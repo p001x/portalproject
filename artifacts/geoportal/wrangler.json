@@ -2,7 +2,7 @@
   "name": "portalproject",
   "compatibility_date": "2024-09-23",
   "assets": {
-    "directory": "dist",
+    "directory": "dist/public",
     "not_found_handling": "single-page-application"
   }
 }
