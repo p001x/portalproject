@@ -1,0 +1,10 @@
+err: null
+stdout: Error importing main:
+
+stderr: Traceback (most recent call last):
+  File "c:\Users\user\Documents\blacportal\backend\check_app.py", line 7, in <module>
+    import main
+  File "c:\Users\user\Documents\blacportal\backend\main.py", line 61, in <module>
+    f.write("Backend module was loaded at " + str(datetime.now(timezone.utc)))
+                                                  ^^^^^^^^
+NameError: name 'datetime' is not defined. Did you forget to import 'datetime'

@@ -1,26 +1,23 @@
+import json
 """Slope / Terrain analysis — no Streamlit dependency."""
 import ee
 from cachetools import TTLCache
 from threading import Lock
+import concurrent.futures
 from gee.classify_utils import quantile_classify
 
 _cache: TTLCache = TTLCache(maxsize=128, ttl=86400)
 _lock = Lock()
 
 
-def compute_slope(district_name: str, n_classes: int = 5) -> dict:
-    cache_key = (district_name, n_classes)
+def compute_slope(aoi_config: dict, n_classes: int = 5) -> dict:
+    cache_key = (json.dumps(aoi_config, sort_keys=True), n_classes)
     with _lock:
         if cache_key in _cache:
             return _cache[cache_key]
 
-    rwanda = ee.FeatureCollection("FAO/GAUL/2015/level2").filter(
-        ee.Filter.And(
-            ee.Filter.eq("ADM0_NAME", "Rwanda"),
-            ee.Filter.eq("ADM2_NAME", district_name),
-        )
-    )
-    aoi = rwanda.geometry()
+    from gee.aoi_utils import get_aoi_geometry
+    aoi = get_aoi_geometry(aoi_config)
 
     dem = ee.Image("USGS/SRTMGL1_003").select("elevation").clip(aoi)
     terrain = ee.Terrain.products(dem)
@@ -39,14 +36,6 @@ def compute_slope(district_name: str, n_classes: int = 5) -> dict:
     aspect_map_id = aspect.getMapId(aspect_vis)
 
     combined_stats_img = slope.rename("slope").addBands(dem.rename("elevation"))
-    combined_stats = combined_stats_img.reduceRegion(
-        reducer=ee.Reducer.mean()
-        .combine(ee.Reducer.max(), sharedInputs=True)
-        .combine(ee.Reducer.percentile([25, 75]), sharedInputs=True)
-        .combine(ee.Reducer.min(), sharedInputs=True),
-        geometry=aoi, scale=30, maxPixels=1e9, tileScale=4,
-    ).getInfo()
-
     classes = {
         "Flat (0–5°)": slope.lt(5),
         "Gentle (5–15°)": slope.gte(5).And(slope.lt(15)),
@@ -58,27 +47,58 @@ def compute_slope(district_name: str, n_classes: int = 5) -> dict:
     area_img = ee.Image.cat(
         [classes[lbl].multiply(ee.Image.pixelArea()).rename(f"c{i}") for i, lbl in enumerate(labels)]
     )
-    area_dict = area_img.reduceRegion(
-        reducer=ee.Reducer.sum(), geometry=aoi, scale=30, maxPixels=1e9, tileScale=4
-    ).getInfo()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        f_stats = executor.submit(
+            lambda: combined_stats_img.reduceRegion(
+                reducer=ee.Reducer.mean()
+                .combine(ee.Reducer.max(), sharedInputs=True)
+                .combine(ee.Reducer.percentile([25, 75]), sharedInputs=True)
+                .combine(ee.Reducer.min(), sharedInputs=True),
+                geometry=aoi, scale=30, maxPixels=1e6, bestEffort=True, tileScale=4,
+            ).getInfo()
+        )
+
+        f_area = executor.submit(
+            lambda: area_img.reduceRegion(
+                reducer=ee.Reducer.sum(), geometry=aoi, scale=30, maxPixels=1e6, bestEffort=True, tileScale=4
+            ).getInfo()
+        )
+
+        f_classify = executor.submit(
+            lambda: quantile_classify(
+                layers=[
+                    {"name": "slope", "image": slope, "title": "Slope (°)"},
+                    {"name": "elevation", "image": dem, "title": "Elevation (m)"},
+                    {"name": "aspect", "image": aspect, "title": "Aspect (°)"},
+                ],
+                aoi=aoi, scale=30, n_classes=n_classes,
+            )
+        )
+
+        f_bounds = executor.submit(
+            lambda: aoi.bounds().getInfo()["coordinates"][0]
+        )
+
+        combined_stats = f_stats.result()
+        area_dict = f_area.result()
+        classify = f_classify.result()
+        bounds = f_bounds.result()
+
     class_areas = {lbl: round((area_dict.get(f"c{i}", 0) or 0) / 1e6, 2) for i, lbl in enumerate(labels)}
 
-    classify = quantile_classify(
-        layers=[
-            {"name": "slope", "image": slope, "title": "Slope (°)"},
-            {"name": "elevation", "image": dem, "title": "Elevation (m)"},
-            {"name": "aspect", "image": aspect, "title": "Aspect (°)"},
-        ],
-        aoi=aoi, scale=30, n_classes=n_classes,
-    )
-
-    bounds = aoi.bounds().getInfo()["coordinates"][0]
     center = [(bounds[0][1] + bounds[2][1]) / 2, (bounds[0][0] + bounds[2][0]) / 2]
 
     result = {
         "slope_tile_url": slope_map_id["tile_fetcher"].url_format,
+        "slope_thumb_url": slope.getThumbURL({**slope_vis, "region": aoi.bounds(), "dimensions": 800, "format": "png"}),
+        "slope_download_url": slope.getDownloadURL({"region": aoi.bounds(), "scale": 30, "format": "GEO_TIFF", "crs": "EPSG:4326"}),
         "hillshade_tile_url": hillshade_map_id["tile_fetcher"].url_format,
+        "hillshade_thumb_url": hillshade.getThumbURL({**hillshade_vis, "region": aoi.bounds(), "dimensions": 800, "format": "png"}),
+        "hillshade_download_url": hillshade.getDownloadURL({"region": aoi.bounds(), "scale": 30, "format": "GEO_TIFF", "crs": "EPSG:4326"}),
         "aspect_tile_url": aspect_map_id["tile_fetcher"].url_format,
+        "aspect_thumb_url": aspect.getThumbURL({**aspect_vis, "region": aoi.bounds(), "dimensions": 800, "format": "png"}),
+        "aspect_download_url": aspect.getDownloadURL({"region": aoi.bounds(), "scale": 30, "format": "GEO_TIFF", "crs": "EPSG:4326"}),
         "stats": {
             "Mean Slope (°)": round(combined_stats.get("slope_mean") or 0, 2),
             "Max Slope (°)": round(combined_stats.get("slope_max") or 0, 2),
@@ -91,7 +111,8 @@ def compute_slope(district_name: str, n_classes: int = 5) -> dict:
         "class_areas_km2": class_areas,
         "classify": classify,
         "center": center,
-        "district": district_name,
+        "district": aoi_config.get("district", aoi_config.get("name", "Custom AOI")),
+        "bbox": bounds,
     }
     with _lock:
         _cache[cache_key] = result

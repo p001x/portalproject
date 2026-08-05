@@ -1,11 +1,9 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Trash2, Download, Upload, Link as LinkIcon, Database } from "lucide-react";
+import { Loader2, Trash2, Download, Upload, Link as LinkIcon, Database, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { MapContainer, TileLayer, Rectangle } from "react-leaflet";
-import "leaflet/dist/leaflet.css";
 import { api, DatasetRecord } from "@/lib/api";
 import { BASE } from "@/lib/api";
 
@@ -40,33 +38,7 @@ function SummaryRow({ records }: { records: DatasetRecord[] }) {
   );
 }
 
-function DatasetMap({ records }: { records: DatasetRecord[] }) {
-  const spatial = records.filter((r) => r.bbox && r.bbox.length === 4);
-  return (
-    <MapContainer
-      center={[-1.94, 29.87]}
-      zoom={8}
-      style={{ height: "300px", width: "100%" }}
-      scrollWheelZoom={false}
-    >
-      <TileLayer
-        url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-      />
-      {spatial.map((r) => {
-        const [minx, miny, maxx, maxy] = r.bbox!;
-        const color = FILE_TYPE_COLORS[r.file_type] ?? FILE_TYPE_COLORS.other;
-        return (
-          <Rectangle
-            key={r.id}
-            bounds={[[miny, minx], [maxy, maxx]]}
-            pathOptions={{ color, weight: 2, fillOpacity: 0.2 }}
-          />
-        );
-      })}
-    </MapContainer>
-  );
-}
+
 
 function DatasetList({
   records,
@@ -75,7 +47,7 @@ function DatasetList({
 }: {
   records: DatasetRecord[];
   source: string;
-  onDelete?: (id: string) => void;
+  onDelete?: (id: string, source: string) => void;
 }) {
   return (
     <div className="rounded-lg border overflow-hidden mt-3">
@@ -130,7 +102,7 @@ function DatasetList({
                     variant="ghost"
                     size="icon"
                     className="h-7 w-7 text-destructive hover:text-destructive"
-                    onClick={() => onDelete(r.id)}
+                    onClick={() => onDelete(r.id, r.source ?? source)}
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </Button>
@@ -170,7 +142,7 @@ function OfficialTab() {
     <div className="space-y-4">
       <SummaryRow records={records} />
       <div className="rounded-lg border overflow-hidden">
-        <DatasetMap records={records} />
+
       </div>
       <DatasetList records={records} source="admin" />
     </div>
@@ -217,7 +189,7 @@ function CommunityTab() {
   const linkMut = useMutation({
     mutationFn: () =>
       api.datasets.addLink({
-        source_url: linkUrl,
+        url: linkUrl,
         name: linkName,
         description: linkDesc,
         contributor: linkContrib,
@@ -245,7 +217,7 @@ function CommunityTab() {
       <div>
         <SummaryRow records={records} />
         <div className="rounded-lg border overflow-hidden">
-          <DatasetMap records={records} />
+
         </div>
         <DatasetList records={records} source="community" />
       </div>
@@ -371,36 +343,20 @@ function CommunityTab() {
 }
 
 function AdminTab() {
-  const qc = useQueryClient();
-  const [password, setPassword] = useState("");
-  const [authed, setAuthed] = useState(false);
-  const [authError, setAuthError] = useState("");
-
+  const [passcode, setPasscode] = useState("");
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [uploadName, setUploadName] = useState("");
   const [uploadDesc, setUploadDesc] = useState("");
 
   const { data, isLoading, refetch } = useQuery({
-    queryKey: ["datasets", "admin"],
-    queryFn: () => api.datasets.list("admin"),
-    enabled: authed,
+    queryKey: ["datasets", "all"],
+    queryFn: () => api.datasets.list("all"),
+    enabled: isAuthenticated,
   });
   const records = data?.records ?? [];
 
-  const signIn = async () => {
-    setAuthError("");
-    try {
-      const res = await api.adminVerify(password);
-      if (res.ok) {
-        setAuthed(true);
-        refetch();
-      } else {
-        setAuthError("Invalid password.");
-      }
-    } catch {
-      setAuthError("Authentication failed.");
-    }
-  };
+  const qc = useQueryClient();
 
   const uploadMut = useMutation({
     mutationFn: () => {
@@ -412,7 +368,9 @@ function AdminTab() {
       return api.datasets.upload(fd);
     },
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["datasets", "all"] });
       qc.invalidateQueries({ queryKey: ["datasets", "admin"] });
+      qc.invalidateQueries({ queryKey: ["datasets", "community"] });
       setFile(null);
       setUploadName("");
       setUploadDesc("");
@@ -420,29 +378,45 @@ function AdminTab() {
   });
 
   const deleteMut = useMutation({
-    mutationFn: (id: string) => api.datasets.delete(id, "admin"),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["datasets", "admin"] }),
+    mutationFn: ({ id, source }: { id: string; source: string }) => api.datasets.delete(id, source),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["datasets", "all"] });
+      qc.invalidateQueries({ queryKey: ["datasets", "admin"] });
+      qc.invalidateQueries({ queryKey: ["datasets", "community"] });
+    },
   });
 
-  if (!authed) {
+  if (!isAuthenticated) {
     return (
-      <div className="max-w-sm space-y-4 py-8">
-        <div className="flex items-center gap-2 font-semibold">
-          <Database className="w-5 h-5 text-primary" /> Admin Sign In
+      <div className="flex flex-col items-center justify-center p-12 space-y-4 border rounded-lg bg-muted/20">
+        <div className="p-3 bg-background border rounded-full">
+          <Lock className="w-6 h-6 text-muted-foreground" />
         </div>
-        <div className="space-y-1">
-          <Label>Password</Label>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && signIn()}
-            placeholder="Admin password"
-            className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+        <div className="text-center">
+          <h3 className="text-lg font-medium">Admin Access Required</h3>
+          <p className="text-sm text-muted-foreground">Enter the admin passcode to manage datasets.</p>
+        </div>
+        <div className="flex gap-2 max-w-sm w-full pt-2">
+          <input 
+            type="password" 
+            placeholder="Passcode"
+            value={passcode}
+            onChange={(e) => setPasscode(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                if (passcode === "admin123") setIsAuthenticated(true);
+                else alert("Incorrect passcode.");
+              }
+            }}
+            className="flex-1 rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
           />
+          <Button onClick={() => {
+            if (passcode === "admin123") setIsAuthenticated(true);
+            else alert("Incorrect passcode.");
+          }}>
+            Unlock
+          </Button>
         </div>
-        {authError && <p className="text-xs text-destructive">{authError}</p>}
-        <Button onClick={signIn} className="w-full">Sign In</Button>
       </div>
     );
   }
@@ -503,7 +477,7 @@ function AdminTab() {
         <DatasetList
           records={records}
           source="admin"
-          onDelete={(id) => deleteMut.mutate(id)}
+          onDelete={(id, source) => deleteMut.mutate({ id, source })}
         />
       )}
     </div>

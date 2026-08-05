@@ -1,8 +1,10 @@
+import json
 """Landfill site suitability (SMCE / Weighted Overlay) — FastAPI backend."""
 import math
 import ee
 from cachetools import TTLCache
 from threading import Lock
+import concurrent.futures
 from gee.classify_utils import quantile_classify
 
 _cache: TTLCache = TTLCache(maxsize=128, ttl=86400)
@@ -97,10 +99,10 @@ def _apply_reverse(score_img, flag):
 def _factor_urls(image, key: str, aoi) -> dict:
     return {
         "tile_url": image.getMapId(_SCORE_VIS)["tile_fetcher"].url_format,
-        "thumb_url": image.getThumbURL({**_SCORE_VIS, "region": aoi, "dimensions": 512, "format": "png"}),
+        "thumb_url": image.getThumbURL({**_SCORE_VIS, "region": aoi.bounds(), "dimensions": 512, "format": "png"}),
         "download_url": image.getDownloadURL({
             "name": f"Landfill_{key}_score", "scale": 100,
-            "region": aoi, "format": "GEO_TIFF", "filePerBand": False,
+            "region": aoi.bounds(), "format": "GEO_TIFF", "filePerBand": False,
         }),
     }
 
@@ -116,7 +118,7 @@ def _normalize_weights(custom: dict | None) -> dict:
 
 
 def compute_landfill_suitability(
-    district_name: str,
+    aoi_config: dict,
     reverse_river: bool = False,
     reverse_residential: bool = False,
     reverse_slope: bool = False,
@@ -128,8 +130,7 @@ def compute_landfill_suitability(
     weights = _normalize_weights(custom_weights)
     weights_tuple = tuple(round(weights[k], 6) for k in FACTOR_ORDER)
 
-    cache_key = (
-        district_name,
+    cache_key = (json.dumps(aoi_config, sort_keys=True),
         reverse_river, reverse_residential, reverse_slope, reverse_road, reverse_lulc,
         n_classes,
         weights_tuple,
@@ -143,10 +144,8 @@ def compute_landfill_suitability(
         "slope": reverse_slope, "road": reverse_road, "lulc": reverse_lulc,
     }
 
-    rwanda = ee.FeatureCollection("FAO/GAUL/2015/level2").filter(
-        ee.Filter.And(ee.Filter.eq("ADM0_NAME", "Rwanda"), ee.Filter.eq("ADM2_NAME", district_name))
-    )
-    aoi = rwanda.geometry()
+    from gee.aoi_utils import get_aoi_geometry
+    aoi = get_aoi_geometry(aoi_config)
 
     # ── Slope ──────────────────────────────────────────────────────────────────
     dem = ee.Image("USGS/SRTMGL1_003").select("elevation")
@@ -203,7 +202,7 @@ def compute_landfill_suitability(
 
     # Final map thumbnail for report
     final_thumb_url = suitability.getThumbURL({
-        **_SCORE_VIS, "region": aoi, "dimensions": 512, "format": "png",
+        **_SCORE_VIS, "region": aoi.bounds(), "dimensions": 512, "format": "png",
     })
 
     # ── Class areas ────────────────────────────────────────────────────────────
@@ -218,9 +217,36 @@ def compute_landfill_suitability(
         classes[lbl].multiply(ee.Image.pixelArea()).rename(f"c{i}")
         for i, lbl in enumerate(labels)
     ])
-    area_dict = area_img.reduceRegion(
-        reducer=ee.Reducer.sum(), geometry=aoi, scale=100, maxPixels=1e9, tileScale=4
-    ).getInfo()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        f_area = executor.submit(
+            lambda: area_img.reduceRegion(
+                reducer=ee.Reducer.sum(), geometry=aoi, scale=100, maxPixels=1e6, bestEffort=True, tileScale=4
+            ).getInfo()
+        )
+
+        f_classify = executor.submit(
+            lambda: quantile_classify(
+                layers=[
+                    {"name": "suitability",    "image": suitability,               "title": "Suitability Index"},
+                    {"name": "river_score",    "image": score_images["river"],      "title": "River Distance"},
+                    {"name": "resid_score",    "image": score_images["residential"],"title": "Residential Distance"},
+                    {"name": "slope_score",    "image": score_images["slope"],      "title": "Slope"},
+                    {"name": "road_score",     "image": score_images["road"],       "title": "Road Accessibility"},
+                    {"name": "lulc_score",     "image": score_images["lulc"],       "title": "Land Cover"},
+                ],
+                aoi=aoi, scale=100, n_classes=n_classes,
+            )
+        )
+
+        f_bounds = executor.submit(
+            lambda: aoi.bounds().getInfo()["coordinates"][0]
+        )
+
+        area_dict = f_area.result()
+        classify = f_classify.result()
+        bounds = f_bounds.result()
+
     class_areas = {
         lbl: round((area_dict.get(f"c{i}", 0) or 0) / 1e6, 2)
         for i, lbl in enumerate(labels)
@@ -240,27 +266,18 @@ def compute_landfill_suitability(
             **urls,
         }
 
-    # ── Classify ───────────────────────────────────────────────────────────────
-    classify = quantile_classify(
-        layers=[
-            {"name": "suitability",    "image": suitability,               "title": "Suitability Index"},
-            {"name": "river_score",    "image": score_images["river"],      "title": "River Distance"},
-            {"name": "resid_score",    "image": score_images["residential"],"title": "Residential Distance"},
-            {"name": "slope_score",    "image": score_images["slope"],      "title": "Slope"},
-            {"name": "road_score",     "image": score_images["road"],       "title": "Road Accessibility"},
-            {"name": "lulc_score",     "image": score_images["lulc"],       "title": "Land Cover"},
-        ],
-        aoi=aoi, scale=100, n_classes=n_classes,
-    )
-
-    bounds = aoi.bounds().getInfo()["coordinates"][0]
     center = [(bounds[0][1] + bounds[2][1]) / 2, (bounds[0][0] + bounds[2][0]) / 2]
 
     ahp_data = compute_ahp_data(weights)
 
+    download_url = suitability.getDownloadURL({
+        "scale": 100, "region": aoi.bounds(), "format": "GEO_TIFF"
+    })
+
     result = {
         "tile_url": map_id["tile_fetcher"].url_format,
         "thumb_url": final_thumb_url,
+        "download_url": download_url,
         "stats": {
             "Total Area (km²)": round(sum(class_areas.values()), 2),
             "Highly Suitable (km²)": class_areas.get("Highly Suitable (4–5)", 0),
@@ -273,7 +290,8 @@ def compute_landfill_suitability(
         "weights_used": {k: round(v, 4) for k, v in weights.items()},
         "ahp_data": ahp_data,
         "center": center,
-        "district": district_name,
+        "district": aoi_config.get("district", aoi_config.get("name", "Custom AOI")),
+        "bbox": bounds,
     }
     with _lock:
         _cache[cache_key] = result

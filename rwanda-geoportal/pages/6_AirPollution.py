@@ -199,6 +199,14 @@ elif "no2_result" in st.session_state:
             f"Mean NO₂ for {result['district']} ({result['start_date']} to {result['end_date']}) "
             f"{who_status} the WHO annual guideline of {WHO_NO2_ANNUAL_THRESHOLD} µmol/m²."
         )
+
+        # Collect map thumbnails for the report
+        maps = []
+        if "tile_url" in result:
+            maps.append(("Map", result["tile_url"]))
+        for panel in result.get("classify", {}).get("panels", []):
+            maps.append((panel["title"], panel["thumb_url"]))
+
         pdf_bytes = build_report(
             module_name="Air Pollution — NO₂",
             district=result["district"],
@@ -206,6 +214,7 @@ elif "no2_result" in st.session_state:
             stats=result["stats"],
             class_areas={},
             extra_notes=notes,
+            maps=maps,
         )
         st.download_button(
             label=":material/download: Download PDF Report",

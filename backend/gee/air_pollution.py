@@ -1,8 +1,10 @@
+import json
 """Air Pollution (Sentinel-5P NO₂) — no Streamlit dependency."""
 from datetime import date as _date
 import ee
 from cachetools import TTLCache
 from threading import Lock
+import concurrent.futures
 from gee.classify_utils import quantile_classify
 
 WHO_NO2_ANNUAL_THRESHOLD = 10.0
@@ -25,19 +27,14 @@ def _month_range(start_date: str, end_date: str):
     return months
 
 
-def compute_no2(district_name: str, start_date: str, end_date: str, n_classes: int = 5) -> dict:
-    cache_key = (district_name, start_date, end_date, n_classes)
+def compute_no2(aoi_config: dict, start_date: str, end_date: str, n_classes: int = 5) -> dict:
+    cache_key = (json.dumps(aoi_config, sort_keys=True), start_date, end_date, n_classes)
     with _lock:
         if cache_key in _cache:
             return _cache[cache_key]
 
-    rwanda = ee.FeatureCollection("FAO/GAUL/2015/level2").filter(
-        ee.Filter.And(
-            ee.Filter.eq("ADM0_NAME", "Rwanda"),
-            ee.Filter.eq("ADM2_NAME", district_name),
-        )
-    )
-    aoi = rwanda.geometry()
+    from gee.aoi_utils import get_aoi_geometry
+    aoi = get_aoi_geometry(aoi_config)
 
     def _to_umol(img):
         return img.multiply(1e6).rename("NO2_umol_m2").copyProperties(
@@ -53,6 +50,7 @@ def compute_no2(district_name: str, start_date: str, end_date: str, n_classes: i
     )
 
     collection_size = s5p.size().getInfo()
+    district_name = aoi_config.get("district", aoi_config.get("name", "Custom AOI"))
     if collection_size == 0:
         raise ValueError(
             f"No Sentinel-5P NO2 imagery available for {district_name} between "
@@ -65,13 +63,6 @@ def compute_no2(district_name: str, start_date: str, end_date: str, n_classes: i
     vis_params = {"min": 0, "max": 200,
                   "palette": ["#000080", "#0000ff", "#00ffff", "#ffff00", "#ff0000"]}
     map_id = composite.getMapId(vis_params)
-
-    stats = composite.reduceRegion(
-        reducer=ee.Reducer.mean()
-        .combine(ee.Reducer.max(), sharedInputs=True)
-        .combine(ee.Reducer.percentile([90]), sharedInputs=True),
-        geometry=aoi, scale=3500, maxPixels=1e9, tileScale=4,
-    ).getInfo()
 
     months = _month_range(start_date, end_date)
     month_images = []
@@ -90,25 +81,50 @@ def compute_no2(district_name: str, start_date: str, end_date: str, n_classes: i
         month_images.append(img)
 
     monthly_img = ee.Image.cat(month_images)
-    monthly_dict = monthly_img.reduceRegion(
-        reducer=ee.Reducer.mean(), geometry=aoi, scale=3500, maxPixels=1e9, tileScale=4
-    ).getInfo()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        f_stats = executor.submit(
+            lambda: composite.reduceRegion(
+                reducer=ee.Reducer.mean()
+                .combine(ee.Reducer.max(), sharedInputs=True)
+                .combine(ee.Reducer.percentile([90]), sharedInputs=True),
+                geometry=aoi, scale=3500, maxPixels=1e6, bestEffort=True, tileScale=4,
+            ).getInfo()
+        )
+
+        f_monthly = executor.submit(
+            lambda: monthly_img.reduceRegion(
+                reducer=ee.Reducer.mean(), geometry=aoi, scale=3500, maxPixels=1e6, bestEffort=True, tileScale=4
+            ).getInfo()
+        )
+
+        f_classify = executor.submit(
+            lambda: quantile_classify(
+                layers=[{"name": "NO2_umol_m2", "image": composite, "title": "NO₂ Column (µmol/m²)"}],
+                aoi=aoi, scale=3500, n_classes=n_classes,
+            )
+        )
+
+        f_bounds = executor.submit(
+            lambda: aoi.bounds().getInfo()["coordinates"][0]
+        )
+
+        stats = f_stats.result()
+        monthly_dict = f_monthly.result()
+        classify = f_classify.result()
+        bounds = f_bounds.result()
+
     time_series = [
         {"month": m, "year": y, "NO2 (µmol/m²)": round(monthly_dict.get(f"m{i}") or 0, 2)}
         for i, (y, m) in enumerate(months)
     ]
 
-    classify = quantile_classify(
-        layers=[{"name": "NO2_umol_m2", "image": composite, "title": "NO₂ Column (µmol/m²)"}],
-        aoi=aoi, scale=3500, n_classes=n_classes,
-    )
-
-    bounds = aoi.bounds().getInfo()["coordinates"][0]
     center = [(bounds[0][1] + bounds[2][1]) / 2, (bounds[0][0] + bounds[2][0]) / 2]
     mean_no2 = round(stats.get("NO2_umol_m2_mean") or 0, 2)
 
     result = {
         "tile_url": map_id["tile_fetcher"].url_format,
+        "thumb_url": composite.getThumbURL({**vis_params, "region": aoi.bounds(), "dimensions": 800, "format": "png"}),
         "stats": {
             "Mean NO2 (µmol/m²)": mean_no2,
             "Max NO2 (µmol/m²)": round(stats.get("NO2_umol_m2_max") or 0, 2),
@@ -119,7 +135,8 @@ def compute_no2(district_name: str, start_date: str, end_date: str, n_classes: i
         "time_series": time_series,
         "classify": classify,
         "center": center,
-        "district": district_name,
+        "district": aoi_config.get("district", aoi_config.get("name", "Custom AOI")),
+        "bbox": bounds,
         "start_date": start_date,
         "end_date": end_date,
     }

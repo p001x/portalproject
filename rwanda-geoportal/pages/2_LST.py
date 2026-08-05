@@ -161,12 +161,21 @@ elif "lst_result" in st.session_state:
             f"using the mono-window algorithm with NDVI-based emissivity correction. "
             f"Analysis covers {result['district']} district from {result['start_date']} to {result['end_date']}."
         )
+        # Gather map images for the PDF report
+        maps = []
+        if "tile_url" in result:
+            maps.append(("Map", result["tile_url"]))
+        if "classify" in result:
+            for panel in result["classify"].get("panels", []):
+                # Each panel contains a title and a thumbnail URL
+                maps.append((panel["title"], panel["thumb_url"]))
         pdf_bytes = build_report(
             module_name="Land Surface Temperature",
             district=result["district"],
             date_range=f"{result['start_date']} to {result['end_date']}",
             stats=result["stats"],
             class_areas=result["class_areas_km2"],
+            maps=maps,
             extra_notes=notes,
         )
         st.download_button(

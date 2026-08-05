@@ -1,0 +1,308 @@
+[
+  {
+    "id": "18bb612d5fd447e7b197b87061a83d89",
+    "geometry": {
+      "type": "Point",
+      "coordinates": [
+        29.696592,
+        -2.114509
+      ]
+    },
+    "class_label": "Built-up",
+    "class_value": 1,
+    "source_filename": "Training_Session_2026-08-01",
+    "source_url": "",
+    "creator": "anonymous",
+    "color": "#ff0000",
+    "created_at": "2026-08-01T16:59:01.700431+00:00"
+  },
+  {
+    "id": "8c8759fda87f4f81b5eabe58a5edc413",
+    "geometry": {
+      "type": "Point",
+      "coordinates": [
+        29.979344,
+        -2.18592
+      ]
+    },
+    "class_label": "Built-up",
+    "class_value": 1,
+    "source_filename": "Training_Session_2026-08-01",
+    "source_url": "",
+    "creator": "anonymous",
+    "color": "#ff0000",
+    "created_at": "2026-08-01T16:59:01.716137+00:00"
+  },
+  {
+    "id": "bccceafeae6247cdb5f10c2581eaf906",
+    "geometry": {
+      "type": "Point",
+      "coordinates": [
+        30.119348,
+        -1.790376
+      ]
+    },
+    "class_label": "Built-up",
+    "class_value": 1,
+    "source_filename": "Training_Session_2026-08-01",
+    "source_url": "",
+    "creator": "anonymous",
+    "color": "#ff0000",
+    "created_at": "2026-08-01T16:59:01.754072+00:00"
+  },
+  {
+    "id": "94497d70d9ea4d7980c25e83b4f4a4eb",
+    "geometry": {
+      "type": "Point",
+      "coordinates": [
+        29.767967,
+        -1.848065
+      ]
+    },
+    "class_label": "Built-up",
+    "class_value": 1,
+    "source_filename": "Training_Session_2026-08-01",
+    "source_url": "",
+    "creator": "anonymous",
+    "color": "#ff0000",
+    "created_at": "2026-08-01T16:59:01.798733+00:00"
+  },
+  {
+    "id": "20fda7312f864cb087fcdf8fc1f4213a",
+    "geometry": {
+      "type": "Point",
+      "coordinates": [
+        29.765221,
+        -2.199652
+      ]
+    },
+    "class_label": "Vegetation",
+    "class_value": 2,
+    "source_filename": "Training_Session_2026-08-01",
+    "source_url": "",
+    "creator": "anonymous",
+    "color": "#00ff00",
+    "created_at": "2026-08-01T16:59:01.834642+00:00"
+  },
+  {
+    "id": "33f841be0390462f91118644c8d585a0",
+    "geometry": {
+      "type": "Point",
+      "coordinates": [
+        29.844831,
+        -2.213385
+      ]
+    },
+    "class_label": "Vegetation",
+    "class_value": 2,
+    "source_filename": "Training_Session_2026-08-01",
+    "source_url": "",
+    "creator": "anonymous",
+    "color": "#00ff00",
+    "created_at": "2026-08-01T16:59:01.885247+00:00"
+  },
+  {
+    "id": "3b20da7940f54dcea952a0748521c406",
+    "geometry": {
+      "type": "Point",
+      "coordinates": [
+        30.374649,
+        -1.919487
+      ]
+    },
+    "class_label": "Vegetation",
+    "class_value": 2,
+    "source_filename": "Training_Session_2026-08-01",
+    "source_url": "",
+    "creator": "anonymous",
+    "color": "#00ff00",
+    "created_at": "2026-08-01T16:59:01.937816+00:00"
+  },
+  {
+    "id": "8ee97be5f29b4b77ac7b0a27c8b03e74",
+    "geometry": {
+      "type": "Point",
+      "coordinates": [
+        29.990325,
+        -1.927728
+      ]
+    },
+    "class_label": "Vegetation",
+    "class_value": 2,
+    "source_filename": "Training_Session_2026-08-01",
+    "source_url": "",
+    "creator": "anonymous",
+    "color": "#00ff00",
+    "created_at": "2026-08-01T16:59:01.972029+00:00"
+  },
+  {
+    "id": "32e997d2d86f49a4ba374bf6478caae6",
+    "geometry": {
+      "type": "Point",
+      "coordinates": [
+        29.800909,
+        -1.639276
+      ]
+    },
+    "class_label": "Vegetation",
+    "class_value": 2,
+    "source_filename": "Training_Session_2026-08-01",
+    "source_url": "",
+    "creator": "anonymous",
+    "color": "#00ff00",
+    "created_at": "2026-08-01T16:59:02.027797+00:00"
+  },
+  {
+    "id": "e1d98355d7b34d40810f4d0263da09f7",
+    "geometry": {
+      "type": "Point",
+      "coordinates": [
+        29.778947,
+        -1.911246
+      ]
+    },
+    "class_label": "Built-up",
+    "class_value": 1,
+    "source_filename": "Training_Session_2026-08-03",
+    "source_url": "",
+    "creator": "anonymous",
+    "color": "#ff0000",
+    "created_at": "2026-08-03T08:35:03.297756+00:00"
+  },
+  {
+    "id": "a8933f25ec5f477fa5ca73f7ba9358b2",
+    "geometry": {
+      "type": "Point",
+      "coordinates": [
+        29.872283,
+        -1.982666
+      ]
+    },
+    "class_label": "Built-up",
+    "class_value": 1,
+    "source_filename": "Training_Session_2026-08-03",
+    "source_url": "",
+    "creator": "anonymous",
+    "color": "#ff0000",
+    "created_at": "2026-08-03T08:35:03.315511+00:00"
+  },
+  {
+    "id": "e38649ff65494de8a059c1a2c42d8915",
+    "geometry": {
+      "type": "Point",
+      "coordinates": [
+        29.943657,
+        -2.114509
+      ]
+    },
+    "class_label": "Built-up",
+    "class_value": 1,
+    "source_filename": "Training_Session_2026-08-03",
+    "source_url": "",
+    "creator": "anonymous",
+    "color": "#ff0000",
+    "created_at": "2026-08-03T08:35:03.443552+00:00"
+  },
+  {
+    "id": "60f04c15ee1f4875867ca83ad3c862bb",
+    "geometry": {
+      "type": "Point",
+      "coordinates": [
+        30.086406,
+        -1.884692
+      ]
+    },
+    "class_label": "Vegetation",
+    "class_value": 2,
+    "source_filename": "Training_Session_2026-08-03",
+    "source_url": "",
+    "creator": "anonymous",
+    "color": "#00ff00",
+    "created_at": "2026-08-03T08:35:03.515437+00:00"
+  },
+  {
+    "id": "d24d4b24159b49c688b477b286210e95",
+    "geometry": {
+      "type": "Point",
+      "coordinates": [
+        29.946402,
+        -1.870957
+      ]
+    },
+    "class_label": "Vegetation",
+    "class_value": 2,
+    "source_filename": "Training_Session_2026-08-03",
+    "source_url": "",
+    "creator": "anonymous",
+    "color": "#00ff00",
+    "created_at": "2026-08-03T08:35:03.579715+00:00"
+  },
+  {
+    "id": "c24bde742ef54b3f8e3610696522963c",
+    "geometry": {
+      "type": "Point",
+      "coordinates": [
+        30.105622,
+        -2.041264
+      ]
+    },
+    "class_label": "Vegetation",
+    "class_value": 2,
+    "source_filename": "Training_Session_2026-08-03",
+    "source_url": "",
+    "creator": "anonymous",
+    "color": "#00ff00",
+    "created_at": "2026-08-03T08:35:03.638531+00:00"
+  },
+  {
+    "id": "be8c75b6a5c44f61a0751aa83279c70d",
+    "geometry": {
+      "type": "Point",
+      "coordinates": [
+        29.74326,
+        -2.029362
+      ]
+    },
+    "class_label": "Water",
+    "class_value": 3,
+    "source_filename": "Training_Session_2026-08-03",
+    "source_url": "",
+    "creator": "anonymous",
+    "color": "#0000ff",
+    "created_at": "2026-08-03T08:35:03.701829+00:00"
+  },
+  {
+    "id": "03794f73869c4b42a12eba61982c226d",
+    "geometry": {
+      "type": "Point",
+      "coordinates": [
+        30.045228,
+        -2.059576
+      ]
+    },
+    "class_label": "Water",
+    "class_value": 3,
+    "source_filename": "Training_Session_2026-08-03",
+    "source_url": "",
+    "creator": "anonymous",
+    "color": "#0000ff",
+    "created_at": "2026-08-03T08:35:03.779119+00:00"
+  },
+  {
+    "id": "d9f0032d04ef4c419919b52abb4457d5",
+    "geometry": {
+      "type": "Point",
+      "coordinates": [
+        29.98758,
+        -1.837077
+      ]
+    },
+    "class_label": "Water",
+    "class_value": 3,
+    "source_filename": "Training_Session_2026-08-03",
+    "source_url": "",
+    "creator": "anonymous",
+    "color": "#0000ff",
+    "created_at": "2026-08-03T08:35:03.845245+00:00"
+  }
+]

@@ -1,0 +1,4 @@
+ERR: Error: Command failed: cd /d "c:\Users\user\Documents\blacportal\backend" && "c:\Users\user\Documents\blacportal\.venv\Scripts\python.exe" print_routes.py
+
+OUT: 
+ERR: 

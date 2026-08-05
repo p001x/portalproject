@@ -1,0 +1,3 @@
+STDOUT:
+Main imported successfully!
+App title: Rwanda Environmental GeoPortal API

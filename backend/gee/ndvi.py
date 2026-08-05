@@ -1,7 +1,9 @@
+import json
 """NDVI computation — no Streamlit dependency. Uses in-memory TTL cache."""
 import ee
 from cachetools import TTLCache
 from threading import Lock
+import concurrent.futures
 from gee.classify_utils import quantile_classify
 
 RWANDA_DISTRICTS = [
@@ -18,7 +20,7 @@ _lock = Lock()
 
 
 def compute_ndvi(
-    district_name: str,
+    aoi_config: dict,
     start_date: str,
     end_date: str,
     n_classes: int = 5,
@@ -30,33 +32,24 @@ def compute_ndvi(
     district, start_date, end_date.  Results are cached for 1 hour per unique
     (district, start_date, end_date, n_classes) combination.
     """
-    cache_key = (district_name, start_date, end_date, n_classes)
+    cache_key = (json.dumps(aoi_config, sort_keys=True), start_date, end_date, n_classes)
 
     with _lock:
         if cache_key in _cache:
             return _cache[cache_key]
 
-    rwanda = ee.FeatureCollection("FAO/GAUL/2015/level2").filter(
-        ee.Filter.And(
-            ee.Filter.eq("ADM0_NAME", "Rwanda"),
-            ee.Filter.eq("ADM2_NAME", district_name),
-        )
-    )
-    aoi = rwanda.geometry()
+    from gee.aoi_utils import get_aoi_geometry
+    aoi = get_aoi_geometry(aoi_config)
 
-    s2 = (
+    s2_median = (
         ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
         .filterDate(start_date, end_date)
         .filterBounds(aoi)
         .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 20))
-        .map(
-            lambda img: img.normalizedDifference(["B8", "B4"])
-            .rename("NDVI")
-            .copyProperties(img, ["system:time_start"])
-        )
+        .select(["B8", "B4"])
+        .median()
     )
-
-    median = s2.median().clip(aoi)
+    median = s2_median.normalizedDifference(["B8", "B4"]).rename("NDVI").clip(aoi)
 
     vis_params = {
         "min": -0.2,
@@ -65,19 +58,7 @@ def compute_ndvi(
     }
     map_id = median.getMapId(vis_params)
 
-    # Stats — one batched reduceRegion call
-    stats = median.reduceRegion(
-        reducer=ee.Reducer.mean()
-        .combine(ee.Reducer.min(), sharedInputs=True)
-        .combine(ee.Reducer.max(), sharedInputs=True)
-        .combine(ee.Reducer.stdDev(), sharedInputs=True),
-        geometry=aoi,
-        scale=100,
-        maxPixels=1e9,
-        tileScale=4,
-    ).getInfo()
-
-    # Class areas — one batched multi-band reduceRegion
+    # Execute GEE requests concurrently
     classes = {
         "Water / Bare (<0)": median.lt(0),
         "Very Low (0–0.2)": median.gte(0).And(median.lt(0.2)),
@@ -90,27 +71,61 @@ def compute_ndvi(
         [classes[lbl].multiply(ee.Image.pixelArea()).rename(f"c{i}")
          for i, lbl in enumerate(labels)]
     )
-    area_dict = area_img.reduceRegion(
-        reducer=ee.Reducer.sum(), geometry=aoi, scale=100, maxPixels=1e9, tileScale=4
-    ).getInfo()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        f_stats = executor.submit(
+            lambda: median.reduceRegion(
+                reducer=ee.Reducer.mean()
+                .combine(ee.Reducer.min(), sharedInputs=True)
+                .combine(ee.Reducer.max(), sharedInputs=True)
+                .combine(ee.Reducer.stdDev(), sharedInputs=True),
+                geometry=aoi,
+                scale=100,
+                maxPixels=1e6, bestEffort=True,
+                tileScale=4,
+            ).getInfo()
+        )
+
+        f_area = executor.submit(
+            lambda: area_img.reduceRegion(
+                reducer=ee.Reducer.sum(), geometry=aoi, scale=100, maxPixels=1e6, bestEffort=True, tileScale=4
+            ).getInfo()
+        )
+
+        f_classify = executor.submit(
+            lambda: quantile_classify(
+                layers=[{"name": "NDVI", "image": median, "title": "NDVI Vegetation Index"}],
+                aoi=aoi,
+                scale=100,
+                n_classes=n_classes,
+            )
+        )
+
+        f_bounds = executor.submit(
+            lambda: aoi.bounds().getInfo()["coordinates"][0]
+        )
+
+        f_thumb = executor.submit(
+            lambda: median.getThumbURL({**vis_params, "region": aoi.bounds(), "dimensions": 512, "format": "png"})
+        )
+
+        stats = f_stats.result()
+        area_dict = f_area.result()
+        classify = f_classify.result()
+        bounds = f_bounds.result()
+        thumb_url = f_thumb.result()
+
     class_areas = {
         lbl: round((area_dict.get(f"c{i}", 0) or 0) / 1e6, 2)
         for i, lbl in enumerate(labels)
     }
 
-    classify = quantile_classify(
-        layers=[{"name": "NDVI", "image": median, "title": "NDVI Vegetation Index"}],
-        aoi=aoi,
-        scale=100,
-        n_classes=n_classes,
-    )
-
-    bounds = aoi.bounds().getInfo()["coordinates"][0]
     center_lon = (bounds[0][0] + bounds[2][0]) / 2
     center_lat = (bounds[0][1] + bounds[2][1]) / 2
 
     result = {
         "tile_url": map_id["tile_fetcher"].url_format,
+        "thumb_url": thumb_url,
         "stats": {
             "Mean NDVI": round(stats.get("NDVI_mean") or 0, 4),
             "Min NDVI": round(stats.get("NDVI_min") or 0, 4),
@@ -120,7 +135,8 @@ def compute_ndvi(
         "class_areas_km2": class_areas,
         "classify": classify,
         "center": [center_lat, center_lon],
-        "district": district_name,
+        "district": aoi_config.get("district", aoi_config.get("name", "Custom AOI")),
+        "bbox": bounds,
         "start_date": start_date,
         "end_date": end_date,
     }

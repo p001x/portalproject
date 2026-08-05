@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useMutation } from "@tanstack/react-query";
 import {
   LineChart,
@@ -10,7 +10,7 @@ import {
   CartesianGrid,
   ReferenceLine,
 } from "recharts";
-import { Loader2, Wind } from "lucide-react";
+import { Loader2, Wind, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
@@ -22,8 +22,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { api, AirPollutionResult } from "@/lib/api";
+import { api, AirPollutionResult , AOIConfig} from "@/lib/api";
 import { DistrictMap } from "@/components/DistrictMap";
+import { ReportDownloadButton } from "@/components/ReportDownloadButton";
+import { MapExportControls } from "@/components/MapExportControls";
+import { StudyAreaSelector } from "@/components/StudyAreaSelector";
 
 const DISTRICTS = [
   "Bugesera","Burera","Gakenke","Gasabo","Gatsibo","Gicumbi","Gisagara",
@@ -31,18 +34,21 @@ const DISTRICTS = [
   "Musanze","Ngoma","Ngororero","Nyabihu","Nyagatare","Nyamagabe",
   "Nyamasheke","Nyanza","Nyarugenge","Nyaruguru","Rubavu","Ruhango",
   "Rulindo","Rusizi","Rutsiro","Rwamagana",
+  "Custom Study Area",
 ];
 
 export function AirPollutionPage() {
-  const [district, setDistrict] = useState("Nyarugenge");
+  const [aoi, setAoi] = useState<AOIConfig>({ type: "gaul2", country: "Rwanda", name: "Musanze", level1: "North/Amajyaruguru", level2: "Musanze" });
   const [startDate, setStartDate] = useState("2023-01-01");
   const [endDate, setEndDate] = useState("2023-12-31");
   const [nClasses, setNClasses] = useState(5);
 
   const { mutate, data, isPending, error } = useMutation<AirPollutionResult, Error>({
     mutationFn: () =>
-      api.airPollution({ district, start_date: startDate, end_date: endDate, n_classes: nClasses }),
+      api.airPollution({ aoi,
+        start_date: startDate, end_date: endDate, n_classes: nClasses }),
   });
+
 
   return (
     <div className="flex h-full">
@@ -57,19 +63,7 @@ export function AirPollutionPage() {
           Tropospheric column density averaged over the selected period.
         </p>
 
-        <div className="space-y-1">
-          <Label>District</Label>
-          <Select value={district} onValueChange={setDistrict}>
-            <SelectTrigger className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {DISTRICTS.map((d) => (
-                <SelectItem key={d} value={d}>{d}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        <StudyAreaSelector value={aoi} onChange={setAoi} />
 
         <div className="space-y-1">
           <Label htmlFor="start-date">Start date</Label>
@@ -137,7 +131,7 @@ export function AirPollutionPage() {
         {isPending && (
           <div className="h-full flex flex-col items-center justify-center gap-3 text-muted-foreground">
             <Loader2 className="w-8 h-8 animate-spin text-primary" />
-            <p>Analyzing NO₂ pollution for {district}…</p>
+            <p>Analyzing NO₂ pollution for {aoi.name || 'Custom'}…</p>
             <p className="text-xs">GEE analysis typically takes 15–60 seconds.</p>
           </div>
         )}
@@ -148,6 +142,8 @@ export function AirPollutionPage() {
               <TabsTrigger value="map">Map</TabsTrigger>
               <TabsTrigger value="stats">Statistics</TabsTrigger>
               <TabsTrigger value="timeseries">Time Series</TabsTrigger>
+              <TabsTrigger value="static-map">Static Maps</TabsTrigger>
+              <TabsTrigger value="report" className="gap-1.5"><FileText className="w-3.5 h-3.5" />Report</TabsTrigger>
             </TabsList>
 
             {/* Map */}
@@ -260,6 +256,52 @@ export function AirPollutionPage() {
                   />
                 </LineChart>
               </ResponsiveContainer>
+            </TabsContent>
+
+            {/* ── Report ── */}
+            {/* Static Maps */}
+            <TabsContent value="static-map" className="flex-1 overflow-y-auto space-y-4">
+              <div>
+                <h2 className="font-semibold text-lg mb-1">Professional Cartography</h2>
+                <p className="text-sm text-muted-foreground">High-quality static maps ready for presentation.</p>
+              </div>
+              <div className="bg-card border rounded-lg p-4">
+              <MapExportControls
+                tileUrl={data.tile_url}
+                thumbUrl={data.classify?.panels?.[0]?.thumb_url || (data as any).thumb_url}
+                downloadUrl={data.download_url}
+                district={aoi.name || "Custom"}
+                title="Air Quality (NO2)"
+              />
+              </div>
+            </TabsContent>
+
+            <TabsContent value="report" className="space-y-6">
+              <div>
+                <h2 className="font-semibold text-lg mb-1">PDF Report — {data.district}</h2>
+                <p className="text-sm text-muted-foreground">
+                  Download a full PDF report including NO₂ statistics, time series analysis, and air quality maps.
+                </p>
+              </div>
+              <div className="bg-card border rounded-lg p-5 space-y-4">
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  <strong>Contents:</strong> District metadata · NO₂ concentration statistics ·
+                  WHO limit exceedance check · Time series data · Air quality maps · Methodology notes.
+                </p>
+                <ReportDownloadButton aoi={aoi}
+                  moduleName="Air Quality (NO2)"
+                  district={aoi.name || "Custom"}
+                  dateRange={`${data.start_date} to ${data.end_date}`}
+                  stats={{
+                    ...data.stats,
+                    "WHO Status": data.exceeds_who ? 1 : 0,
+                  }}
+                  classAreas={{}}
+                  extraNotes={`Air quality analysis derived from Sentinel-5P NRTI NO2 dataset. Values are tropospheric column density in µmol/m². The WHO recommended limit is 10 µmol/m² (annual mean). Analysis covers ${data.district} district from ${data.start_date} to ${data.end_date}.`}
+                  maps={data.classify?.panels?.map((p) => [p.title, p.thumb_url] as [string, string]) ?? [["NO2 Density", data.tile_url]]}
+                  filename={`AirQuality_${data.district}_${data.start_date}.pdf`}
+                />
+              </div>
             </TabsContent>
           </Tabs>
         )}

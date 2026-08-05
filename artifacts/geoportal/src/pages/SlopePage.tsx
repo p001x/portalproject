@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useMutation } from "@tanstack/react-query";
 import {
   BarChart,
@@ -9,7 +9,7 @@ import {
   ResponsiveContainer,
   Cell,
 } from "recharts";
-import { Loader2, Mountain } from "lucide-react";
+import { Loader2, Mountain, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
@@ -21,8 +21,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { api, SlopeResult } from "@/lib/api";
+import { api, SlopeResult , AOIConfig} from "@/lib/api";
 import { DistrictMap } from "@/components/DistrictMap";
+import { ReportDownloadButton } from "@/components/ReportDownloadButton";
+import { MapExportControls } from "@/components/MapExportControls";
+import { StudyAreaSelector } from "@/components/StudyAreaSelector";
 
 const DISTRICTS = [
   "Bugesera","Burera","Gakenke","Gasabo","Gatsibo","Gicumbi","Gisagara",
@@ -30,6 +33,7 @@ const DISTRICTS = [
   "Musanze","Ngoma","Ngororero","Nyabihu","Nyagatare","Nyamagabe",
   "Nyamasheke","Nyanza","Nyarugenge","Nyaruguru","Rubavu","Ruhango",
   "Rulindo","Rusizi","Rutsiro","Rwamagana",
+  "Custom Study Area",
 ];
 
 const SLOPE_COLORS = ["#2166ac","#92c5de","#fee08b","#f4a582","#d6604d"];
@@ -49,13 +53,15 @@ const palette = (n: number) => {
 };
 
 export function SlopePage() {
-  const [district, setDistrict] = useState("Musanze");
+  const [aoi, setAoi] = useState<AOIConfig>({ type: "gaul2", country: "Rwanda", name: "Musanze", level1: "North/Amajyaruguru", level2: "Musanze" });
   const [nClasses, setNClasses] = useState(5);
   const [activeLayer, setActiveLayer] = useState("slope");
 
   const { mutate, data, isPending, error } = useMutation<SlopeResult, Error>({
-    mutationFn: () => api.slope({ district, n_classes: nClasses }),
+    mutationFn: () => api.slope({ aoi,
+        n_classes: nClasses }),
   });
+
 
   const getActiveTileUrl = () => {
     if (!data) return "";
@@ -77,19 +83,7 @@ export function SlopePage() {
           Slope in degrees, hillshade at 315° azimuth, aspect in degrees from north.
         </p>
 
-        <div className="space-y-1">
-          <Label>District</Label>
-          <Select value={district} onValueChange={setDistrict}>
-            <SelectTrigger className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {DISTRICTS.map((d) => (
-                <SelectItem key={d} value={d}>{d}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        <StudyAreaSelector value={aoi} onChange={setAoi} />
 
         <div className="space-y-2">
           <Label>Classes: {nClasses}</Label>
@@ -126,14 +120,15 @@ export function SlopePage() {
       <main className="flex-1 overflow-y-auto p-6">
         {!data && !isPending && (
           <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
-            Select a district, then click <strong className="mx-1">Analyze Terrain</strong>.
+            Select a aoi,
+        then click <strong className="mx-1">Analyze Terrain</strong>.
           </div>
         )}
 
         {isPending && (
           <div className="h-full flex flex-col items-center justify-center gap-3 text-muted-foreground">
             <Loader2 className="w-8 h-8 animate-spin text-primary" />
-            <p>Analyzing terrain for {district}…</p>
+            <p>Analyzing terrain for {aoi.name || 'Custom'}…</p>
             <p className="text-xs">GEE analysis typically takes 15–60 seconds.</p>
           </div>
         )}
@@ -144,6 +139,8 @@ export function SlopePage() {
               <TabsTrigger value="map">Map</TabsTrigger>
               <TabsTrigger value="stats">Statistics</TabsTrigger>
               <TabsTrigger value="classify">Classification</TabsTrigger>
+              <TabsTrigger value="static-map">Static Maps</TabsTrigger>
+              <TabsTrigger value="report" className="gap-1.5"><FileText className="w-3.5 h-3.5" />Report</TabsTrigger>
             </TabsList>
 
             {/* Map */}
@@ -177,6 +174,36 @@ export function SlopePage() {
                   <strong className="text-foreground">Aspect:</strong> circular color wheel (N/E/S/W)
                 </span>
               </div>
+            </TabsContent>
+
+            {/* Static Maps */}
+            <TabsContent value="static-map" className="flex-1 overflow-y-auto space-y-4">
+              <div className="flex flex-col gap-2">
+                <span className="text-sm font-medium">Select Map to Export:</span>
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {LAYER_OPTIONS.map(({ key, label }) => (
+                    <button
+                      key={key}
+                      onClick={() => setActiveLayer(key)}
+                      className={`px-3 py-1 rounded text-xs font-medium border transition-colors ${
+                        activeLayer === key
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-card border-input hover:bg-muted"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <MapExportControls
+                tileUrl={getActiveTileUrl()!}
+                thumbUrl={activeLayer === "slope" ? (data as any).slope_thumb_url : activeLayer === "hillshade" ? (data as any).hillshade_thumb_url : (data as any).aspect_thumb_url}
+                downloadUrl={activeLayer === "slope" ? (data as any).slope_download_url : activeLayer === "hillshade" ? (data as any).hillshade_download_url : (data as any).aspect_download_url}
+                district={aoi.name || "Custom"}
+                title={LAYER_OPTIONS.find(l => l.key === activeLayer)?.label || "Terrain Map"}
+                classAreas={activeLayer === "slope" ? data.class_areas_km2 : undefined}
+              />
             </TabsContent>
 
             {/* Statistics */}
@@ -312,6 +339,32 @@ export function SlopePage() {
                     </ResponsiveContainer>
                   </div>
                 ))}
+              </div>
+            </TabsContent>
+
+            {/* ── Report ── */}
+            <TabsContent value="report" className="space-y-6">
+              <div>
+                <h2 className="font-semibold text-lg mb-1">PDF Report — {data.district}</h2>
+                <p className="text-sm text-muted-foreground">
+                  Download a full PDF report including terrain statistics, class areas, and classification maps.
+                </p>
+              </div>
+              <div className="bg-card border rounded-lg p-5 space-y-4">
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  <strong>Contents:</strong> District metadata · Elevation & slope statistics (min, max, mean, std) ·
+                  Slope class area table · Quantile classification panels · Methodology notes.
+                </p>
+                <ReportDownloadButton aoi={aoi}
+                  moduleName="Terrain and Slope"
+                  district={aoi.name || "Custom"}
+                  dateRange="Current (SRTM 30m)"
+                  stats={data.stats as Record<string, number>}
+                  classAreas={data.class_areas_km2}
+                  extraNotes={`Terrain analysis derived from USGS SRTM (Shuttle Radar Topography Mission) 30m Digital Elevation Model. Analysis covers ${data.district} district.`}
+                  maps={data.classify?.panels?.map((p) => [p.title, p.thumb_url] as [string, string]) ?? []}
+                  filename={`Slope_${data.district}.pdf`}
+                />
               </div>
             </TabsContent>
           </Tabs>

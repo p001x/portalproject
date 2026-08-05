@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Loader2, Thermometer } from "lucide-react";
+import { Loader2, Thermometer, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
@@ -12,8 +12,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { api, UHIResult } from "@/lib/api";
+import { api, UHIResult , AOIConfig} from "@/lib/api";
 import { DistrictMap } from "@/components/DistrictMap";
+import { ReportDownloadButton } from "@/components/ReportDownloadButton";
+import { MapExportControls } from "@/components/MapExportControls";
+import { StudyAreaSelector } from "@/components/StudyAreaSelector";
 
 const DISTRICTS = [
   "Bugesera","Burera","Gakenke","Gasabo","Gatsibo","Gicumbi","Gisagara",
@@ -21,6 +24,7 @@ const DISTRICTS = [
   "Musanze","Ngoma","Ngororero","Nyabihu","Nyagatare","Nyamagabe",
   "Nyamasheke","Nyanza","Nyarugenge","Nyaruguru","Rubavu","Ruhango",
   "Rulindo","Rusizi","Rutsiro","Rwamagana",
+  "Custom Study Area",
 ];
 
 function today() {
@@ -42,7 +46,7 @@ function StatCard({ label, value }: { label: string; value: string | number }) {
 }
 
 export function UHIPage() {
-  const [district, setDistrict] = useState("Kicukiro");
+  const [aoi, setAoi] = useState<AOIConfig>({ type: "gaul2", country: "Rwanda", name: "Musanze", level1: "North/Amajyaruguru", level2: "Musanze" });
   const [startDate, setStartDate] = useState(sixMonthsAgo());
   const [endDate, setEndDate] = useState(today());
   const [gridSize, setGridSize] = useState(5);
@@ -51,12 +55,13 @@ export function UHIPage() {
   const { mutate, data, isPending, error } = useMutation<UHIResult, Error>({
     mutationFn: () =>
       api.uhi({
-        district,
-        start_date: startDate,
+        aoi,
+                start_date: startDate,
         end_date: endDate,
         grid_size: gridSize,
       }),
   });
+
 
   const tileUrl = data
     ? activeLayer === "lst"
@@ -77,19 +82,7 @@ export function UHIPage() {
           Normalized Difference Built-up Index (NDBI).
         </p>
 
-        <div className="space-y-1">
-          <Label>District</Label>
-          <Select value={district} onValueChange={setDistrict}>
-            <SelectTrigger className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {DISTRICTS.map((d) => (
-                <SelectItem key={d} value={d}>{d}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        <StudyAreaSelector value={aoi} onChange={setAoi} />
 
         <div className="space-y-1">
           <Label htmlFor="uhi-start-date">Start date</Label>
@@ -156,7 +149,7 @@ export function UHIPage() {
         {isPending && (
           <div className="h-full flex flex-col items-center justify-center gap-3 text-muted-foreground">
             <Loader2 className="w-8 h-8 animate-spin text-primary" />
-            <p>Analyzing UHI for {district}…</p>
+            <p>Analyzing UHI for {aoi.name || 'Custom'}…</p>
             <p className="text-xs">GEE analysis typically takes 15–60 seconds.</p>
           </div>
         )}
@@ -167,6 +160,8 @@ export function UHIPage() {
               <TabsTrigger value="map">Map</TabsTrigger>
               <TabsTrigger value="analysis">Analysis</TabsTrigger>
               <TabsTrigger value="grid">Grid Table</TabsTrigger>
+              <TabsTrigger value="static-map">Static Maps</TabsTrigger>
+              <TabsTrigger value="report" className="gap-1.5"><FileText className="w-3.5 h-3.5" />Report</TabsTrigger>
             </TabsList>
 
             {/* Map Tab */}
@@ -219,7 +214,7 @@ export function UHIPage() {
             {/* Analysis Tab */}
             <TabsContent value="analysis" className="space-y-6">
               <div>
-                <h2 className="font-semibold text-lg mb-1">UHI Analysis — {district}</h2>
+                <h2 className="font-semibold text-lg mb-1">UHI Analysis — {aoi.name || 'Custom'}</h2>
                 <p className="text-sm text-muted-foreground">
                   {data.n_cells_with_data} / {data.n_cells_total} cells with data
                 </p>
@@ -321,6 +316,57 @@ export function UHIPage() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            </TabsContent>
+
+            {/* ── Report ── */}
+            {/* Static Maps */}
+            <TabsContent value="static-map" className="flex-1 overflow-y-auto space-y-4">
+              <div>
+                <h2 className="font-semibold text-lg mb-1">Professional Cartography</h2>
+                <p className="text-sm text-muted-foreground">High-quality static maps ready for presentation.</p>
+              </div>
+              <div className="bg-card border rounded-lg p-4">
+              <MapExportControls
+                tileUrl={tileUrl}
+                thumbUrl={activeLayer === "lst" ? (data as any).lst_thumb_url : (data as any).ndbi_thumb_url}
+                downloadUrl={activeLayer === "lst" ? (data as any).lst_download_url : (data as any).ndbi_download_url}
+                district={data.district ?? (aoi.name || "Custom")}
+                title={activeLayer === "lst" ? "LST Map" : "NDBI Map"}
+                classAreas={data.class_areas_km2}
+              /></div>
+            </TabsContent>
+
+            <TabsContent value="report" className="space-y-6">
+              <div>
+                <h2 className="font-semibold text-lg mb-1">PDF Report — {data.district ?? (aoi.name || "Custom")}</h2>
+                <p className="text-sm text-muted-foreground">
+                  Download a full PDF report including LST/NDBI statistics, linear regression results, and correlation charts.
+                </p>
+              </div>
+              <div className="bg-card border rounded-lg p-5 space-y-4">
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  <strong>Contents:</strong> District metadata · LST & NDBI descriptive statistics ·
+                  Linear regression summary (R², p-value, slope) · Bivariate map & Scatterplot · Methodology notes.
+                </p>
+                <ReportDownloadButton aoi={aoi}
+                  moduleName="Urban Heat Island"
+                  district={data.district ?? (aoi.name || "Custom")}
+                  dateRange={`${data.start_date ?? startDate} to ${data.end_date ?? endDate}`}
+                  stats={{
+                    "LST Mean": data.lst_stats.mean ?? 0,
+                    "NDBI Mean": data.ndbi_stats.mean ?? 0,
+                    "R²": data.regression?.r2 ?? 0,
+                    "Slope": data.regression?.slope ?? 0,
+                  }}
+                  classAreas={{}}
+                  extraNotes={`Urban Heat Island (UHI) analysis correlates Land Surface Temperature (LST) with the Normalized Difference Built-up Index (NDBI) using a spatial grid approach. Analysis covers ${data.district} (aoi.name || "Custom") from ${data.start_date} to ${data.end_date} with a grid size of ${data.n_cells_total} cells.`}
+                  maps={[
+                    ["Bivariate Map (LST x NDBI)", data.bivariate_png],
+                    ["Scatterplot", data.scatter_png],
+                  ]}
+                  filename={`UHI_${data.district}_${data.start_date}.pdf`}
+                />
               </div>
             </TabsContent>
           </Tabs>

@@ -1,0 +1,8 @@
+# Cloudflare Pages Redirects & API Proxy Configuration
+
+# Proxy /api requests to your hosted FastAPI backend
+# Replace "https://your-backend-server.onrender.com" with your actual backend URL once deployed
+/api/*  https://your-backend-server.onrender.com/api/:splat  200
+
+# Single Page Application (SPA) fallback routing for React
+/*      /index.html                                          200

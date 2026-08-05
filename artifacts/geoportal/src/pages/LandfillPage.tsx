@@ -7,12 +7,15 @@ import { Loader2, Trash2, FileText, Printer } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { api, LandfillResult } from "@/lib/api";
+import { api, LandfillResult , AOIConfig} from "@/lib/api";
 import { DistrictMap, LegendItem } from "@/components/DistrictMap";
+import { StudyAreaSelector } from "@/components/StudyAreaSelector";
+import { MapExportControls } from "@/components/MapExportControls";
 
 const DISTRICTS = [
   "Bugesera","Burera","Gakenke","Gasabo","Gatsibo","Gicumbi","Gisagara",
@@ -20,6 +23,7 @@ const DISTRICTS = [
   "Musanze","Ngoma","Ngororero","Nyabihu","Nyagatare","Nyamagabe",
   "Nyamasheke","Nyanza","Nyarugenge","Nyaruguru","Rubavu","Ruhango",
   "Rulindo","Rusizi","Rutsiro","Rwamagana",
+  "Custom Study Area",
 ];
 
 const FACTOR_KEYS = ["river", "residential", "slope", "road", "lulc"] as const;
@@ -188,7 +192,7 @@ function printReport(data: LandfillResult, analysisDate: string) {
   const unPct = total > 0 ? ((unKm2 / total) * 100).toFixed(1) : "0";
 
   const interpretation = `
-    The multi-criteria weighted overlay analysis for <strong>${data.district}</strong> district identifies 
+    The multi-criteria weighted overlay analysis for <strong>${data.district}</strong> identifies 
     <strong>${hsPct}%</strong> of the study area (${hsKm2} km²) as Highly Suitable for landfill site development, 
     while <strong>${unPct}%</strong> (${unKm2} km²) is classified as Unsuitable. 
     The analysis applies AHP-derived weights, with River Distance (${data.factor_maps.river?.weight_pct ?? 30}%) 
@@ -334,7 +338,7 @@ function printReport(data: LandfillResult, analysisDate: string) {
 // ── Main component ──────────────────────────────────────────────────────────
 
 export function LandfillPage() {
-  const [district, setDistrict] = useState("Nyagatare");
+  const [aoi, setAoi] = useState<AOIConfig>({ type: "gaul2", country: "Rwanda", name: "Musanze", level1: "North/Amajyaruguru", level2: "Musanze" });
   const [nClasses, setNClasses] = useState(4);
 
   // Weights (stored per-district in localStorage)
@@ -349,16 +353,16 @@ export function LandfillPage() {
 
   // Reload weights when district changes
   useEffect(() => {
-    setWeights(loadWeights(district));
-  }, [district]);
+    setWeights(loadWeights((aoi.name || "Custom")));
+  }, [aoi.name || "Custom"]);
 
   const handleWeightChange = useCallback((key: FactorKey, val: number) => {
     setWeights((prev) => {
       const next = { ...prev, [key]: val };
-      saveWeights(district, next);
+      saveWeights(aoi.name || "Custom", next);
       return next;
     });
-  }, [district]);
+  }, [aoi.name || "Custom"]);
 
   const normalizedWeights = normalize(weights);
   const totalRaw = Object.values(weights).reduce((a, b) => a + b, 0);
@@ -369,8 +373,8 @@ export function LandfillPage() {
   const { mutate, data, isPending, error } = useMutation<LandfillResult, Error>({
     mutationFn: () =>
       api.landfill({
-        district,
-        n_classes: nClasses,
+        aoi,
+                n_classes: nClasses,
         reverse_river: reverseRiver,
         reverse_residential: reverseResidential,
         reverse_slope: reverseSlope,
@@ -400,15 +404,7 @@ export function LandfillPage() {
         </p>
 
         {/* District */}
-        <div className="space-y-1">
-          <Label>District</Label>
-          <Select value={district} onValueChange={setDistrict}>
-            <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {DISTRICTS.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
+        <StudyAreaSelector value={aoi} onChange={setAoi} />
 
         {/* Classes */}
         <div className="space-y-2">
@@ -459,7 +455,7 @@ export function LandfillPage() {
             className="w-full text-xs"
             onClick={() => {
               setWeights({ ...DEFAULT_WEIGHTS });
-              saveWeights(district, { ...DEFAULT_WEIGHTS });
+              saveWeights(aoi.name || "Custom", { ...DEFAULT_WEIGHTS });
             }}
           >
             Reset to defaults
@@ -467,11 +463,12 @@ export function LandfillPage() {
         </div>
 
         {/* ── Reverse Factors ── */}
-        <div className="space-y-2">
-          <Label className="text-sm font-semibold">Reverse Factors</Label>
-          <p className="text-xs text-muted-foreground">
-            Invert the scoring direction for a factor (e.g. "closer to roads = better").
-          </p>
+        <div className="space-y-4 pt-2 border-t">
+          <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center justify-between">
+            Reverse Factors
+            <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded font-normal text-muted-foreground">Optional</span>
+          </Label>
+          <div className="space-y-3">
           {[
             { label: "River distance",       value: reverseRiver,       setter: setReverseRiver },
             { label: "Residential distance", value: reverseResidential,  setter: setReverseResidential },
@@ -479,16 +476,14 @@ export function LandfillPage() {
             { label: "Road distance",        value: reverseRoad,         setter: setReverseRoad },
             { label: "Land use (LULC)",      value: reverseLulc,         setter: setReverseLulc },
           ].map(({ label, value, setter }) => (
-            <label key={label} className="flex items-center gap-2 cursor-pointer text-sm">
-              <input
-                type="checkbox"
-                checked={value}
-                onChange={(e) => setter(e.target.checked)}
-                className="rounded border-input"
-              />
-              {label}
-            </label>
+            <div key={label} className="flex items-center justify-between group">
+              <Label className="text-xs font-normal cursor-pointer text-muted-foreground group-hover:text-foreground transition-colors" onClick={() => setter(!value)}>
+                {label}
+              </Label>
+              <Switch checked={value} onCheckedChange={setter} className="scale-75 origin-right" />
+            </div>
           ))}
+          </div>
         </div>
 
         <Button className="w-full gap-2" onClick={() => mutate()} disabled={isPending}>
@@ -513,7 +508,7 @@ export function LandfillPage() {
         {isPending && (
           <div className="h-full flex flex-col items-center justify-center gap-3 text-muted-foreground">
             <Loader2 className="w-8 h-8 animate-spin text-primary" />
-            <p>Analyzing landfill suitability for {district}…</p>
+            <p>Analyzing landfill suitability for {aoi.name || 'Custom'}…</p>
             <p className="text-xs">GEE analysis typically takes 15–60 seconds.</p>
           </div>
         )}
@@ -524,6 +519,7 @@ export function LandfillPage() {
               <TabsTrigger value="map">Map</TabsTrigger>
               <TabsTrigger value="stats">Statistics</TabsTrigger>
               <TabsTrigger value="factors">Factor Maps</TabsTrigger>
+              <TabsTrigger value="static-map">Static Maps</TabsTrigger>
               <TabsTrigger value="report" className="gap-1.5">
                 <FileText className="w-3.5 h-3.5" />Report
               </TabsTrigger>
@@ -533,7 +529,8 @@ export function LandfillPage() {
             <TabsContent value="map" className="flex-1 min-h-[500px]">
               <div className="h-[560px] rounded-lg overflow-hidden border">
                 <DistrictMap
-                  center={data.center}
+            bbox={data?.bbox as any}
+            center={data.center}
                   tileUrl={data.tile_url}
                   title={`Landfill Suitability — ${data.district}`}
                   legend={SUITABILITY_LEGEND}
@@ -646,6 +643,23 @@ export function LandfillPage() {
                     analysisDate={analysisDate}
                   />
                 ))}
+              </div>
+            </TabsContent>
+
+            {/* Static Maps */}
+            <TabsContent value="static-map" className="flex-1 overflow-y-auto space-y-4">
+              <div>
+                <h2 className="font-semibold text-lg mb-1">Professional Cartography</h2>
+                <p className="text-sm text-muted-foreground">High-quality static maps ready for presentation.</p>
+              </div>
+              <div className="bg-card border rounded-lg p-4">
+                <MapExportControls
+                  tileUrl={data.tile_url}
+                  thumbUrl={data.thumb_url}
+                  district={aoi.name || "Custom"}
+                  title="Landfill Site Suitability"
+                  classAreas={data.class_areas_km2}
+                />
               </div>
             </TabsContent>
 
@@ -830,7 +844,7 @@ export function LandfillPage() {
                     const unPct = total2 > 0 ? ((unKm2 / total2) * 100).toFixed(1) : "0";
                     return (
                       <p>
-                        The analysis of <strong>{data.district}</strong> district identifies{" "}
+                        The analysis of <strong>{data.district}</strong> identifies{" "}
                         <strong>{hsPct}%</strong> of the area ({hsKm2} km²) as Highly Suitable for
                         landfill development. River Distance ({data.factor_maps.river?.weight_pct ?? 30}%)
                         and Residential Distance ({data.factor_maps.residential?.weight_pct ?? 25}%) are

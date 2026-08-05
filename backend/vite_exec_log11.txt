@@ -1,0 +1,6 @@
+STDOUT:
+(6, 'page_view', 'rusle', '/rusle', '6b9bc42b-58f2-4599-8f8c-44c7a391123a', '127.0.0.1', None, None, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36 Edg/150.0.0.0', '2026-07-31T14:36:12.353921+00:00')
+(5, 'page_view', 'rare_data', '/rare-data', '2010ac0e-59db-4aca-bd09-3af0cfd36d48', '127.0.0.1', None, None, 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36', '2026-07-31T14:36:12.309666+00:00')
+(4, 'page_view', 'rare_data', '/rare-data', 'test-session-public-ip', '8.8.8.8', 'United States', 'Ashburn', 'testclient', '2026-07-31T14:34:55.225990+00:00')
+(3, 'page_view', 'rare_data', '/rare-data', 'test-session-public-ip', '8.8.8.8', 'United States', 'Ashburn', 'testclient', '2026-07-31T14:34:26.492236+00:00')
+(2, 'page_view', 'home', '/', 'test-session-123', 'testclient', None, None, 'testclient', '2026-07-31T14:31:34.169369+00:00')

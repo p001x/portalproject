@@ -1,0 +1,7 @@
+ERROR:
+spawnSync C:\WINDOWS\system32\cmd.exe ETIMEDOUT
+
+STDOUT:
+
+
+STDERR:

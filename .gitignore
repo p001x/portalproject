@@ -48,6 +48,8 @@ yarn-error.log
 .venv/
 __pycache__/
 *.pyc
+*.tif
+backend/data/files/
 gee_key.json
 spatis/
 secrets.toml

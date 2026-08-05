@@ -1,0 +1,4 @@
+STATUS: 200
+BODY: {'status': 'success'}
+DB ROWS:
+(4, 'page_view', 'rare_data', '/rare-data', 'test-session-public-ip', '8.8.8.8', 'United States', 'Ashburn', 'testclient', '2026-07-31T14:34:55.225990+00:00')

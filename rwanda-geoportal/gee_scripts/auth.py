@@ -16,6 +16,13 @@ def _load_key_json() -> str:
     except Exception:
         pass
 
+    key_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "backend", "gee_key.json"))
+    if os.path.exists(key_file_path):
+        with open(key_file_path, "r", encoding="utf-8") as f:
+            val = f.read().strip()
+            if len(val) > 100 and val.startswith("{"):
+                return val
+
     return key_json
 
 
@@ -25,7 +32,13 @@ def _try_init(key_json: str):
         email=key_data["client_email"],
         key_data=key_json,
     )
-    ee.Initialize(credentials)
+    
+    target_project = key_data.get("project_id", "ee-petersonyang87")
+    ee.Initialize(credentials, project=target_project)
+    
+    roots = ee.data.getAssetRoots()
+    print(f"Verified GEE initialization. Account: {key_data['client_email']}, Project: {target_project}, Roots: {roots}")
+    
     return key_data
 
 

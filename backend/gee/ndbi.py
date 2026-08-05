@@ -1,16 +1,12 @@
+import json
 """NDBI (Normalized Difference Built-up Index) helper — used by UHI module."""
 import ee
 
 
-def ndbi_image_and_aoi(district_name: str, start_date: str, end_date: str):
+def ndbi_image_and_aoi(aoi_config: dict, start_date: str, end_date: str):
     """Build a median NDBI image from Landsat 9 SR and return (ndbi_image, aoi)."""
-    rwanda = ee.FeatureCollection("FAO/GAUL/2015/level2").filter(
-        ee.Filter.And(
-            ee.Filter.eq("ADM0_NAME", "Rwanda"),
-            ee.Filter.eq("ADM2_NAME", district_name),
-        )
-    )
-    aoi = rwanda.geometry()
+    from gee.aoi_utils import get_aoi_geometry
+    aoi = get_aoi_geometry(aoi_config)
 
     def apply_scale_factors(image):
         optical = image.select("SR_B.").multiply(0.0000275).add(-0.2)

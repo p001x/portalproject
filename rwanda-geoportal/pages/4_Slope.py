@@ -169,6 +169,14 @@ elif "slope_result" in st.session_state:
             f"Slope calculated using ee.Terrain.slope(). "
             f"District: {result['district']}. Data source: USGS/SRTMGL1_003."
         )
+        
+        # Collect map thumbnails for the report
+        maps = []
+        if "tile_url" in result:
+            maps.append(("Map", result["tile_url"]))
+        for panel in result.get("classify", {}).get("panels", []):
+            maps.append((panel["title"], panel["thumb_url"]))
+
         pdf_bytes = build_report(
             module_name="Slope & Terrain Analysis",
             district=result["district"],
@@ -176,6 +184,7 @@ elif "slope_result" in st.session_state:
             stats=result["stats"],
             class_areas=result["class_areas_km2"],
             extra_notes=notes,
+            maps=maps,
         )
         st.download_button(
             label=":material/download: Download PDF Report",

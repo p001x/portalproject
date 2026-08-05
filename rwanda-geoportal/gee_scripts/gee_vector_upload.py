@@ -38,7 +38,13 @@ class IngestedVectorAsset:
     feature_count: int
 
 
-def push_vector_to_gee(file_bytes: bytes, filename: str, asset_name: str, allow_overwrite: bool = True) -> IngestedVectorAsset:
+def push_vector_to_gee(
+    file_bytes: bytes,
+    filename: str,
+    asset_name: str,
+    allow_overwrite: bool = True,
+    custom_project_id: str | None = None,
+) -> IngestedVectorAsset:
     """Parse `file_bytes` (Shapefile zip / GeoJSON / GPKG / KML / points CSV) via
     `utils/vector_import.py`, stage it as GeoJSON in this app's Object Storage
     bucket, then ingest it as a permanent Earth Engine table (FeatureCollection)
@@ -67,8 +73,11 @@ def push_vector_to_gee(file_bytes: bytes, filename: str, asset_name: str, allow_
     if not asset_name:
         raise AssetUploadError("Give the asset a name first.")
 
+    import os
     key_data = _service_account_info()
-    project_id = key_data["project_id"]
+    project_id = (custom_project_id or os.environ.get("GEE_PROJECT_ID") or key_data.get("project_id", "")).strip()
+    if not project_id:
+        project_id = "ee-petersonyang87"
     ee_sa_email = key_data["client_email"]
 
     bucket = _staging_bucket()

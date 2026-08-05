@@ -163,6 +163,12 @@ elif "ndvi_result" in st.session_state:
             f"The analysis covers {result['district']} district from {result['start_date']} to {result['end_date']} "
             f"using Sentinel-2 SR cloud-masked median composite at 10 m resolution."
         )
+        # Collect map thumbnails for the report
+        maps = []
+        if "tile_url" in result:
+            maps.append(("Map", result["tile_url"]))
+        for panel in result.get("classify", {}).get("panels", []):
+            maps.append((panel["title"], panel["thumb_url"]))
         pdf_bytes = build_report(
             module_name="NDVI Vegetation Health",
             district=result["district"],
@@ -170,6 +176,7 @@ elif "ndvi_result" in st.session_state:
             stats=result["stats"],
             class_areas=result["class_areas_km2"],
             extra_notes=notes,
+            maps=maps,
         )
         st.download_button(
             label=":material/download: Download PDF Report",

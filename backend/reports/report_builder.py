@@ -11,6 +11,8 @@ from reportlab.platypus import (
 )
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 
+from reports.cartography import enhance_map_cartography
+
 GREEN       = colors.HexColor("#1a9850")
 DARK        = colors.HexColor("#1a1a2e")
 LIGHT_GREEN = colors.HexColor("#d9ef8b")
@@ -142,6 +144,7 @@ def build_report(
     stats: dict,
     class_areas: dict,
     extra_notes: str = "",
+    maps: list[tuple[str, str]] = None,
 ) -> bytes:
     """Generic PDF report for any analysis module (no embedded maps)."""
     buffer = io.BytesIO()
@@ -164,6 +167,25 @@ def build_report(
     if extra_notes:
         story.append(Paragraph("Notes & Interpretation", st_styles["section"]))
         story.append(Paragraph(extra_notes, st_styles["body"]))
+        story.append(Spacer(1, 0.3 * cm))
+    if maps:
+        story.append(Spacer(1, 0.5 * cm))
+        story.append(HRFlowable(width="100%", thickness=1, color=colors.lightgrey))
+        story.append(Spacer(1, 0.2 * cm))
+        story.append(Paragraph("Maps", st_styles["section"]))
+        for title, url in maps:
+            buf = _fetch_image(url)
+            if buf:
+                # Enhance the raw thumbnail with cartographic elements
+                try:
+                    carto_buf = enhance_map_cartography(buf.read(), district, title, class_areas)
+                    story.extend(_rl_image(carto_buf, PAGE_W, title, st_styles))
+                except Exception as e:
+                    # Fallback to raw image if cartography fails
+                    buf.seek(0)
+                    story.extend(_rl_image(buf, PAGE_W/2, title, st_styles))
+            else:
+                story.append(Paragraph(f"[Map unavailable: {title}]", st_styles["caption"]))
         story.append(Spacer(1, 0.3 * cm))
 
     story.append(Spacer(1, 0.5 * cm))

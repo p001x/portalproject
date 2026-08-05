@@ -1,0 +1,4 @@
+STATUS: 200
+BODY: {'status': 'success'}
+DB ROWS:
+(1, 'page_view', 'home', '/', 'test-session-123', 'testclient', None, None, 'testclient', '2026-07-31T14:30:15.924609+00:00')

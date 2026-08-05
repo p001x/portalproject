@@ -1,24 +1,21 @@
+import json
 """Land Surface Temperature (LST) — no Streamlit dependency."""
 import ee
 from cachetools import TTLCache
 from threading import Lock
+import concurrent.futures
 from gee.classify_utils import quantile_classify
 
 _cache: TTLCache = TTLCache(maxsize=128, ttl=3600)
 _lock = Lock()
 
 
-def lst_image_and_aoi(district_name: str, start_date: str, end_date: str):
+def lst_image_and_aoi(aoi_config: dict, start_date: str, end_date: str):
     """Build the median LST image (°C, Landsat 9 mono-window) and the AOI geometry.
     Shared with uhi.py which needs the raw ee.Image for further composition.
     """
-    rwanda = ee.FeatureCollection("FAO/GAUL/2015/level2").filter(
-        ee.Filter.And(
-            ee.Filter.eq("ADM0_NAME", "Rwanda"),
-            ee.Filter.eq("ADM2_NAME", district_name),
-        )
-    )
-    aoi = rwanda.geometry()
+    from gee.aoi_utils import get_aoi_geometry
+    aoi = get_aoi_geometry(aoi_config)
 
     def apply_scale_factors(image):
         optical = image.select("SR_B.").multiply(0.0000275).add(-0.2)
@@ -57,27 +54,19 @@ def lst_image_and_aoi(district_name: str, start_date: str, end_date: str):
     return lst_median, aoi
 
 
-def compute_lst(district_name: str, start_date: str, end_date: str, n_classes: int = 5) -> dict:
-    cache_key = (district_name, start_date, end_date, n_classes)
+def compute_lst(aoi_config: dict, start_date: str, end_date: str, n_classes: int = 5) -> dict:
+    cache_key = (json.dumps(aoi_config, sort_keys=True), start_date, end_date, n_classes)
     with _lock:
         if cache_key in _cache:
             return _cache[cache_key]
 
-    lst_median, aoi = lst_image_and_aoi(district_name, start_date, end_date)
+    lst_median, aoi = lst_image_and_aoi(aoi_config, start_date, end_date)
 
     vis_params = {
         "min": 15, "max": 40,
         "palette": ["#313695", "#74add1", "#fee090", "#f46d43", "#a50026"],
     }
     map_id = lst_median.getMapId(vis_params)
-
-    stats = lst_median.reduceRegion(
-        reducer=ee.Reducer.mean()
-        .combine(ee.Reducer.min(), sharedInputs=True)
-        .combine(ee.Reducer.max(), sharedInputs=True)
-        .combine(ee.Reducer.stdDev(), sharedInputs=True),
-        geometry=aoi, scale=100, maxPixels=1e9, tileScale=4,
-    ).getInfo()
 
     classes = {
         "Cool (<20°C)": lst_median.lt(20),
@@ -90,21 +79,47 @@ def compute_lst(district_name: str, start_date: str, end_date: str, n_classes: i
     area_img = ee.Image.cat(
         [classes[lbl].multiply(ee.Image.pixelArea()).rename(f"c{i}") for i, lbl in enumerate(labels)]
     )
-    area_dict = area_img.reduceRegion(
-        reducer=ee.Reducer.sum(), geometry=aoi, scale=100, maxPixels=1e9, tileScale=4
-    ).getInfo()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        f_stats = executor.submit(
+            lambda: lst_median.reduceRegion(
+                reducer=ee.Reducer.mean()
+                .combine(ee.Reducer.min(), sharedInputs=True)
+                .combine(ee.Reducer.max(), sharedInputs=True)
+                .combine(ee.Reducer.stdDev(), sharedInputs=True),
+                geometry=aoi, scale=100, maxPixels=1e6, bestEffort=True, tileScale=4,
+            ).getInfo()
+        )
+
+        f_area = executor.submit(
+            lambda: area_img.reduceRegion(
+                reducer=ee.Reducer.sum(), geometry=aoi, scale=100, maxPixels=1e6, bestEffort=True, tileScale=4
+            ).getInfo()
+        )
+
+        f_classify = executor.submit(
+            lambda: quantile_classify(
+                layers=[{"name": "LST", "image": lst_median, "title": "Land Surface Temperature (°C)"}],
+                aoi=aoi, scale=100, n_classes=n_classes,
+            )
+        )
+
+        f_bounds = executor.submit(
+            lambda: aoi.bounds().getInfo()["coordinates"][0]
+        )
+
+        stats = f_stats.result()
+        area_dict = f_area.result()
+        classify = f_classify.result()
+        bounds = f_bounds.result()
+
     class_areas = {lbl: round((area_dict.get(f"c{i}", 0) or 0) / 1e6, 2) for i, lbl in enumerate(labels)}
 
-    classify = quantile_classify(
-        layers=[{"name": "LST", "image": lst_median, "title": "Land Surface Temperature (°C)"}],
-        aoi=aoi, scale=100, n_classes=n_classes,
-    )
-
-    bounds = aoi.bounds().getInfo()["coordinates"][0]
     center = [(bounds[0][1] + bounds[2][1]) / 2, (bounds[0][0] + bounds[2][0]) / 2]
 
     result = {
         "tile_url": map_id["tile_fetcher"].url_format,
+        "thumb_url": lst_median.getThumbURL({**vis_params, "region": aoi.bounds(), "dimensions": 800, "format": "png"}),
         "stats": {
             "Mean LST (°C)": round(stats.get("LST_mean") or 0, 2),
             "Min LST (°C)": round(stats.get("LST_min") or 0, 2),
@@ -114,7 +129,8 @@ def compute_lst(district_name: str, start_date: str, end_date: str, n_classes: i
         "class_areas_km2": class_areas,
         "classify": classify,
         "center": center,
-        "district": district_name,
+        "district": aoi_config.get("district", aoi_config.get("name", "Custom AOI")),
+        "bbox": bounds,
         "start_date": start_date,
         "end_date": end_date,
     }

@@ -18,7 +18,19 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
+args = "backend: run"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
 args = "artifacts/geoportal: web"
+
+[[workflows.workflow]]
+name = "backend: run"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cd backend && ../.venv/Scripts/python -m uvicorn main:app --reload --port 8001"
 
 [[workflows.workflow]]
 name = "artifacts/geoportal: web"
@@ -45,5 +57,5 @@ channel = "stable-25_05"
 packages = ["cairo", "ffmpeg-full", "freetype", "geos", "ghostscript", "glibcLocales", "gobject-introspection", "gtk3", "lcms2", "libimagequant", "libjpeg", "libtiff", "libwebp", "libxcrypt", "openjpeg", "pkg-config", "qhull", "tcl", "tk", "xsimd", "zlib"]
 
 [[ports]]
-localPort = 8001
+localPort = 5000
 externalPort = 80

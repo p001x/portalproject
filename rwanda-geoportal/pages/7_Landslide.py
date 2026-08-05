@@ -292,6 +292,14 @@ elif "landslide_result" in st.session_state:
             f"LSI classes: <1.8 Very Low, 1.8–2.6 Low, 2.6–3.4 Moderate, "
             f"3.4–4.2 High, ≥4.2 Very High."
         )
+
+        # Collect map thumbnails for the report
+        maps = []
+        if "tile_url" in result:
+            maps.append(("Map", result["tile_url"]))
+        for panel in result.get("classify", {}).get("panels", []):
+            maps.append((panel["title"], panel["thumb_url"]))
+
         pdf_bytes = build_report(
             module_name="Landslide Susceptibility",
             district=current_district,
@@ -299,6 +307,7 @@ elif "landslide_result" in st.session_state:
             stats=result["stats"],
             class_areas=result["class_areas_km2"],
             extra_notes=notes,
+            maps=maps,
         )
         st.download_button(
             label=":material/download: Download PDF Report",

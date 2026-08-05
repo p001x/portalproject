@@ -95,23 +95,26 @@ def _class_palette(n: int) -> list:
 
 def _class_tile_url(cls_img: "ee.Image", n_classes: int) -> str:
     vis = {"min": 1, "max": n_classes, "palette": _class_palette(n_classes)}
-    return cls_img.getMapId(vis)["tile_fetcher"].url_format
+    smoothed = cls_img.focal_mode(150, 'circle', 'meters')
+    return smoothed.getMapId(vis)["tile_fetcher"].url_format
 
 
 def _class_thumb_url(cls_img: "ee.Image", n_classes: int, aoi) -> str:
     vis = {"min": 1, "max": n_classes, "palette": _class_palette(n_classes)}
-    return cls_img.getThumbURL({**vis, "region": aoi, "dimensions": 512, "format": "png"})
+    smoothed = cls_img.focal_mode(150, 'circle', 'meters')
+    return smoothed.getThumbURL({**vis, "region": aoi, "dimensions": 512, "format": "png"})
 
 
 def _factor_urls(image: "ee.Image", key: str, aoi) -> dict:
     """Return tile URL, thumb URL (PNG 512px), and GeoTIFF download URL for one factor."""
     vis = FACTOR_VIS[key]
     vp  = {"min": vis["min"], "max": vis["max"], "palette": vis["palette"]}
-    tile_url     = image.getMapId(vp)["tile_fetcher"].url_format
-    thumb_url    = image.getThumbURL({
+    smoothed = image.focal_mean(150, 'circle', 'meters')
+    tile_url     = smoothed.getMapId(vp)["tile_fetcher"].url_format
+    thumb_url    = smoothed.getThumbURL({
         **vp, "region": aoi, "dimensions": 512, "format": "png",
     })
-    download_url = image.getDownloadURL({
+    download_url = smoothed.getDownloadURL({
         "name": f"RUSLE_{key}", "scale": 100,
         "region": aoi, "format": "GEO_TIFF", "filePerBand": False,
     })
@@ -184,12 +187,12 @@ def compute_rusle(
 
     # ── K: Soil Erodibility ───────────────────────────────────────────────────
     clay = (
-        ee.Image("OpenLandMap/SOL/SOL_CLAY-WFRACTION_USDA-3A1A1A_M/v02")
-        .select("b0").clip(aoi)
+        ee.Image("projects/soilgrids-isric/clay_mean_0-5cm_250m")
+        .select(0).divide(10).clip(aoi)
     )
     sand = (
-        ee.Image("OpenLandMap/SOL/SOL_SAND-WFRACTION_USDA-3A1A1A_M/v02")
-        .select("b0").clip(aoi)
+        ee.Image("projects/soilgrids-isric/sand_mean_0-5cm_250m")
+        .select(0).divide(10).clip(aoi)
     )
     silt = clay.add(sand).multiply(-1).add(100).max(1)
     f_csand = (
@@ -330,7 +333,7 @@ def compute_rusle(
         C.rename("C"), P.rename("P"), A.rename("A"),
     ])
     pct_dict = all_factors_img.reduceRegion(
-        reducer=ee.Reducer.percentile(percentile_steps),
+        reducer=ee.Reducer.min().combine(ee.Reducer.max(), sharedInputs=True),
         geometry=aoi,
         scale=250,
         maxPixels=1e9,
@@ -338,12 +341,11 @@ def compute_rusle(
         bestEffort=True,
     ).getInfo()
 
-    # Build Python-side list of thresholds (floats) for each factor/soil-loss
     def _thresholds(band_name):
-        return [
-            pct_dict.get(f"{band_name}_p{p}", 0) or 0
-            for p in percentile_steps
-        ]
+        min_val = FACTOR_VIS[band_name]["min"]
+        max_val = FACTOR_VIS[band_name]["max"]
+        step = (max_val - min_val) / n_classes if n_classes > 0 else 0
+        return [min_val + step * j for j in range(1, n_classes)]
 
     reverse_map = {
         "R": reverse_r, "K": reverse_k, "LS": reverse_ls,

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useMutation } from "@tanstack/react-query";
 import {
   BarChart,
@@ -9,10 +9,11 @@ import {
   ResponsiveContainer,
   Cell,
 } from "recharts";
-import { Loader2, Mountain } from "lucide-react";
+import { Loader2, Mountain, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
@@ -21,8 +22,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { api, RUSLEResult } from "@/lib/api";
+import { api, RUSLEResult , AOIConfig} from "@/lib/api";
 import { DistrictMap } from "@/components/DistrictMap";
+import { ReportDownloadButton } from "@/components/ReportDownloadButton";
+import { MapExportControls } from "@/components/MapExportControls";
+import { StudyAreaSelector } from "@/components/StudyAreaSelector";
 
 const DISTRICTS = [
   "Bugesera","Burera","Gakenke","Gasabo","Gatsibo","Gicumbi","Gisagara",
@@ -30,23 +34,24 @@ const DISTRICTS = [
   "Musanze","Ngoma","Ngororero","Nyabihu","Nyagatare","Nyamagabe",
   "Nyamasheke","Nyanza","Nyarugenge","Nyaruguru","Rubavu","Ruhango",
   "Rulindo","Rusizi","Rutsiro","Rwamagana",
+  "Custom Study Area",
 ];
 
-const YEARS = [2018, 2019, 2020, 2021, 2022, 2023, 2024];
+const YEARS = Array.from({ length: 15 }, (_, i) => 2010 + i);
 
 const RUSLE_COLORS = ["#1a9641","#a6d96a","#ffffbf","#fdae61","#d7191c","#7b0000"];
 
 const FACTOR_LAYERS = [
-  { key: "R", label: "R" },
-  { key: "K", label: "K" },
-  { key: "LS", label: "LS" },
-  { key: "C", label: "C" },
-  { key: "P", label: "P" },
-  { key: "A", label: "A Soil Loss" },
+  { key: "A", label: "A — Annual Soil Loss" },
+  { key: "R", label: "R — Rainfall Erosivity" },
+  { key: "K", label: "K — Soil Erodibility" },
+  { key: "LS", label: "LS — Topographic Factor" },
+  { key: "C", label: "C — Cover Management" },
+  { key: "P", label: "P — Support Practice" },
 ];
 
 export function RUSLEPage() {
-  const [district, setDistrict] = useState("Huye");
+  const [aoi, setAoi] = useState<AOIConfig>({ type: "gaul2", country: "Rwanda", name: "Musanze", level1: "North/Amajyaruguru", level2: "Musanze" });
   const [year, setYear] = useState(2023);
   const [nClasses, setNClasses] = useState(5);
   const [reverseR, setReverseR] = useState(false);
@@ -59,8 +64,8 @@ export function RUSLEPage() {
   const { mutate, data, isPending, error } = useMutation<RUSLEResult, Error>({
     mutationFn: () =>
       api.rusle({
-        district,
-        year,
+        aoi,
+                year,
         n_classes: nClasses,
         reverse_r: reverseR,
         reverse_k: reverseK,
@@ -70,10 +75,24 @@ export function RUSLEPage() {
       }),
   });
 
+
   const getActiveTileUrl = () => {
     if (!data) return "";
     if (activeLayer === "A") return data.tile_url;
-    return data.factor_maps[activeLayer]?.tile_url ?? data.tile_url;
+    return data.factor_maps[activeLayer]?.class_tile_url ?? data.factor_maps[activeLayer]?.tile_url ?? data.tile_url;
+  };
+
+  const getActiveThumbUrl = () => {
+    if (!data) return undefined;
+    if (activeLayer === "risk") return (data as any).risk_index?.thumb_url;
+    if (activeLayer === "A") return (data as any).factor_maps?.A?.thumb_url;
+    return (data as any).factor_maps?.[activeLayer]?.class_thumb_url ?? (data as any).factor_maps?.[activeLayer]?.thumb_url;
+  };
+
+  const getActiveDownloadUrl = () => {
+    if (!data) return undefined;
+    if (activeLayer === "risk") return (data as any).risk_index?.download_url;
+    return (data as any).factor_maps?.[activeLayer]?.download_url;
   };
 
   return (
@@ -89,19 +108,7 @@ export function RUSLEPage() {
           rainfall, soil erodibility, slope, cover and practice factors.
         </p>
 
-        <div className="space-y-1">
-          <Label>District</Label>
-          <Select value={district} onValueChange={setDistrict}>
-            <SelectTrigger className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {DISTRICTS.map((d) => (
-                <SelectItem key={d} value={d}>{d}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        <StudyAreaSelector value={aoi} onChange={setAoi} />
 
         <div className="space-y-1">
           <Label>Year</Label>
@@ -110,6 +117,7 @@ export function RUSLEPage() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="none">None</SelectItem>
               {YEARS.map((y) => (
                 <SelectItem key={y} value={String(y)}>{y}</SelectItem>
               ))}
@@ -128,10 +136,12 @@ export function RUSLEPage() {
           />
         </div>
 
-        <div className="space-y-2">
-          <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <div className="space-y-4 pt-2 border-t">
+          <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center justify-between">
             Reverse Factors
+            <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded font-normal text-muted-foreground">Optional</span>
           </Label>
+          <div className="space-y-3">
           {[
             { label: "Reverse R (Rainfall)", value: reverseR, set: setReverseR },
             { label: "Reverse K (Soil)", value: reverseK, set: setReverseK },
@@ -139,16 +149,14 @@ export function RUSLEPage() {
             { label: "Reverse C (Cover)", value: reverseC, set: setReverseC },
             { label: "Reverse P (Practice)", value: reverseP, set: setReverseP },
           ].map(({ label, value, set }) => (
-            <label key={label} className="flex items-center gap-2 text-sm cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={value}
-                onChange={(e) => set(e.target.checked)}
-                className="rounded border-input accent-primary w-4 h-4"
-              />
-              {label}
-            </label>
+            <div key={label} className="flex items-center justify-between group">
+              <Label className="text-xs font-normal cursor-pointer text-muted-foreground group-hover:text-foreground transition-colors" onClick={() => set(!value)}>
+                {label}
+              </Label>
+              <Switch checked={value} onCheckedChange={set} className="scale-75 origin-right" />
+            </div>
           ))}
+          </div>
         </div>
 
         <Button
@@ -182,7 +190,7 @@ export function RUSLEPage() {
         {isPending && (
           <div className="h-full flex flex-col items-center justify-center gap-3 text-muted-foreground">
             <Loader2 className="w-8 h-8 animate-spin text-primary" />
-            <p>Computing RUSLE for {district} ({year})…</p>
+            <p>Computing RUSLE for {aoi.name || 'Custom'} ({year})…</p>
             <p className="text-xs">GEE analysis typically takes 15–60 seconds.</p>
           </div>
         )}
@@ -194,6 +202,8 @@ export function RUSLEPage() {
               <TabsTrigger value="stats">Statistics</TabsTrigger>
               <TabsTrigger value="factors">Factor Maps</TabsTrigger>
               <TabsTrigger value="risk">Risk Index</TabsTrigger>
+              <TabsTrigger value="static-map">Static Maps</TabsTrigger>
+              <TabsTrigger value="report" className="gap-1.5"><FileText className="w-3.5 h-3.5" />Report</TabsTrigger>
             </TabsList>
 
             {/* Map */}
@@ -216,6 +226,36 @@ export function RUSLEPage() {
               <div className="h-[520px] rounded-lg overflow-hidden border">
                 <DistrictMap center={data.center} tileUrl={getActiveTileUrl()} />
               </div>
+            </TabsContent>
+
+            {/* Static Maps */}
+            <TabsContent value="static-map" className="flex-1 overflow-y-auto space-y-4">
+              <div className="flex flex-col gap-2">
+                <span className="text-sm font-medium">Select Map to Export:</span>
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {FACTOR_LAYERS.map(({ key, label }) => (
+                    <button
+                      key={key}
+                      onClick={() => setActiveLayer(key)}
+                      className={`px-3 py-1 rounded text-xs font-medium border transition-colors ${
+                        activeLayer === key
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-card border-input hover:bg-muted"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <MapExportControls
+                tileUrl={getActiveTileUrl()!}
+                thumbUrl={getActiveThumbUrl()}
+                downloadUrl={getActiveDownloadUrl()}
+                district={aoi.name || "Custom"}
+                title={FACTOR_LAYERS.find(l => l.key === activeLayer)?.label || "RUSLE Map"}
+                classAreas={activeLayer === "risk" ? data.risk_index.class_areas_km2 : activeLayer === "A" ? data.n_class_soil_loss_km2 : undefined}
+              />
             </TabsContent>
 
             {/* Statistics */}
@@ -371,6 +411,42 @@ export function RUSLEPage() {
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
+              </div>
+            </TabsContent>
+
+            {/* ── Report ── */}
+            <TabsContent value="report" className="space-y-6">
+              <div>
+                <h2 className="font-semibold text-lg mb-1">PDF Report — {data.district}</h2>
+                <p className="text-sm text-muted-foreground">
+                  Download a full PDF report including soil loss statistics, factor summaries, and risk maps.
+                </p>
+              </div>
+              <div className="bg-card border rounded-lg p-5 space-y-4">
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  <strong>Contents:</strong> District metadata · Soil loss statistics ·
+                  Factor means (R, K, LS, C, P) · Risk class area table · Maps · Methodology notes.
+                </p>
+                <ReportDownloadButton aoi={aoi}
+                  moduleName="RUSLE Soil Erosion"
+                  district={aoi.name || "Custom"}
+                  dateRange={`Year: ${data.year}`}
+                  stats={{
+                    ...data.stats,
+                    "Mean R": data.factor_means.R,
+                    "Mean K": data.factor_means.K,
+                    "Mean LS": data.factor_means.LS,
+                    "Mean C": data.factor_means.C,
+                    "Mean P": data.factor_means.P,
+                  }}
+                  classAreas={data.class_areas_km2}
+                  extraNotes={`Soil loss is estimated using the Revised Universal Soil Loss Equation (RUSLE). Analysis covers ${data.district} district for the year ${data.year}.`}
+                  maps={[
+                    ["Soil Loss Map", data.tile_url],
+                    ["Erosion Risk Index", data.risk_index.thumb_url]
+                  ]}
+                  filename={`RUSLE_${data.district}_${data.year}.pdf`}
+                />
               </div>
             </TabsContent>
           </Tabs>

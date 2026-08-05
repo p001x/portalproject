@@ -1,7 +1,9 @@
+import json
 """RUSLE soil erosion analysis — no Streamlit dependency."""
 import math
 import ee
 from cachetools import TTLCache
+import concurrent.futures
 from threading import Lock
 
 _cache: TTLCache = TTLCache(maxsize=64, ttl=3600)
@@ -61,21 +63,23 @@ def _class_palette(n: int) -> list:
 
 def _class_tile_url(cls_img, n_classes: int) -> str:
     vis = {"min": 1, "max": n_classes, "palette": _class_palette(n_classes)}
-    return cls_img.getMapId(vis)["tile_fetcher"].url_format
+    smoothed = cls_img.focal_mode(150, 'circle', 'meters')
+    return smoothed.getMapId(vis)["tile_fetcher"].url_format
 
 
 def _class_thumb_url(cls_img, n_classes: int, aoi) -> str:
     vis = {"min": 1, "max": n_classes, "palette": _class_palette(n_classes)}
-    return cls_img.getThumbURL({**vis, "region": aoi, "dimensions": 512, "format": "png"})
+    smoothed = cls_img.focal_mode(150, 'circle', 'meters')
+    return smoothed.getThumbURL({**vis, "region": aoi.bounds(), "dimensions": 512, "format": "png"})
 
 
 def _factor_urls(image, key: str, aoi) -> dict:
     vis = FACTOR_VIS[key]
     vp = {"min": vis["min"], "max": vis["max"], "palette": vis["palette"]}
+    smoothed = image.focal_mean(150, 'circle', 'meters')
     return {
-        "tile_url": image.getMapId(vp)["tile_fetcher"].url_format,
-        "thumb_url": image.getThumbURL({**vp, "region": aoi, "dimensions": 512, "format": "png"}),
-        "download_url": image.getDownloadURL({"name": f"RUSLE_{key}", "scale": 100, "region": aoi, "format": "GEO_TIFF", "filePerBand": False}),
+        "tile_url": smoothed.getMapId(vp)["tile_fetcher"].url_format,
+        "thumb_url": smoothed.getThumbURL({**vp, "region": aoi.bounds(), "dimensions": 512, "format": "png"}),
     }
 
 
@@ -90,37 +94,35 @@ def _classify_from_breakpoints(img, breakpoints: list, reverse: bool = False):
 
 
 def compute_rusle(
-    district_name: str, year: int, n_classes: int = 5,
+    aoi_config: dict, year: int, n_classes: int = 5,
     reverse_r: bool = False, reverse_k: bool = False, reverse_ls: bool = False,
     reverse_c: bool = False, reverse_p: bool = False,
 ) -> dict:
-    cache_key = (district_name, year, n_classes, reverse_r, reverse_k, reverse_ls, reverse_c, reverse_p)
+    cache_key = (json.dumps(aoi_config, sort_keys=True), year, n_classes, reverse_r, reverse_k, reverse_ls, reverse_c, reverse_p)
     with _lock:
         if cache_key in _cache:
             return _cache[cache_key]
 
-    rwanda = ee.FeatureCollection("FAO/GAUL/2015/level2").filter(
-        ee.Filter.And(ee.Filter.eq("ADM0_NAME", "Rwanda"), ee.Filter.eq("ADM2_NAME", district_name))
-    )
-    aoi = rwanda.geometry()
+    from gee.aoi_utils import get_aoi_geometry
+    aoi = get_aoi_geometry(aoi_config)
     start = f"{year}-01-01"
     end = f"{year}-12-31"
 
-    chirps_annual = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY").filterDate(start, end).filterBounds(aoi).sum().clip(aoi)
+    chirps_annual = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY").filterDate(start, end).filterBounds(aoi).sum()
     R = chirps_annual.multiply(0.35).add(38.5).rename("R")
 
-    clay = ee.Image("OpenLandMap/SOL/SOL_CLAY-WFRACTION_USDA-3A1A1A_M/v02").select("b0").clip(aoi)
-    sand = ee.Image("OpenLandMap/SOL/SOL_SAND-WFRACTION_USDA-3A1A1A_M/v02").select("b0").clip(aoi)
+    clay = ee.Image("projects/soilgrids-isric/clay_mean_0-5cm_250m").select(0).divide(10)
+    sand = ee.Image("projects/soilgrids-isric/sand_mean_0-5cm_250m").select(0).divide(10)
     silt = clay.add(sand).multiply(-1).add(100).max(1)
     f_csand = sand.multiply(clay.add(sand).divide(100)).multiply(-0.0256).exp().multiply(0.3).add(0.2)
     f_cl_si = silt.divide(clay.add(silt).max(1)).pow(0.3)
     K = f_csand.multiply(f_cl_si).multiply(0.763).multiply(0.1317).max(0.020).min(0.060).rename("K")
 
-    dem = ee.Image("USGS/SRTMGL1_003").select("elevation").clip(aoi)
+    dem = ee.Image("USGS/SRTMGL1_003").select("elevation")
     slope_deg = ee.Terrain.slope(dem)
     slope_rad = slope_deg.multiply(math.pi / 180)
     sin_theta = slope_rad.sin()
-    flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select("b1").clip(aoi).max(0)
+    flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select("b1").max(0)
     cell_area_m2 = 450.0 * 450.0
     As = flow_acc.add(0.5).multiply(cell_area_m2)
     L = As.divide(22.13).pow(0.4)
@@ -129,31 +131,42 @@ def compute_rusle(
     S = S_gentle.where(slope_deg.gte(5.14), S_steep).max(0.03)
     LS = L.multiply(S).min(300).rename("LS")
 
-    ndvi = (
-        ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED").filterDate(start, end).filterBounds(aoi)
-        .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 20))
+    s2_ndvi_col = (
+        ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+        .filterDate(start, end)
+        .filterBounds(aoi)
+        .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 30))
         .map(lambda img: img.normalizedDifference(["B8", "B4"]).rename("NDVI"))
-        .median().clip(aoi)
     )
+    l8_ndvi_col = (
+        ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
+        .filterDate(start, end)
+        .filterBounds(aoi)
+        .filter(ee.Filter.lt("CLOUD_COVER", 30))
+        .map(lambda img: img.normalizedDifference(["SR_B5", "SR_B4"]).rename("NDVI"))
+    )
+    l7_ndvi_col = (
+        ee.ImageCollection("LANDSAT/LE07/C02/T1_L2")
+        .filterDate(start, end)
+        .filterBounds(aoi)
+        .filter(ee.Filter.lt("CLOUD_COVER", 30))
+        .map(lambda img: img.normalizedDifference(["SR_B4", "SR_B3"]).rename("NDVI"))
+    )
+    ndvi = s2_ndvi_col.merge(l8_ndvi_col).merge(l7_ndvi_col).median()
     ndvi_safe = ndvi.max(0.001).min(0.990)
     C = ndvi_safe.multiply(-2).divide(ndvi_safe.multiply(-1).add(1)).exp().max(0.001).min(1.0).rename("C")
 
     P = (ee.Image(1.0).where(slope_deg.lt(5), 0.10).where(slope_deg.gte(5).And(slope_deg.lt(10)), 0.12)
          .where(slope_deg.gte(10).And(slope_deg.lt(15)), 0.14).where(slope_deg.gte(15).And(slope_deg.lt(20)), 0.19)
          .where(slope_deg.gte(20).And(slope_deg.lt(25)), 0.25).where(slope_deg.gte(25).And(slope_deg.lt(30)), 0.50)
-         .where(slope_deg.gte(30), 1.00).clip(aoi).rename("P"))
+         .where(slope_deg.gte(30), 1.00).rename("P"))
 
     A = R.multiply(K).multiply(LS).multiply(C).multiply(P).rename("A")
     A = A.where(A.lt(0), 0).clip(aoi)
 
-    stats_raw = A.reduceRegion(
-        reducer=ee.Reducer.mean().combine(ee.Reducer.min(), sharedInputs=True)
-        .combine(ee.Reducer.max(), sharedInputs=True).combine(ee.Reducer.stdDev(), sharedInputs=True),
-        geometry=aoi, scale=250, maxPixels=1e9, tileScale=4,
-    ).getInfo()
-
     factor_img = R.rename("R").addBands(K.rename("K")).addBands(LS.rename("LS")).addBands(C.rename("C")).addBands(P.rename("P"))
-    factor_raw = factor_img.reduceRegion(reducer=ee.Reducer.mean(), geometry=aoi, scale=250, maxPixels=1e9, tileScale=4).getInfo()
+
+    factor_images = {"R": R, "K": K, "LS": LS, "C": C, "P": P, "A": A}
 
     fixed_class_thresholds = [
         ("Very Low (<10 t/ha/yr)", A.lt(10)),
@@ -165,29 +178,56 @@ def compute_rusle(
     ]
     fixed_labels = [lbl for lbl, _ in fixed_class_thresholds]
     fixed_area_img = ee.Image.cat([mask.multiply(ee.Image.pixelArea()).rename(f"c{i}") for i, (_, mask) in enumerate(fixed_class_thresholds)])
-    fixed_area_dict = fixed_area_img.reduceRegion(reducer=ee.Reducer.sum(), geometry=aoi, scale=250, maxPixels=1e9, tileScale=4).getInfo()
-    class_areas = {lbl: round((fixed_area_dict.get(f"c{i}", 0) or 0) / 1e6, 2) for i, lbl in enumerate(fixed_labels)}
-
-    factor_images = {"R": R, "K": K, "LS": LS, "C": C, "P": P, "A": A}
-    factor_maps = {}
-    for key, img in factor_images.items():
-        vis_meta = FACTOR_VIS[key]
-        urls = _factor_urls(img, key, aoi)
-        factor_maps[key] = {**vis_meta, **urls}
 
     n_classes = max(2, min(n_classes, 10))
-    percentile_steps = [round(100 * j / n_classes) for j in range(1, n_classes)]
     all_factors_img = ee.Image.cat([R.rename("R"), K.rename("K"), LS.rename("LS"), C.rename("C"), P.rename("P"), A.rename("A")])
-    pct_dict = all_factors_img.reduceRegion(
-        reducer=ee.Reducer.percentile(percentile_steps), geometry=aoi, scale=250,
-        maxPixels=1e9, tileScale=4, bestEffort=True,
-    ).getInfo()
+
+    # OPTIMIZATION: Combine mean/min/max/stdDev into a single pass (removed percentile to avoid execution limit and ensure clear equal-interval classes)
+    combined_reducer = (
+        ee.Reducer.mean()
+        .combine(ee.Reducer.min(), sharedInputs=True)
+        .combine(ee.Reducer.max(), sharedInputs=True)
+        .combine(ee.Reducer.stdDev(), sharedInputs=True)
+    )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        f_combined = executor.submit(
+            lambda: all_factors_img.reduceRegion(
+                reducer=combined_reducer, geometry=aoi, scale=250, maxPixels=1e6, bestEffort=True, tileScale=4
+            ).getInfo()
+        )
+        f_bounds = executor.submit(
+            lambda: aoi.bounds().getInfo()["coordinates"][0]
+        )
+
+        combined_dict = f_combined.result()
+        bounds = f_bounds.result()
+
+    # Reconstruct the expected variable names from the combined dictionary
+    stats_raw = {
+        "A_mean": combined_dict.get("A_mean"),
+        "A_min": combined_dict.get("A_min"),
+        "A_max": combined_dict.get("A_max"),
+        "A_stdDev": combined_dict.get("A_stdDev"),
+    }
+    factor_raw = {
+        "R": combined_dict.get("R_mean"),
+        "K": combined_dict.get("K_mean"),
+        "LS": combined_dict.get("LS_mean"),
+        "C": combined_dict.get("C_mean"),
+        "P": combined_dict.get("P_mean"),
+    }
+    pct_dict = combined_dict
 
     def _thresholds(band_name):
-        return [pct_dict.get(f"{band_name}_p{p}", 0) or 0 for p in percentile_steps]
+        min_val = FACTOR_VIS[band_name]["min"]
+        max_val = FACTOR_VIS[band_name]["max"]
+        step = (max_val - min_val) / n_classes if n_classes > 0 else 0
+        return [min_val + step * j for j in range(1, n_classes)]
 
     reverse_map = {"R": reverse_r, "K": reverse_k, "LS": reverse_ls, "C": reverse_c, "P": reverse_p}
     class_images = {}
+    factor_maps = {k: dict(FACTOR_VIS[k]) for k in RECLASS_FACTOR_ORDER}
     for key in RECLASS_FACTOR_ORDER:
         bps = [ee.Number(v) for v in _thresholds(key)]
         cls_img = _classify_from_breakpoints(factor_images[key], bps, reverse_map[key]).clip(aoi)
@@ -198,6 +238,14 @@ def compute_rusle(
         factor_maps[key]["class_tile_url"] = _class_tile_url(cls_img, n_classes)
         factor_maps[key]["class_thumb_url"] = _class_thumb_url(cls_img, n_classes, aoi)
         factor_maps[key]["class_breakpoints"] = _thresholds(key)
+
+    smoothed_A = A.focal_mean(150, 'circle', 'meters')
+    A_map_id = smoothed_A.getMapId({"min": FACTOR_VIS["A"]["min"], "max": FACTOR_VIS["A"]["max"], "palette": FACTOR_VIS["A"]["palette"]})
+    factor_maps["A"] = {
+        **FACTOR_VIS["A"],
+        "tile_url": A_map_id["tile_fetcher"].url_format,
+        "thumb_url": smoothed_A.getThumbURL({**FACTOR_VIS["A"], "region": aoi.bounds(), "dimensions": 800, "format": "png"}),
+    }
 
     a_bps = [ee.Number(v) for v in _thresholds("A")]
     A_class = _classify_from_breakpoints(A, a_bps).clip(aoi)
@@ -223,14 +271,6 @@ def compute_rusle(
         risk_class_masks.append(mask)
 
     risk_area_img = ee.Image.cat([m.multiply(ee.Image.pixelArea()).rename(f"r{i}") for i, m in enumerate(risk_class_masks)])
-    risk_area_dict = risk_area_img.reduceRegion(reducer=ee.Reducer.sum(), geometry=aoi, scale=250, maxPixels=1e9, tileScale=4).getInfo()
-    risk_class_labels = [f"Risk Class {j + 1}" for j in range(n_classes)]
-    risk_class_areas = {lbl: round((risk_area_dict.get(f"r{i}", 0) or 0) / 1e6, 2) for i, lbl in enumerate(risk_class_labels)}
-    risk_stats_raw = risk_index.reduceRegion(
-        reducer=ee.Reducer.mean().combine(ee.Reducer.stdDev(), sharedInputs=True),
-        geometry=aoi, scale=250, maxPixels=1e9, tileScale=4,
-    ).getInfo()
-
     a_class_masks = []
     for j in range(n_classes):
         lo = _thresholds("A")[j - 1] if j > 0 else None
@@ -244,7 +284,30 @@ def compute_rusle(
         a_class_masks.append(mask)
 
     a_class_area_img = ee.Image.cat([m.multiply(ee.Image.pixelArea()).rename(f"a{i}") for i, m in enumerate(a_class_masks)])
-    a_class_area_dict = a_class_area_img.reduceRegion(reducer=ee.Reducer.sum(), geometry=aoi, scale=250, maxPixels=1e9, tileScale=4).getInfo()
+
+    # OPTIMIZATION: Combine area computations into a single pass
+    combined_area_img = ee.Image.cat([fixed_area_img, risk_area_img, a_class_area_img])
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        f_combined_area = executor.submit(
+            lambda: combined_area_img.reduceRegion(reducer=ee.Reducer.sum(), geometry=aoi, scale=250, maxPixels=1e6, bestEffort=True, tileScale=4).getInfo()
+        )
+        f_risk_stats = executor.submit(
+            lambda: risk_index.reduceRegion(
+                reducer=ee.Reducer.mean().combine(ee.Reducer.stdDev(), sharedInputs=True),
+                geometry=aoi, scale=250, maxPixels=1e6, bestEffort=True, tileScale=4,
+            ).getInfo()
+        )
+
+        combined_area_dict = f_combined_area.result()
+        risk_stats_raw = f_risk_stats.result()
+    
+    fixed_area_dict = combined_area_dict
+    risk_area_dict = combined_area_dict
+    a_class_area_dict = combined_area_dict
+
+    risk_class_labels = [f"Risk Class {j + 1}" for j in range(n_classes)]
+    risk_class_areas = {lbl: round((risk_area_dict.get(f"r{i}", 0) or 0) / 1e6, 2) for i, lbl in enumerate(risk_class_labels)}
+
     a_thresholds = _thresholds("A")
     a_class_labels = []
     for j in range(n_classes):
@@ -253,13 +316,30 @@ def compute_rusle(
         a_class_labels.append(f"Class 1 (<{hi})" if lo is None else (f"Class {j+1} (≥{lo})" if hi is None else f"Class {j+1} ({lo}–{hi})"))
     a_class_areas = {lbl: round((a_class_area_dict.get(f"a{i}", 0) or 0) / 1e6, 2) for i, lbl in enumerate(a_class_labels)}
 
-    bounds = aoi.bounds().getInfo()["coordinates"][0]
+    class_areas = {lbl: round((fixed_area_dict.get(f"c{i}", 0) or 0) / 1e6, 2) for i, lbl in enumerate(fixed_labels)}
+
     center = [(bounds[0][1] + bounds[2][1]) / 2, (bounds[0][0] + bounds[2][0]) / 2]
+
+    # OPTIMIZATION: Generate raw map download URLs asynchronously and at 250m scale to prevent timeouts
+    def get_dl_url(img):
+        return img.getDownloadURL({"region": aoi.bounds(), "scale": 250, "format": "GEO_TIFF", "crs": "EPSG:4326"})
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=7) as dl_executor:
+        f_dl_A = dl_executor.submit(lambda: get_dl_url(A))
+        f_dl_risk = dl_executor.submit(lambda: get_dl_url(risk_index))
+        dl_factors = {}
+        for key in RECLASS_FACTOR_ORDER:
+            dl_factors[key] = dl_executor.submit(lambda k=key: get_dl_url(factor_images[k]))
+
+        factor_maps["A"]["download_url"] = f_dl_A.result()
+        risk_download_url = f_dl_risk.result()
+        for key in RECLASS_FACTOR_ORDER:
+            factor_maps[key]["download_url"] = dl_factors[key].result()
 
     result = {
         "tile_url": factor_maps["A"]["tile_url"],
         "risk_index": {
-            "tile_url": risk_tile_url, "thumb_url": risk_thumb_url,
+            "tile_url": risk_tile_url, "thumb_url": risk_thumb_url, "download_url": risk_download_url,
             "mean": round(risk_stats_raw.get("RiskIndex_mean") or 0, 2),
             "std_dev": round(risk_stats_raw.get("RiskIndex_stdDev") or 0, 2),
             "class_areas_km2": risk_class_areas, "weight_pct_each": RECLASS_WEIGHT_PCT,
@@ -284,7 +364,8 @@ def compute_rusle(
         "reverse_flags": reverse_map,
         "n_classes": n_classes,
         "center": center,
-        "district": district_name,
+        "district": aoi_config.get("district", aoi_config.get("name", "Custom AOI")),
+        "bbox": bounds,
         "year": year,
     }
     with _lock:

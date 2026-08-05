@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useMutation } from "@tanstack/react-query";
 import {
   BarChart,
@@ -9,7 +9,7 @@ import {
   ResponsiveContainer,
   Cell,
 } from "recharts";
-import { Loader2, Play, Leaf } from "lucide-react";
+import { Loader2, Play, Leaf, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
@@ -21,8 +21,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { api, NDVIResult } from "@/lib/api";
+import { api, NDVIResult, AOIConfig } from "@/lib/api";
 import { DistrictMap } from "@/components/DistrictMap";
+import { ReportDownloadButton } from "@/components/ReportDownloadButton";
+import { MapExportControls } from "@/components/MapExportControls";
+import { StudyAreaSelector } from "@/components/StudyAreaSelector";
 
 const DISTRICTS = [
   "Bugesera","Burera","Gakenke","Gasabo","Gatsibo","Gicumbi","Gisagara",
@@ -30,6 +33,7 @@ const DISTRICTS = [
   "Musanze","Ngoma","Ngororero","Nyabihu","Nyagatare","Nyamagabe",
   "Nyamasheke","Nyanza","Nyarugenge","Nyaruguru","Rubavu","Ruhango",
   "Rulindo","Rusizi","Rutsiro","Rwamagana",
+  "Custom Study Area",
 ];
 
 const CLASS_COLORS = ["#d73027","#fc8d59","#fee08b","#91cf60","#1a9850"];
@@ -44,15 +48,17 @@ function sixMonthsAgo() {
 }
 
 export function NDVIPage() {
-  const [district, setDistrict] = useState("Gasabo");
+  const [aoi, setAoi] = useState<AOIConfig>({ type: "gaul2", country: "Rwanda", name: "Musanze", level1: "North/Amajyaruguru", level2: "Musanze" });
   const [startDate, setStartDate] = useState(sixMonthsAgo());
   const [endDate, setEndDate] = useState(today());
   const [nClasses, setNClasses] = useState(5);
 
   const { mutate, data, isPending, error } = useMutation<NDVIResult, Error>({
     mutationFn: () =>
-      api.ndvi({ district, start_date: startDate, end_date: endDate, n_classes: nClasses }),
+      api.ndvi({ aoi,
+        start_date: startDate, end_date: endDate, n_classes: nClasses }),
   });
+
 
   const palette = (n: number) => {
     const full = ["#1a9850","#66bd63","#a6d96a","#d9ef8b","#ffffbf",
@@ -75,19 +81,7 @@ export function NDVIPage() {
           Cloud-masked median composite over the selected period.
         </p>
 
-        <div className="space-y-1">
-          <Label>District</Label>
-          <Select value={district} onValueChange={setDistrict}>
-            <SelectTrigger className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {DISTRICTS.map((d) => (
-                <SelectItem key={d} value={d}>{d}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        <StudyAreaSelector value={aoi} onChange={setAoi} />
 
         <div className="space-y-1">
           <Label htmlFor="start-date">Start date</Label>
@@ -153,7 +147,7 @@ export function NDVIPage() {
         {isPending && (
           <div className="h-full flex flex-col items-center justify-center gap-3 text-muted-foreground">
             <Loader2 className="w-8 h-8 animate-spin text-primary" />
-            <p>Computing NDVI for {district}…</p>
+            <p>Computing NDVI for {aoi.name || 'Custom'}…</p>
             <p className="text-xs">GEE analysis typically takes 15–60 seconds.</p>
           </div>
         )}
@@ -164,6 +158,8 @@ export function NDVIPage() {
               <TabsTrigger value="map">Map</TabsTrigger>
               <TabsTrigger value="stats">Statistics</TabsTrigger>
               <TabsTrigger value="classify">Classification</TabsTrigger>
+              <TabsTrigger value="static-map">Static Maps</TabsTrigger>
+              <TabsTrigger value="report" className="gap-1.5"><FileText className="w-3.5 h-3.5" />Report</TabsTrigger>
             </TabsList>
 
             {/* Map */}
@@ -326,6 +322,49 @@ export function NDVIPage() {
                     </ResponsiveContainer>
                   </div>
                 ))}
+              </div>
+            </TabsContent>
+
+            {/* ── Report ── */}
+            {/* Static Maps */}
+            <TabsContent value="static-map" className="flex-1 overflow-y-auto space-y-4">
+              <div>
+                <h2 className="font-semibold text-lg mb-1">Professional Cartography</h2>
+                <p className="text-sm text-muted-foreground">High-quality static maps ready for presentation.</p>
+              </div>
+              <div className="bg-card border rounded-lg p-4">
+              <MapExportControls
+                tileUrl={data.tile_url}
+                thumbUrl={data.classify?.panels?.[0]?.thumb_url || (data as any).thumb_url}
+                downloadUrl={(data as any).download_url}
+                district={aoi.name || "Custom"}
+                title="NDVI Vegetation Health"
+                classAreas={data.class_areas_km2}
+              /></div>
+            </TabsContent>
+
+            <TabsContent value="report" className="space-y-6">
+              <div>
+                <h2 className="font-semibold text-lg mb-1">PDF Report — {data.district}</h2>
+                <p className="text-sm text-muted-foreground">
+                  Download a full PDF report including statistics, class areas, and classification maps.
+                </p>
+              </div>
+              <div className="bg-card border rounded-lg p-5 space-y-4">
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  <strong>Contents:</strong> District metadata · NDVI statistics (min, max, mean, std) ·
+                  Vegetation class area table · Quantile classification panels · Interpretation notes.
+                </p>
+                <ReportDownloadButton aoi={aoi}
+                  moduleName="NDVI Vegetation Health"
+                  district={aoi.name || "Custom"}
+                  dateRange={`${data.start_date} to ${data.end_date}`}
+                  stats={data.stats as Record<string, number>}
+                  classAreas={data.class_areas_km2}
+                  extraNotes={`NDVI values range from -1 to 1. Values above 0.4 indicate healthy dense vegetation. Analysis covers ${data.district} district from ${data.start_date} to ${data.end_date} using Sentinel-2 SR cloud-masked median composite at 10 m resolution.`}
+                  maps={data.classify?.panels?.map((p) => [p.title, p.thumb_url] as [string, string]) ?? []}
+                  filename={`NDVI_${data.district}_${data.start_date}.pdf`}
+                />
               </div>
             </TabsContent>
           </Tabs>

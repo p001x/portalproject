@@ -254,6 +254,14 @@ elif "landfill_result" in st.session_state:
             f"{reverse_note} "
             f"Highly suitable areas require ground validation and regulatory review before use."
         )
+
+        # Collect map thumbnails for the report
+        maps = []
+        if "tile_url" in result:
+            maps.append(("Suitability Map", result["tile_url"]))
+        for panel in result.get("classify", {}).get("panels", []):
+            maps.append((panel["title"], panel["thumb_url"]))
+
         pdf_bytes = build_report(
             module_name="Landfill Siting Suitability",
             district=result["district"],
@@ -261,6 +269,7 @@ elif "landfill_result" in st.session_state:
             stats=result["stats"],
             class_areas=result["class_areas_km2"],
             extra_notes=notes,
+            maps=maps,
         )
         st.download_button(
             label=":material/download: Download PDF Report",
