@@ -382,7 +382,6 @@ export function AccessibilityPage() {
                     district={mapData.district || aoi.name || "Custom"}
                     title={activeLayer === "continuous" ? "Travel Time Continuous Map" : "Accessibility Classes Map"}
                     classAreas={activeLayer === "classified" ? statsData?.class_areas_km2 : undefined}
-                    overridePalette={ACCESSIBILITY_COLORS}
                   />
                 </div>
               ) : (
