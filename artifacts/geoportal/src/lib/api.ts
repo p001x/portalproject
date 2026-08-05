@@ -4,7 +4,7 @@
  * so the same code works in production behind the reverse proxy.
  */
 
-export const BASE = "/api";
+export const BASE = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? "https://portalproject-los0.onrender.com/api" : "/api");
 
 // ── GEE Individual Auth Token Management ────────────────────────────────────
 const GEE_TOKEN_KEY = "gee_individual_token";
