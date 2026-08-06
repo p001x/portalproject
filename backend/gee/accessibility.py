@@ -141,22 +141,9 @@ def _build_accessibility_images(aoi_config: dict, amenities: list[str]):
     
     # 1. Fetch amenities
     points, raw_points = fetch_overpass_points(amenities, bbox)
-    
-    # Strictly obey study area by clipping points to the exact AOI polygon
-    if points:
-        fc = ee.FeatureCollection(points)
-        clipped_fc = fc.filterBounds(aoi)
-        clipped_info = clipped_fc.getInfo()
-        points = []
-        raw_points = []
-        for f in clipped_info.get("features", []):
-            coords = f["geometry"]["coordinates"]
-            props = f["properties"]
-            points.append(ee.Feature(ee.Geometry.Point(coords), props))
-            raw_points.append({"lon": coords[0], "lat": coords[1], "name": props.get("name", "Unknown"), "type": props.get("type", "unknown")})
 
     if not points:
-        raise ValueError(f"No {' or '.join(amenities)} found strictly inside this study area. Try selecting a different area or different amenities.")
+        raise ValueError(f"No {' or '.join(amenities)} found in or near this study area. Try selecting a different area or different amenities.")
         
     # Cap to avoid GEE payload limits
     max_points = 1500
