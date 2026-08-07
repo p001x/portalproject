@@ -55,7 +55,7 @@ def fetch_overpass_points(amenities: list[str], bbox: list[float]) -> tuple[list
           way["amenity"~"^{'$|^'.join(amenities)}$"]({overpass_bbox});
           relation["amenity"~"^{'$|^'.join(amenities)}$"]({overpass_bbox});
         );
-        out center;
+        out center tags;
         """
         
         endpoints = [
@@ -72,7 +72,7 @@ def fetch_overpass_points(amenities: list[str], bbox: list[float]) -> tuple[list
                 headers = {
                     "User-Agent": "RwandaGeoPortal/1.0 (contact@example.com)"
                 }
-                response = requests.post(url, data=query.encode('utf-8'), headers=headers, timeout=100)
+                response = requests.post(url, data={'data': query}, headers=headers, timeout=100)
                 response.raise_for_status()
                 data = response.json()
                 
