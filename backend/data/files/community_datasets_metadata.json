@@ -1,0 +1,23 @@
+[
+  {
+    "id": "a66a8e55-020d-4255-9f80-369ccd06ba6a",
+    "name": "LULC.tif",
+    "description": "Uploaded from Digitizer Map",
+    "file_type": "tiff",
+    "storage_key": "local://rare_data/community_files/a66a8e55-020d-4255-9f80-369ccd06ba6a_LULC.tif",
+    "original_filename": "LULC.tif",
+    "bbox": [
+      29.869162860030915,
+      -2.208508126007844,
+      30.457200045015554,
+      -1.6757173309965556
+    ],
+    "upload_date": "2026-07-23T20:31:07.287774+00:00",
+    "file_size_mb": 0.882,
+    "status": "ok",
+    "error_message": null,
+    "source": "community",
+    "contributor": null,
+    "source_url": null
+  }
+]
