@@ -1,0 +1,25 @@
+services:
+  # Backend FastAPI Service
+  - type: web
+    name: geoportal-api
+    env: docker
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: PORT
+        value: 8000
+      - key: GEE_PROJECT_ID
+        sync: false # You will need to add this in the Render Dashboard
+      - key: GEE_SERVICE_ACCOUNT_KEY
+        sync: false # You will need to add this in the Render Dashboard
+
+  # Frontend React App (Static Site)
+  - type: static
+    name: geoportal-ui
+    buildCommand: npm i -g pnpm && pnpm install && pnpm run build
+    staticPublishPath: ./artifacts/geoportal/dist/public
+    envVars:
+      - key: VITE_API_URL
+        fromService:
+          type: web
+          name: geoportal-api
+          envVarKey: RENDER_EXTERNAL_URL
