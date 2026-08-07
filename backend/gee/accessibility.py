@@ -104,10 +104,18 @@ def fetch_local_points(amenities: list[str], bbox: list[float]) -> tuple[list[ee
                     found_count += 1
                     
                     name = "Unnamed"
-                    for col in ["NAME", "Name", "name", "Nom", "nom", "NOM"]:
-                        if col in row and getattr(row, col) is not None:
-                            name = str(getattr(row, col))
-                            break
+                    possible_cols = [
+                        "NAME", "Name", "name", "Nom", "nom", "NOM", 
+                        "SCHOOL_NAM", "Facility_N", "Market_Nam", "Description",
+                        "school_nam", "School", "school", "facility"
+                    ]
+                    import pandas as pd
+                    for col in possible_cols:
+                        if col in row:
+                            val = row[col]
+                            if pd.notna(val) and str(val).strip() and str(val).strip().lower() != "nan":
+                                name = str(val).strip()
+                                break
                             
                     features.append(ee.Feature(ee.Geometry.Point([lon, lat])))
                     raw_points.append({"lon": lon, "lat": lat, "name": name, "type": am})
@@ -422,11 +430,26 @@ def compute_accessibility_export(aoi_config: dict, amenities: list[str]) -> dict
             return _cache_export[cache_key]
 
     aoi, travel_time, acc_class, factors = _build_accessibility_images(aoi_config, amenities)
+    
+    raw_points = factors.get("raw_points", [])
+    if raw_points:
+        points_fc = ee.FeatureCollection([ee.Feature(ee.Geometry.Point([p["lon"], p["lat"]])) for p in raw_points])
+        buffered = points_fc.map(lambda f: f.buffer(100))
+        points_mask = ee.Image(0).byte().paint(buffered, 1)
+        points_rgb = ee.Image([0, 0, 0]).byte().updateMask(points_mask)
+    else:
+        points_rgb = ee.Image(0).mask(0)
+
+    tt_rgb = travel_time.visualize(min=0, max=3600, palette=ACCESSIBILITY_VIS["palette"])
+    acc_rgb = acc_class.visualize(**ACCESSIBILITY_VIS)
+
+    tt_final = tt_rgb.blend(points_rgb)
+    acc_final = acc_rgb.blend(points_rgb)
 
     result = {
-        "travel_time_thumb_url": travel_time.getThumbURL({"min": 0, "max": 3600, "palette": ACCESSIBILITY_VIS["palette"], "region": aoi.bounds(), "dimensions": 800, "format": "png"}),
+        "travel_time_thumb_url": tt_final.getThumbURL({"region": aoi.bounds(), "dimensions": 800, "format": "png"}),
         "travel_time_download_url": travel_time.getDownloadURL({"region": aoi.bounds(), "scale": 100, "format": "GEO_TIFF", "crs": "EPSG:4326"}),
-        "acc_class_thumb_url": acc_class.getThumbURL({**ACCESSIBILITY_VIS, "region": aoi.bounds(), "dimensions": 800, "format": "png"}),
+        "acc_class_thumb_url": acc_final.getThumbURL({"region": aoi.bounds(), "dimensions": 800, "format": "png"}),
         "factor_maps": {},
     }
     with _lock:
