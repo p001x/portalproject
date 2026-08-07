@@ -15,32 +15,6 @@ from typing import Optional
 
 from fastapi import FastAPI, HTTPException, File, UploadFile, Form, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-import requests
-
-@app.get("/test-overpass")
-def test_overpass():
-    amenities = ["school"]
-    miny, minx, maxy, maxx = -1.97, 29.9, -1.93, 30.1 # Approximate Kigali
-    overpass_bbox = f"{miny:.6f},{minx:.6f},{maxy:.6f},{maxx:.6f}"
-
-    query = f"""
-    [out:json][timeout:90];
-    (
-      node["amenity"~"^{'$|^'.join(amenities)}$"]({overpass_bbox});
-      way["amenity"~"^{'$|^'.join(amenities)}$"]({overpass_bbox});
-      relation["amenity"~"^{'$|^'.join(amenities)}$"]({overpass_bbox});
-    );
-    out center;
-    """
-    headers = {"User-Agent": "RwandaGeoPortal/1.0"}
-    try:
-        response = requests.post("https://overpass-api.de/api/interpreter", data=query.encode('utf-8'), headers=headers)
-        response.raise_for_status()
-        data = response.json()
-        return {"count": len(data.get('elements', [])), "first": data.get('elements', [])[0] if data.get('elements') else None, "query": query}
-    except Exception as e:
-        return {"error": str(e), "text": getattr(e, 'response', None) and e.response.text}
-
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
