@@ -439,12 +439,19 @@ def compute_accessibility_export(aoi_config: dict, amenities: list[str]) -> dict
         points_rgb = ee.Image([0, 0, 0]).byte().updateMask(points_mask)
     else:
         points_rgb = ee.Image(0).mask(0)
+        
+    roads = factors.get("roads")
+    if roads:
+        roads_mask = ee.Image(0).byte().paint(roads, 1, 1)
+        roads_rgb = ee.Image([255, 0, 0]).byte().updateMask(roads_mask)
+    else:
+        roads_rgb = ee.Image(0).mask(0)
 
     tt_rgb = travel_time.visualize(min=0, max=3600, palette=ACCESSIBILITY_VIS["palette"])
     acc_rgb = acc_class.visualize(**ACCESSIBILITY_VIS)
 
-    tt_final = tt_rgb.blend(points_rgb)
-    acc_final = acc_rgb.blend(points_rgb)
+    tt_final = tt_rgb.blend(roads_rgb).blend(points_rgb)
+    acc_final = acc_rgb.blend(roads_rgb).blend(points_rgb)
 
     result = {
         "travel_time_thumb_url": tt_final.getThumbURL({"region": aoi.bounds(), "dimensions": 800, "format": "png"}),
