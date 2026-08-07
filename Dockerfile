@@ -17,6 +17,9 @@ RUN pip install --no-cache-dir .
 # Copy the backend code
 COPY backend /app/backend
 
+# Copy the sector shapefiles needed for Rwanda study areas
+COPY sectrstu /app/sectrstu
+
 # Set the working directory to backend so uvicorn finds main.py easily
 WORKDIR /app/backend
 
