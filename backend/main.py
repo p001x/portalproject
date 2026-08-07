@@ -30,6 +30,7 @@ from gee.lst import compute_lst
 from gee.rusle import compute_rusle
 from gee.slope import compute_slope
 from gee.landfill import compute_landfill_suitability
+from gee.habitat import compute_habitat_suitability, compute_ahp_data as compute_habitat_ahp
 from gee.air_pollution import compute_no2
 from gee.landslide import (
     compute_landslide_map,
@@ -316,18 +317,20 @@ class SlopeRequest(BaseModel):
 
 
 class LandfillRequest(BaseModel):
-    aoi: dict = Field(default_factory=dict, description="AOI Configuration object")
-    district: Optional[str] = Field(None, examples=["Nyagatare"])
-    n_classes: int = Field(5, ge=2, le=10)
+    aoi: dict
     reverse_river: bool = False
     reverse_residential: bool = False
     reverse_slope: bool = False
     reverse_road: bool = False
     reverse_lulc: bool = False
-    custom_weights: Optional[dict] = Field(
-        None,
-        description="Optional weight overrides e.g. {'river':0.4,'residential':0.2,'slope':0.2,'road':0.1,'lulc':0.1}. Values are normalized to sum to 1.",
-    )
+    n_classes: int = 5
+    custom_weights: Optional[dict] = None
+
+class HabitatRequest(BaseModel):
+    aoi: dict
+    reverse_flags: dict = {}
+    n_classes: int = 5
+    custom_weights: Optional[dict] = None
 
 
 class AirPollutionRequest(BaseModel):
@@ -671,8 +674,29 @@ def landfill_endpoint(req: LandfillRequest):
             custom_weights=req.custom_weights,
         )
     except Exception as exc:
-        logger.exception("Landfill failed for %s", req.district)
-        raise HTTPException(500, str(exc)) from exc
+        logger.exception("Landfill failed for %s", req.aoi.get("name", "unknown"))
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/habitat", tags=["analysis"])
+def habitat_endpoint(req: HabitatRequest):
+    _require_gee()
+    try:
+        return compute_habitat_suitability(
+            req.aoi, req.reverse_flags, req.n_classes, req.custom_weights
+        )
+    except Exception as exc:
+        logger.exception("Habitat suitability failed for %s", req.aoi.get("name", "unknown"))
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.post("/api/habitat/ahp", tags=["analysis"])
+def habitat_ahp_endpoint(req: HabitatRequest):
+    # Does not require GEE map creation
+    try:
+        return compute_habitat_ahp(req.custom_weights or {})
+    except Exception as exc:
+        logger.exception("Habitat AHP computation failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.post("/api/air-pollution", tags=["analysis"])

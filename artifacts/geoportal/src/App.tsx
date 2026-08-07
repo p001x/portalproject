@@ -14,6 +14,7 @@ import { UHIPage } from "@/pages/UHIPage";
 import { DroughtPage } from "@/pages/DroughtPage";
 import { FloodPage } from "@/pages/FloodPage";
 import { AccessibilityPage } from "@/pages/AccessibilityPage";
+import { HabitatSuitabilityPage } from "@/pages/HabitatSuitabilityPage";
 import { RareDataPage } from "@/pages/RareDataPage";
 import { SampleDigitizationPage } from "@/pages/SampleDigitizationPage";
 import { DashboardPage } from "@/pages/DashboardPage";
@@ -57,6 +58,7 @@ const analysisModules = [
   { path: "/drought", label: "Drought", icon: Droplet, description: "Agri Drought" },
   { path: "/uhi", label: "UHI", icon: Flame, description: "Urban Heat Island" },
   { path: "/accessibility", label: "Accessibility", icon: Navigation, description: "Facility Access" },
+  { path: "/habitat", label: "Crane Habitat", icon: Leaf, description: "Suitability (AHP)" },
 ];
 
 const rareDataModules = [
@@ -202,6 +204,7 @@ function Router() {
         <Route path="/drought" component={DroughtPage} />
         <Route path="/uhi" component={UHIPage} />
         <Route path="/accessibility" component={AccessibilityPage} />
+        <Route path="/habitat" component={HabitatSuitabilityPage} />
         <Route path="/rare-data" component={RareDataPage} />
         <Route path="/samples" component={SampleDigitizationPage} />
         <Route path="/dashboard" component={DashboardPage} />

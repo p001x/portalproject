@@ -156,6 +156,30 @@ export interface AhpData {
   n: number;
 }
 
+export const fetchLandfillAhp = async (
+  customWeights: Record<string, number> | null
+): Promise<AhpData> => {
+  const { data } = await api.post("/landfill/ahp", { custom_weights: customWeights || {} });
+  return data;
+};
+
+export const fetchHabitatSuitability = async (payload: {
+  aoi: AOIConfig;
+  reverse_flags?: Record<string, boolean>;
+  n_classes?: number;
+  custom_weights?: Record<string, number> | null;
+}): Promise<HabitatResult> => {
+  const { data } = await api.post("/habitat", payload);
+  return data;
+};
+
+export const fetchHabitatAhp = async (
+  customWeights: Record<string, number> | null
+): Promise<AhpData> => {
+  const { data } = await api.post("/habitat/ahp", { custom_weights: customWeights || {} });
+  return data;
+};
+
 export interface LandfillFactorMap {
   label: string;
   weight_pct: number;
@@ -181,6 +205,27 @@ export interface LandfillResult {
   bbox?: number[];
   aoi: AOIConfig;
   district?: string;
+}
+
+export interface HabitatFactorMap {
+  label: string;
+  weight_pct: number;
+  reversed: boolean;
+  description: string;
+  tile_url: string;
+  thumb_url: string;
+  download_url: string;
+}
+
+export interface HabitatResult {
+  tile_url: string;
+  thumb_url: string;
+  download_url?: string;
+  class_areas_km2: Record<string, number>;
+  classify: { panels: ClassifyPanel[]; n_classes: number; percentile_steps: number[] };
+  factors: Record<string, HabitatFactorMap>;
+  map_id: string;
+  token: string;
 }
 
 export interface AirPollutionResult {
