@@ -20,6 +20,9 @@ COPY backend /app/backend
 # Copy the sector shapefiles needed for Rwanda study areas
 COPY sectrstu /app/sectrstu
 
+# Copy the local vector datasets needed for Accessibility
+COPY "dataset vector" "/app/dataset vector"
+
 # Set the working directory to backend so uvicorn finds main.py easily
 WORKDIR /app/backend
 

@@ -1,0 +1,213 @@
+<metadata>
+	<idinfo>
+		<citation>
+			<citeinfo>
+				<origin>MINITRACO-CGIS/NUR, MINECOFIN/SNR, CGIS-NUR</origin>
+				<pubdate>2001, 2004, 2006</pubdate>
+				<title Sync="TRUE">Province_2006_rw92</title>
+				<geoform Sync="TRUE">vector digital data</geoform>
+				<onlink>\\CGISITC01\C$\_CGIS\_Data\Shapefiles\Administrative\Administrative_jan_06\Region_06_rw92.shp</onlink>
+				<ftname Sync="TRUE">Province_2006_rw92</ftname></citeinfo>
+		</citation>
+		<descript>
+			<abstract>The national and administrative boundaries have been provided by the MINITRACO-CGIS/NUR, MINECOFIN/SNR and updated by the CGIS-NUR</abstract>
+			<purpose>The boundaries have been developped for oriention, cartographic and analysis purposes</purpose>
+			<langdata Sync="TRUE">en</langdata></descript>
+		<timeperd>
+			<timeinfo>
+				<mdattim>
+					<sngdate>
+						<caldate>2006</caldate>
+					</sngdate>
+				</mdattim>
+			</timeinfo>
+			<current>publication date</current>
+		</timeperd>
+		<status>
+			<progress>Complete</progress>
+			<update>As needed</update>
+		</status>
+		<spdom>
+			<bounding>
+				<westbc Sync="TRUE">28.860728</westbc>
+				<eastbc Sync="TRUE">30.899451</eastbc>
+				<northbc Sync="TRUE">-1.044344</northbc>
+				<southbc Sync="TRUE">-2.838029</southbc>
+			</bounding>
+			<lboundng><leftbc Sync="TRUE">373333.327800</leftbc><rightbc Sync="TRUE">600000.309195</rightbc><bottombc Sync="TRUE">9686244.770680</bottombc><topbc Sync="TRUE">9884521.562548</topbc></lboundng></spdom>
+		<keywords>
+			<theme>
+				<themekt>boundaries, administrative, limits, polygon</themekt>
+				<themekey>orientation, boundaries, administrative, limits, polygon, province</themekey>
+			</theme>
+			<place>
+				<placekey>Rwanda</placekey>
+			</place>
+			<temporal>
+				<tempkey>2006</tempkey>
+			</temporal>
+		</keywords>
+		<accconst>The data remains full property of the owners. It can be accessed, reproduced and distributed when asked.</accconst>
+		<useconst>the owner information must be explicitly acknowledged and displayed in the copyright information.The Authors do not assume any responsibilities for improper use of the data.</useconst>
+		<ptcontac>
+			<cntinfo>
+				<cntperp>
+					<cntper>GIS Team</cntper>
+					<cntorg>CGIS-NUR</cntorg>
+				</cntperp>
+				<cntemail>info@cgisnur.org</cntemail>
+				<hours>8:00-17:00</hours>
+			</cntinfo>
+		</ptcontac>
+		<native Sync="TRUE">Microsoft Windows XP Version 5.1 (Build 2600) Service Pack 2; ESRI ArcCatalog 9.1.0.722</native>
+		<crossref>
+			<citeinfo>
+				<origin>MINITRACO-CGIS-NUR, MINECOFIN/SNR, CGIS-NUR</origin>
+				<pubdate>2006</pubdate>
+				<title>District_2001_rw92</title>
+			</citeinfo>
+		</crossref>
+		<natvform Sync="TRUE">Shapefile</natvform></idinfo>
+	<dataqual>
+		<lineage>
+			<procstep>
+				<procdate>2006</procdate>
+				<proccont>
+					<cntinfo>
+						<cntperp>
+							<cntper>GIS Team</cntper>
+							<cntorg>CGIS-NUR</cntorg>
+						</cntperp>
+					</cntinfo>
+				</proccont>
+			</procstep>
+			<procstep>
+				<procdesc>Metadata imported.</procdesc>
+				<srcused>C:\DOCUME~1\ADMINI~1.CGI\LOCALS~1\Temp\xmlD.tmp</srcused>
+			</procstep>
+			<procstep>
+				<procdesc>Metadata imported.</procdesc>
+				<srcused>C:\DOCUME~1\ADMINI~1.CGI\LOCALS~1\Temp\xml82.tmp</srcused>
+			</procstep>
+			<procstep>
+				<procdesc>Metadata imported.</procdesc>
+				<srcused>C:\DOCUME~1\ADMINI~1.CGI\LOCALS~1\Temp\xml1D.tmp</srcused>
+			</procstep>
+			<procstep>
+				<procdesc>Metadata imported.</procdesc>
+				<srcused>C:\DOCUME~1\ADMINI~1.CGI\LOCALS~1\Temp\xml1F.tmp</srcused>
+			</procstep>
+			<procstep>
+				<procdesc>Metadata imported.</procdesc>
+				<srcused>C:\DOCUME~1\ADMINI~1.CGI\LOCALS~1\Temp\xml22.tmp</srcused>
+			</procstep>
+			<procstep><procdesc Sync="TRUE">Metadata imported.</procdesc><srcused Sync="TRUE">C:\DOCUME~1\ADMINI~1.CGI\LOCALS~1\Temp\xml2F.tmp</srcused><date Sync="TRUE">20060208</date><time Sync="TRUE">16550900</time></procstep><procstep><procdesc Sync="TRUE">Dataset moved.</procdesc><srcused Sync="TRUE">D:\arcinfo\rwanda\Admin_boundary\Province_2006_rw92</srcused><date Sync="TRUE">20060928</date><time Sync="TRUE">09121700</time></procstep></lineage>
+	</dataqual>
+	<spdoinfo>
+		<direct Sync="TRUE">Vector</direct>
+		<ptvctinf><esriterm Name="province"><efeatyp Sync="TRUE">Simple</efeatyp><efeageom code="4" Sync="TRUE"></efeageom><esritopo Sync="TRUE">FALSE</esritopo><efeacnt Sync="TRUE">0</efeacnt><spindex Sync="TRUE">FALSE</spindex><linrefer Sync="TRUE">FALSE</linrefer></esriterm></ptvctinf></spdoinfo>
+	<spref>
+		<horizsys>
+			<planar>
+				<planci>
+					<plance Sync="TRUE">coordinate pair</plance>
+					<coordrep>
+						<absres Sync="TRUE">0.000512</absres>
+						<ordres Sync="TRUE">0.000512</ordres>
+					</coordrep>
+					<plandu Sync="TRUE">meters</plandu>
+				</planci>
+			</planar>
+			<geodetic>
+				<horizdn Sync="TRUE">D_Arc_1960</horizdn>
+				<ellips Sync="TRUE">Clarke_1880_RGS</ellips>
+				<semiaxis Sync="TRUE">6378249.145000</semiaxis>
+				<denflat Sync="TRUE">293.465000</denflat>
+			</geodetic>
+			<cordsysn><geogcsn Sync="TRUE">GCS_Arc_1960</geogcsn><projcsn Sync="TRUE">Transverse Mercator</projcsn></cordsysn></horizsys>
+	</spref>
+	<eainfo>
+		<detailed Name="province">
+			<attr>
+				<attrlabl>PERIMETER</attrlabl>
+				<attalias Sync="TRUE">PERIMETER</attalias><attrtype Sync="TRUE">Double</attrtype><attwidth Sync="TRUE">19</attwidth><atprecis Sync="TRUE">0</atprecis><attscale Sync="TRUE">0</attscale></attr>
+			<attr><attrlabl Sync="TRUE">FID</attrlabl><attalias Sync="TRUE">FID</attalias><attrtype Sync="TRUE">OID</attrtype><attwidth Sync="TRUE">4</attwidth><atprecis Sync="TRUE">0</atprecis><attscale Sync="TRUE">0</attscale><attrdef Sync="TRUE">Internal feature number.</attrdef><attrdefs Sync="TRUE">Esri</attrdefs><attrdomv><udom Sync="TRUE">Sequential unique whole numbers that are automatically generated.</udom></attrdomv></attr><attr>
+				<attrlabl>POP_02</attrlabl>
+				<attalias Sync="TRUE">POP_02</attalias><attrtype Sync="TRUE">Double</attrtype><attwidth Sync="TRUE">19</attwidth><atprecis Sync="TRUE">0</atprecis><attscale Sync="TRUE">0</attscale></attr>
+			<attr><attrlabl Sync="TRUE">REGION</attrlabl><attalias Sync="TRUE">REGION</attalias><attrtype Sync="TRUE">String</attrtype><attwidth Sync="TRUE">254</attwidth><atprecis Sync="TRUE">0</atprecis><attscale Sync="TRUE">0</attscale></attr><attr>
+				<attrlabl>Shape</attrlabl>
+				<attrdef>Feature geometry.</attrdef>
+				<attrdefs>ESRI</attrdefs>
+				<attrdomv>
+					<udom>Coordinates defining the features.</udom>
+				</attrdomv>
+				<attrtype Sync="TRUE">Geometry</attrtype><attwidth Sync="TRUE">0</attwidth><attalias Sync="TRUE">Shape</attalias><atprecis Sync="TRUE">0</atprecis><attscale Sync="TRUE">0</attscale></attr>
+			<enttyp>
+				<enttypl Sync="TRUE">province</enttypl>
+				<enttypt Sync="TRUE">Feature Class</enttypt><enttypc Sync="TRUE">0</enttypc></enttyp>
+			<attr><attrlabl Sync="TRUE">INTARA</attrlabl><attalias Sync="TRUE">INTARA</attalias><attrtype Sync="TRUE">String</attrtype><attwidth Sync="TRUE">30</attwidth><atprecis Sync="TRUE">0</atprecis><attscale Sync="TRUE">0</attscale></attr><attr><attrlabl Sync="TRUE">PROVINCE</attrlabl><attalias Sync="TRUE">PROVINCE</attalias><attrtype Sync="TRUE">String</attrtype><attwidth Sync="TRUE">30</attwidth><atprecis Sync="TRUE">0</atprecis><attscale Sync="TRUE">0</attscale></attr><attr><attrlabl Sync="TRUE">PROV_ID</attrlabl><attalias Sync="TRUE">PROV_ID</attalias><attrtype Sync="TRUE">Double</attrtype><attwidth Sync="TRUE">19</attwidth><atprecis Sync="TRUE">0</atprecis><attscale Sync="TRUE">0</attscale></attr><attr><attrlabl Sync="TRUE">AREA</attrlabl><attalias Sync="TRUE">AREA</attalias><attrtype Sync="TRUE">Double</attrtype><attwidth Sync="TRUE">19</attwidth><atprecis Sync="TRUE">0</atprecis><attscale Sync="TRUE">0</attscale></attr><attr><attrlabl Sync="TRUE">AREA_SKM</attrlabl><attalias Sync="TRUE">AREA_SKM</attalias><attrtype Sync="TRUE">Double</attrtype><attwidth Sync="TRUE">19</attwidth><atprecis Sync="TRUE">0</atprecis><attscale Sync="TRUE">0</attscale></attr><attr><attrlabl Sync="TRUE">Shape_Leng</attrlabl><attalias Sync="TRUE">Shape_Leng</attalias><attrtype Sync="TRUE">Double</attrtype><attwidth Sync="TRUE">19</attwidth><atprecis Sync="TRUE">0</atprecis><attscale Sync="TRUE">0</attscale></attr><attr><attrlabl Sync="TRUE">Shape_Area</attrlabl><attalias Sync="TRUE">Shape_Area</attalias><attrtype Sync="TRUE">Double</attrtype><attwidth Sync="TRUE">19</attwidth><atprecis Sync="TRUE">0</atprecis><attscale Sync="TRUE">0</attscale><attrdef Sync="TRUE">Area of feature in internal units squared.</attrdef><attrdefs Sync="TRUE">Esri</attrdefs><attrdomv><udom Sync="TRUE">Positive real numbers that are automatically generated.</udom></attrdomv></attr></detailed>
+	</eainfo>
+	<distinfo>
+		<resdesc>Downloadable Data</resdesc>
+		<stdorder>
+			<digform>
+				<digtinfo>
+					<transize>0.479</transize>
+					<dssize Sync="TRUE">0.479</dssize></digtinfo>
+			</digform>
+		</stdorder>
+	</distinfo>
+	<metainfo>
+		<metd Sync="TRUE">20060210</metd>
+		<metc>
+			<cntinfo>
+				<cntorgp>
+					<cntorg>CGIS-NUR</cntorg>
+					<cntper>GIS Team</cntper>
+				</cntorgp>
+				<cntaddr>
+					<addrtype>mailing and physical address</addrtype>
+					<city>Butare</city>
+					<state>Butare</state>
+					<postal>PO. BOX 212</postal>
+					<country>Rwanda</country>
+				</cntaddr>
+				<cntvoice>+250 530 210</cntvoice>
+				<cntfax>+250 530 870</cntfax>
+				<cntemail>info@cgisnur.org</cntemail>
+				<hours>8:00 - 17:00</hours>
+			</cntinfo>
+		</metc>
+		<metstdn Sync="TRUE">FGDC Content Standards for Digital Geospatial Metadata</metstdn>
+		<metstdv Sync="TRUE">FGDC-STD-001-1998</metstdv>
+		<mettc Sync="TRUE">local time</mettc>
+		<metsi>
+			<metscs>Public Domain</metscs>
+			<metsc>Unclassified</metsc>
+		</metsi>
+		<metextns>
+			<onlink>http://www.esri.com/metadata/esriprof80.html</onlink>
+			<metprof>ESRI Metadata Profile</metprof>
+		</metextns>
+		<metextns>
+			<onlink>http://www.esri.com/metadata/esriprof80.html</onlink>
+			<metprof>ESRI Metadata Profile</metprof>
+		</metextns>
+		<metextns>
+			<onlink>http://www.esri.com/metadata/esriprof80.html</onlink>
+			<metprof>ESRI Metadata Profile</metprof>
+		</metextns>
+		<metextns>
+			<onlink>http://www.esri.com/metadata/esriprof80.html</onlink>
+			<metprof>ESRI Metadata Profile</metprof>
+		</metextns>
+		<metextns>
+			<onlink>http://www.esri.com/metadata/esriprof80.html</onlink>
+			<metprof>ESRI Metadata Profile</metprof>
+		</metextns>
+		<metextns>
+			<onlink>http://www.esri.com/metadata/esriprof80.html</onlink>
+			<metprof>ESRI Metadata Profile</metprof>
+		</metextns>
+		<langmeta Sync="TRUE">en</langmeta></metainfo>
+	<Esri><MetaID>{65D85561-FB11-4AC9-A2F4-BDCA964C6640}</MetaID><CreaDate>20060208</CreaDate><CreaTime>16550900</CreaTime><SyncOnce>FALSE</SyncOnce><SyncDate>20260624</SyncDate><SyncTime>15230900</SyncTime><ModDate>20260624</ModDate><ModTime>15230900</ModTime><DataProperties><itemProps><itemName Sync="TRUE">province</itemName><imsContentType Sync="TRUE">002</imsContentType><itemLocation><linkage Sync="TRUE">file://\\DESKTOP-UBC3SGT\C$\Users\user\Documents\projectlear\dataset vector\province.shp</linkage><protocol Sync="TRUE">Local Area Network</protocol></itemLocation><itemSize Sync="TRUE">0.000</itemSize></itemProps><coordRef><type Sync="TRUE">Projected</type><geogcsn Sync="TRUE">GCS_Arc_1960</geogcsn><csUnits Sync="TRUE">Linear Unit: Meters (1.000000)</csUnits><projcsn Sync="TRUE">Arc_1960_Transverse_Mercator</projcsn><peXml Sync="TRUE">&lt;ProjectedCoordinateSystem xsi:type='typens:ProjectedCoordinateSystem' xmlns:xsi='http://www.w3.org/2001/XMLSchema-instance' xmlns:xs='http://www.w3.org/2001/XMLSchema' xmlns:typens='http://www.esri.com/schemas/ArcGIS/3.6.0'&gt;&lt;WKT&gt;PROJCS[&amp;quot;Arc_1960_Transverse_Mercator&amp;quot;,GEOGCS[&amp;quot;GCS_Arc_1960&amp;quot;,DATUM[&amp;quot;D_Arc_1960&amp;quot;,SPHEROID[&amp;quot;Clarke_1880_RGS&amp;quot;,6378249.145,293.465]],PRIMEM[&amp;quot;Greenwich&amp;quot;,0.0],UNIT[&amp;quot;Degree&amp;quot;,0.0174532925199433]],PROJECTION[&amp;quot;Transverse_Mercator&amp;quot;],PARAMETER[&amp;quot;false_easting&amp;quot;,500000.0],PARAMETER[&amp;quot;false_northing&amp;quot;,10000000.0],PARAMETER[&amp;quot;central_meridian&amp;quot;,30.0],PARAMETER[&amp;quot;scale_factor&amp;quot;,0.9999],PARAMETER[&amp;quot;latitude_of_origin&amp;quot;,0.0],UNIT[&amp;quot;Meters&amp;quot;,1.0]]&lt;/WKT&gt;&lt;XOrigin&gt;-5122800&lt;/XOrigin&gt;&lt;YOrigin&gt;-1000&lt;/YOrigin&gt;&lt;XYScale&gt;450314931.24392509&lt;/XYScale&gt;&lt;ZOrigin&gt;-100000&lt;/ZOrigin&gt;&lt;ZScale&gt;10000&lt;/ZScale&gt;&lt;MOrigin&gt;-100000&lt;/MOrigin&gt;&lt;MScale&gt;10000&lt;/MScale&gt;&lt;XYTolerance&gt;0.001&lt;/XYTolerance&gt;&lt;ZTolerance&gt;0.001&lt;/ZTolerance&gt;&lt;MTolerance&gt;0.001&lt;/MTolerance&gt;&lt;HighPrecision&gt;true&lt;/HighPrecision&gt;&lt;/ProjectedCoordinateSystem&gt;</peXml></coordRef><lineage><Process ToolSource="c:\program files\arcgis\pro\Resources\ArcToolbox\toolboxes\Conversion Tools.tbx\ExportFeatures" Date="20260624" Time="152309">ExportFeatures Province "C:\Users\user\Documents\projectlear\dataset vector\province.shp" # NOT_USE_ALIAS "REGION "REGION" true true false 254 Text 0 0,First,#,Province,REGION,0,253;INTARA "INTARA" true true false 30 Text 0 0,First,#,Province,INTARA,0,29;PROVINCE "PROVINCE" true true false 30 Text 0 0,First,#,Province,PROVINCE,0,29;PROV_ID "PROV_ID" true true false 8 Double 0 0,First,#,Province,PROV_ID,-1,-1;POP_02 "POP_02" true true false 8 Double 0 0,First,#,Province,POP_02,-1,-1;AREA "AREA" true true false 8 Double 0 0,First,#,Province,AREA,-1,-1;PERIMETER "PERIMETER" true true false 8 Double 0 0,First,#,Province,PERIMETER,-1,-1;AREA_SKM "AREA_SKM" true true false 8 Double 0 0,First,#,Province,AREA_SKM,-1,-1;Shape_Length "Shape_Length" false true true 8 Double 0 0,First,#,Province,Shape_Length,-1,-1;Shape_Area "Shape_Area" false true true 8 Double 0 0,First,#,Province,Shape_Area,-1,-1" #</Process></lineage></DataProperties></Esri><dataIdInfo><envirDesc Sync="TRUE">Microsoft Windows 10 Version 10.0 (Build 26200) ; Esri ArcGIS 13.6.0.59527</envirDesc><dataLang><languageCode Sync="TRUE" value="eng"></languageCode><countryCode value="USA" Sync="TRUE"></countryCode></dataLang><idCitation><resTitle Sync="TRUE">province</resTitle><presForm><PresFormCd Sync="TRUE" value="005"></PresFormCd></presForm></idCitation><spatRpType><SpatRepTypCd Sync="TRUE" value="001"></SpatRepTypCd></spatRpType><dataExt><geoEle><GeoBndBox esriExtentType="native"><westBL Sync="TRUE">373333.3278</westBL><eastBL Sync="TRUE">600000.309195</eastBL><northBL Sync="TRUE">9884521.562548</northBL><southBL Sync="TRUE">9686244.77068</southBL><exTypeCode Sync="TRUE">1</exTypeCode></GeoBndBox></geoEle></dataExt><geoBox esriExtentType="decdegrees"><westBL Sync="TRUE">28.860728</westBL><eastBL Sync="TRUE">30.899451</eastBL><northBL Sync="TRUE">-1.044344</northBL><southBL Sync="TRUE">-2.838029</southBL><exTypeCode Sync="TRUE">1</exTypeCode></geoBox></dataIdInfo><mdLang><languageCode Sync="TRUE" value="eng"></languageCode><countryCode value="USA" Sync="TRUE"></countryCode></mdLang><mdStanName Sync="TRUE">ISO 19115 Geographic Information - Metadata</mdStanName><mdStanVer Sync="TRUE">DIS_ESRI1.0</mdStanVer><mdChar><CharSetCd Sync="TRUE" value="004"></CharSetCd></mdChar><mdHrLv><ScopeCd Sync="TRUE" value="005"></ScopeCd></mdHrLv><mdHrLvName Sync="TRUE">dataset</mdHrLvName><distInfo><distributor><distorTran><onLineSrc><orDesc Sync="TRUE">002</orDesc><linkage Sync="TRUE">file://\\KAPPELER\D\arcinfo\rwanda\Admin_boundary\2006\Province_2006_rw92</linkage><protocol Sync="TRUE">Local Area Network</protocol></onLineSrc><transSize Sync="TRUE">0.479</transSize></distorTran><distorFormat><formatName Sync="TRUE">Shapefile</formatName></distorFormat></distributor><distFormat><formatName Sync="TRUE">Shapefile</formatName></distFormat><distTranOps><transSize Sync="TRUE">0.000</transSize></distTranOps></distInfo><refSysInfo><RefSystem><refSysID><identCode Sync="TRUE" code="0">Transverse Mercator</identCode></refSysID></RefSystem></refSysInfo><spatRepInfo><VectSpatRep><geometObjs Name="province"><geoObjTyp><GeoObjTypCd value="002" Sync="TRUE"></GeoObjTypCd></geoObjTyp><geoObjCnt Sync="TRUE">0</geoObjCnt></geometObjs><topLvl><TopoLevCd value="001" Sync="TRUE"></TopoLevCd></topLvl></VectSpatRep></spatRepInfo><mdDateSt Sync="TRUE">20260624</mdDateSt></metadata>

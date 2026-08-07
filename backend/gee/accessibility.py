@@ -32,8 +32,11 @@ def haversine(lon1, lat1, lon2, lat2):
     return R * c
 
 
-def fetch_overpass_points(amenities: list[str], bbox: list[float]) -> tuple[list[ee.Feature], list[dict]]:
-    """Fetch OpenStreetMap POIs within a bounding box via Overpass API."""
+import os
+import geopandas as gpd
+
+def fetch_local_points(amenities: list[str], bbox: list[float]) -> tuple[list[ee.Feature], list[dict]]:
+    """Fetch POIs within a bounding box from local shapefiles."""
     if not amenities:
         return [], []
         
@@ -46,89 +49,63 @@ def fetch_overpass_points(amenities: list[str], bbox: list[float]) -> tuple[list
                 raise cached_result
             return cached_result
             
-        overpass_bbox = f"{miny:.6f},{minx:.6f},{maxy:.6f},{maxx:.6f}"
-    
-        query = f"[out:json][timeout:90][bbox:{overpass_bbox}];\n(\n"
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        dataset_dir = os.path.join(base_dir, "dataset vector")
+        
+        amenity_to_shp = {
+            "primary_school": "Schools_primary.shp",
+            "secondary_school": "Schools_secondary.shp",
+            "superior_school": "Schools_superior.shp",
+            "marketplace": "Markets.shp"
+        }
+        
+        features = []
+        raw_points = []
+        
         for am in amenities:
-            query += f'  nwr["amenity"="{am}"];\n'
-        query += ");\nout center tags;\n"
-        
-        endpoints = [
-            "https://overpass-api.de/api/interpreter",
-            "https://lz4.overpass-api.de/api/interpreter",
-            "https://z.overpass-api.de/api/interpreter",
-            "https://overpass.kumi.systems/api/interpreter",
-            "https://overpass.openstreetmap.fr/api/interpreter",
-        ]
-        
-        # Force IPv4 because Render/Docker IPv6 stacks often throw "Network is unreachable"
-        import socket
-        import urllib3.util.connection as urllib3_cn
-        urllib3_cn.allowed_gai_family = lambda: socket.AF_INET
-        
-        last_error = None
-        for url in endpoints:
+            if am not in amenity_to_shp:
+                continue
+                
+            shp_path = os.path.join(dataset_dir, amenity_to_shp[am])
+            if not os.path.exists(shp_path):
+                logger.error(f"Shapefile not found: {shp_path}")
+                continue
+                
             try:
-                headers = {
-                    "User-Agent": "RwandaGeoPortal/1.0 (contact@example.com)"
-                }
-                response = requests.post(url, data={'data': query}, headers=headers, timeout=100)
-                response.raise_for_status()
-                data = response.json()
-                
-                features = []
-                raw_points = []
-                for element in data.get('elements', []):
-                    lon = element.get('lon') or element.get('center', {}).get('lon')
-                    lat = element.get('lat') or element.get('center', {}).get('lat')
-                    tags = element.get('tags', {})
-                    name = tags.get('name', 'Unnamed')
-                    amenity_type = tags.get('amenity', 'Facility')
-                    if lon and lat:
-                        features.append(ee.Feature(ee.Geometry.Point([lon, lat])))
-                        raw_points.append({"lon": lon, "lat": lat, "name": name, "type": amenity_type})
-                
-                if 'remark' in data and not features:
-                    # If there's a remark (e.g. timeout) and no features, treat as failure
-                    raise ValueError(f"OpenStreetMap query failed: {data['remark']}")
-                    
-                if not features:
-                    # Successfully queried, but genuinely 0 results. Don't try other endpoints.
-                    debug_resp = str(data)[:300]
-                    logger.warning(f"Overpass returned no features for {amenities} in bbox {overpass_bbox}. Response: {debug_resp}")
-                    # We return [] to let the calling function handle it with a clean error
-                    _cache_overpass[cache_key] = ([], [{"debug": f"Query:\n{query}\n\nResponse:\n{debug_resp}"}])
-                    return [], [{"debug": f"Query:\n{query}\n\nResponse:\n{debug_resp}"}]
-                    
-                _cache_overpass[cache_key] = (features, raw_points)
-                return features, raw_points
-                
-            except requests.exceptions.RequestException as e:
-                logger.warning(f"Overpass API error on {url}: {e}")
-                last_error = e
-                if e.response is not None and e.response.status_code == 429:
-                    time.sleep(2) # Backoff before trying next endpoint
-                continue
-            except Exception as e:
-                # We explicitly check if it's the remark ValueError we raised, and if so, continue
-                if isinstance(e, ValueError) and "OpenStreetMap query failed" in str(e):
-                    logger.warning(f"Overpass API remark on {url}: {e}")
-                    last_error = e
+                # Read bounding box efficiently
+                gdf = gpd.read_file(shp_path, bbox=(minx, miny, maxx, maxy))
+                if gdf.empty:
                     continue
-                logger.error(f"Unexpected error parsing Overpass data on {url}: {e}")
-                last_error = e
-                continue
-    
-        if last_error:
-            if isinstance(last_error, requests.exceptions.RequestException) and last_error.response is not None:
-                err = ValueError(f"Failed to fetch data from OpenStreetMap. API error: {last_error.response.status_code}")
-            else:
-                err = ValueError(f"Failed to fetch data from OpenStreetMap: {str(last_error)}")
-            _cache_overpass[cache_key] = err
-            raise err
-        
-        _cache_overpass[cache_key] = ([], [])
-        return [], []
+                if gdf.crs and gdf.crs.to_epsg() != 4326:
+                    gdf = gdf.to_crs(epsg=4326)
+                    
+                for _, row in gdf.iterrows():
+                    geom = row.geometry
+                    if geom is None or geom.is_empty:
+                        continue
+                        
+                    if geom.geom_type != 'Point':
+                        geom = geom.centroid
+                        
+                    lon, lat = geom.x, geom.y
+                    
+                    name = "Unnamed"
+                    for col in ["NAME", "Name", "name", "Nom", "nom", "NOM"]:
+                        if col in row and getattr(row, col) is not None:
+                            name = str(getattr(row, col))
+                            break
+                            
+                    features.append(ee.Feature(ee.Geometry.Point([lon, lat])))
+                    raw_points.append({"lon": lon, "lat": lat, "name": name, "type": am})
+            except Exception as e:
+                logger.error(f"Error reading shapefile {shp_path}: {e}")
+                
+        if not features:
+            logger.warning(f"No local features found for {amenities} in bbox {bbox}.")
+            return [], []
+            
+        _cache_overpass[cache_key] = (features, raw_points)
+        return features, raw_points
 
 
 def _build_accessibility_images(aoi_config: dict, amenities: list[str]):
@@ -141,7 +118,7 @@ def _build_accessibility_images(aoi_config: dict, amenities: list[str]):
     bbox = [min(lons), min(lats), max(lons), max(lats)]
     
     # 1. Fetch amenities
-    points, raw_points = fetch_overpass_points(amenities, bbox)
+    points, raw_points = fetch_local_points(amenities, bbox)
 
     if not points:
         debug_info = ""

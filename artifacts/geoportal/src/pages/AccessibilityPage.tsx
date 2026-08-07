@@ -25,20 +25,15 @@ const ACCESSIBILITY_COLORS = ["#5C3A21", "#B98D4F", "#E8C285", "#F3E58C"];
 const ACCESSIBILITY_LABELS = ["Very High (0-15m)", "High (15-30m)", "Low (30-45m)", "Very Low (45-60m)"];
 
 const AMENITY_OPTIONS = [
-  { id: "hospital", label: "Hospital" },
-  { id: "clinic", label: "Clinic" },
-  { id: "school", label: "School" },
-  { id: "college", label: "College" },
-  { id: "university", label: "University" },
-  { id: "marketplace", label: "Marketplace" },
-  { id: "bank", label: "Bank" },
-  { id: "townhall", label: "Town Hall" },
-  { id: "community_centre", label: "Community Centre" }
+  { id: "primary_school", label: "Primary School" },
+  { id: "secondary_school", label: "Secondary School" },
+  { id: "superior_school", label: "College / University" },
+  { id: "marketplace", label: "Marketplace" }
 ];
 
 export function AccessibilityPage() {
   const [aoi, setAoi] = useState<AOIConfig>({ type: "gaul2", country: "Rwanda", name: "Kigali City", level1: "Kigali City", level2: "Gasabo" });
-  const [selectedAmenities, setSelectedAmenities] = useState<string[]>(["school"]);
+  const [selectedAmenities, setSelectedAmenities] = useState<string[]>(["primary_school"]);
   const [nClasses, setNClasses] = useState(4);
   const [activeLayer, setActiveLayer] = useState<string>("classified");
   const [showRoads, setShowRoads] = useState(false);
