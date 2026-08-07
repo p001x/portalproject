@@ -26,7 +26,7 @@ export function GEEProjectConfig() {
   const fetchStatus = async () => {
     try {
       setLoading(true);
-      const res = await fetch("/api/gee/config");
+      const res = await fetch("https://geoportal-api-ygzi.onrender.com/api/gee/config");
       if (res.ok) {
         const data: GEEStatus = await res.json();
         setStatus(data);
@@ -55,7 +55,7 @@ export function GEEProjectConfig() {
 
     try {
       setSaving(true);
-      const res = await fetch("/api/gee/config", {
+      const res = await fetch("https://geoportal-api-ygzi.onrender.com/api/gee/config", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
