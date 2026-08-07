@@ -79,13 +79,14 @@ def fetch_local_points(amenities: list[str], bbox: list[float]) -> tuple[list[ee
                 
                 # Reproject to WGS84 before bounding box filtering
                 if gdf.crs and gdf.crs.to_epsg() != 4326:
-                    gdf = gdf.to_crs(epsg=4326)
-                    
-                # Filter using the bounding box in WGS84
-                gdf = gdf.cx[minx:maxx, miny:maxy]
-                if gdf.empty:
-                    continue
-                    
+                    try:
+                        gdf = gdf.to_crs(epsg=4326)
+                    except Exception as e:
+                        logger.error(f"Failed to reproject {am} to 4326: {e}")
+                        continue
+                
+                logger.info(f"Loaded {am}. Total features: {len(gdf)}. Bounding box: {minx}, {miny}, {maxx}, {maxy}")
+                found_count = 0
                 for _, row in gdf.iterrows():
                     geom = row.geometry
                     if geom is None or geom.is_empty:
@@ -95,6 +96,12 @@ def fetch_local_points(amenities: list[str], bbox: list[float]) -> tuple[list[ee
                         geom = geom.centroid
                         
                     lon, lat = geom.x, geom.y
+                    
+                    # Manual spatial filter
+                    if not (minx <= lon <= maxx and miny <= lat <= maxy):
+                        continue
+                        
+                    found_count += 1
                     
                     name = "Unnamed"
                     for col in ["NAME", "Name", "name", "Nom", "nom", "NOM"]:
