@@ -48,19 +48,15 @@ def fetch_overpass_points(amenities: list[str], bbox: list[float]) -> tuple[list
             
         overpass_bbox = f"{miny:.6f},{minx:.6f},{maxy:.6f},{maxx:.6f}"
     
-        query = "[out:json][timeout:90];\n(\n"
+        query = f"[out:json][timeout:90][bbox:{overpass_bbox}];\n(\n"
         for am in amenities:
-            query += f'  node["amenity"="{am}"]({overpass_bbox});\n'
-            query += f'  way["amenity"="{am}"]({overpass_bbox});\n'
-            query += f'  relation["amenity"="{am}"]({overpass_bbox});\n'
+            query += f'  nwr["amenity"="{am}"];\n'
         query += ");\nout center tags;\n"
         
         endpoints = [
             "https://overpass-api.de/api/interpreter",
-            "https://overpass.openstreetmap.ru/api/interpreter",
             "https://lz4.overpass-api.de/api/interpreter",
             "https://z.overpass-api.de/api/interpreter",
-            "https://overpass.osm.ch/api/interpreter",
         ]
         
         last_error = None
