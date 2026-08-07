@@ -72,12 +72,19 @@ def fetch_local_points(amenities: list[str], bbox: list[float]) -> tuple[list[ee
                 continue
                 
             try:
-                # Read bounding box efficiently
-                gdf = gpd.read_file(shp_path, bbox=(minx, miny, maxx, maxy))
+                # Load all features (files are very small)
+                gdf = gpd.read_file(shp_path)
                 if gdf.empty:
                     continue
+                
+                # Reproject to WGS84 before bounding box filtering
                 if gdf.crs and gdf.crs.to_epsg() != 4326:
                     gdf = gdf.to_crs(epsg=4326)
+                    
+                # Filter using the bounding box in WGS84
+                gdf = gdf.cx[minx:maxx, miny:maxy]
+                if gdf.empty:
+                    continue
                     
                 for _, row in gdf.iterrows():
                     geom = row.geometry
