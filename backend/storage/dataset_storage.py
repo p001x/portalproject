@@ -193,24 +193,14 @@ def load_metadata(source: str = "admin") -> list[dict[str, Any]]:
     try:
         key = METADATA_KEYS[source]
         
-        with open("C:/Users/user/Documents/blacportal/backend/debug_metadata.txt", "w") as f:
-            f.write(f"Source: {source}\n")
-            f.write(f"Key: {key}\n")
-            f.write(f"Exists: {client.exists(key)}\n")
-            if client.exists(key):
-                raw = client.download_as_text(key)
-                f.write(f"Raw length: {len(raw)}\n")
-                data = json.loads(raw)
-                f.write(f"Parsed length: {len(data) if isinstance(data, list) else 'not list'}\n")
-            
         if not client.exists(key):
             return []
         raw = client.download_as_text(key)
         data = json.loads(raw)
         return data if isinstance(data, list) else []
     except Exception as e:
-        with open("C:/Users/user/Documents/blacportal/backend/debug_metadata_error.txt", "w") as f:
-            f.write(str(e))
+        import logging
+        logging.error(f"Error loading metadata: {e}")
         return []
 
 
