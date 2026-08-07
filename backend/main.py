@@ -332,6 +332,9 @@ class HabitatRequest(BaseModel):
     n_classes: int = 5
     custom_weights: Optional[dict] = None
 
+class HabitatAhpRequest(BaseModel):
+    custom_weights: Optional[dict] = None
+
 
 class AirPollutionRequest(BaseModel):
     aoi: dict = Field(default_factory=dict, description="AOI Configuration object")
@@ -690,7 +693,7 @@ def habitat_endpoint(req: HabitatRequest):
         raise HTTPException(status_code=500, detail=str(exc))
 
 @app.post("/api/habitat/ahp", tags=["analysis"])
-def habitat_ahp_endpoint(req: HabitatRequest):
+def habitat_ahp_endpoint(req: HabitatAhpRequest):
     # Does not require GEE map creation
     try:
         return compute_habitat_ahp(req.custom_weights or {})

@@ -247,6 +247,10 @@ def compute_habitat_suitability(
         "class_areas_km2": class_areas,
         "factors": {
             k: {
+                "label": FACTOR_META[k]["label"],
+                "weight_pct": weights[k] * 100,
+                "reversed": bool(reverse_flags.get(k, False)),
+                "description": FACTOR_META[k]["reversed_desc"] if reverse_flags.get(k, False) else FACTOR_META[k]["normal_desc"],
                 "tile_url": score_images[k].getMapId(_SCORE_VIS)["tile_fetcher"].url_format,
                 "thumb_url": safe_thumb(score_images[k]),
                 "download_url": safe_url(score_images[k], f"Habitat_{k}_score")
