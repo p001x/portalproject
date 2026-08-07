@@ -313,7 +313,7 @@ def compute_flood_susceptibility(
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
         f_area = executor.submit(
             lambda: area_img.reduceRegion(
-                reducer=ee.Reducer.sum(), geometry=aoi, scale=250, maxPixels=1e6, bestEffort=True, tileScale=4
+                reducer=ee.Reducer.sum(), geometry=aoi, scale=250, maxPixels=10000, bestEffort=True, tileScale=4
             ).getInfo()
         )
 

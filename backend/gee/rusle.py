@@ -193,7 +193,7 @@ def compute_rusle(
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         f_combined = executor.submit(
             lambda: all_factors_img.reduceRegion(
-                reducer=combined_reducer, geometry=aoi, scale=250, maxPixels=1e6, bestEffort=True, tileScale=4
+                reducer=combined_reducer, geometry=aoi, scale=250, maxPixels=10000, bestEffort=True, tileScale=4
             ).getInfo()
         )
         f_bounds = executor.submit(
@@ -289,12 +289,12 @@ def compute_rusle(
     combined_area_img = ee.Image.cat([fixed_area_img, risk_area_img, a_class_area_img])
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         f_combined_area = executor.submit(
-            lambda: combined_area_img.reduceRegion(reducer=ee.Reducer.sum(), geometry=aoi, scale=250, maxPixels=1e6, bestEffort=True, tileScale=4).getInfo()
+            lambda: combined_area_img.reduceRegion(reducer=ee.Reducer.sum(), geometry=aoi, scale=250, maxPixels=10000, bestEffort=True, tileScale=4).getInfo()
         )
         f_risk_stats = executor.submit(
             lambda: risk_index.reduceRegion(
                 reducer=ee.Reducer.mean().combine(ee.Reducer.stdDev(), sharedInputs=True),
-                geometry=aoi, scale=250, maxPixels=1e6, bestEffort=True, tileScale=4,
+                geometry=aoi, scale=250, maxPixels=10000, bestEffort=True, tileScale=4,
             ).getInfo()
         )
 

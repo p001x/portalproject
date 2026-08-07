@@ -55,13 +55,13 @@ def compute_slope(aoi_config: dict, n_classes: int = 5) -> dict:
                 .combine(ee.Reducer.max(), sharedInputs=True)
                 .combine(ee.Reducer.percentile([25, 75]), sharedInputs=True)
                 .combine(ee.Reducer.min(), sharedInputs=True),
-                geometry=aoi, scale=30, maxPixels=1e6, bestEffort=True, tileScale=4,
+                geometry=aoi, scale=30, maxPixels=10000, bestEffort=True, tileScale=4,
             ).getInfo()
         )
 
         f_area = executor.submit(
             lambda: area_img.reduceRegion(
-                reducer=ee.Reducer.sum(), geometry=aoi, scale=30, maxPixels=1e6, bestEffort=True, tileScale=4
+                reducer=ee.Reducer.sum(), geometry=aoi, scale=30, maxPixels=10000, bestEffort=True, tileScale=4
             ).getInfo()
         )
 

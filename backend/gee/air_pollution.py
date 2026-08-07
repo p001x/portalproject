@@ -88,13 +88,13 @@ def compute_no2(aoi_config: dict, start_date: str, end_date: str, n_classes: int
                 reducer=ee.Reducer.mean()
                 .combine(ee.Reducer.max(), sharedInputs=True)
                 .combine(ee.Reducer.percentile([90]), sharedInputs=True),
-                geometry=aoi, scale=3500, maxPixels=1e6, bestEffort=True, tileScale=4,
+                geometry=aoi, scale=3500, maxPixels=10000, bestEffort=True, tileScale=4,
             ).getInfo()
         )
 
         f_monthly = executor.submit(
             lambda: monthly_img.reduceRegion(
-                reducer=ee.Reducer.mean(), geometry=aoi, scale=3500, maxPixels=1e6, bestEffort=True, tileScale=4
+                reducer=ee.Reducer.mean(), geometry=aoi, scale=3500, maxPixels=10000, bestEffort=True, tileScale=4
             ).getInfo()
         )
 

@@ -273,10 +273,10 @@ def compute_agricultural_drought(
             "stats": dvi.reduceRegion(
                 reducer=ee.Reducer.mean().combine(ee.Reducer.min(), sharedInputs=True)
                 .combine(ee.Reducer.max(), sharedInputs=True).combine(ee.Reducer.stdDev(), sharedInputs=True),
-                geometry=geometry, scale=250, maxPixels=1e6, bestEffort=True, tileScale=4,
+                geometry=geometry, scale=250, maxPixels=10000, bestEffort=True, tileScale=4,
             ),
             "areas": class_area_bands.reduceRegion(
-                reducer=ee.Reducer.sum(), geometry=geometry, scale=250, maxPixels=1e6, bestEffort=True, tileScale=4,
+                reducer=ee.Reducer.sum(), geometry=geometry, scale=250, maxPixels=10000, bestEffort=True, tileScale=4,
             ),
             "centroid": geometry.centroid(maxError=100).coordinates(),
             "bounds": geometry.bounds().coordinates().get(0)

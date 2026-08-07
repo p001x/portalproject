@@ -221,7 +221,7 @@ def compute_landfill_suitability(
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
         f_area = executor.submit(
             lambda: area_img.reduceRegion(
-                reducer=ee.Reducer.sum(), geometry=aoi, scale=100, maxPixels=1e6, bestEffort=True, tileScale=4
+                reducer=ee.Reducer.sum(), geometry=aoi, scale=100, maxPixels=10000, bestEffort=True, tileScale=4
             ).getInfo()
         )
 

@@ -87,13 +87,13 @@ def compute_lst(aoi_config: dict, start_date: str, end_date: str, n_classes: int
                 .combine(ee.Reducer.min(), sharedInputs=True)
                 .combine(ee.Reducer.max(), sharedInputs=True)
                 .combine(ee.Reducer.stdDev(), sharedInputs=True),
-                geometry=aoi, scale=100, maxPixels=1e6, bestEffort=True, tileScale=4,
+                geometry=aoi, scale=100, maxPixels=10000, bestEffort=True, tileScale=4,
             ).getInfo()
         )
 
         f_area = executor.submit(
             lambda: area_img.reduceRegion(
-                reducer=ee.Reducer.sum(), geometry=aoi, scale=100, maxPixels=1e6, bestEffort=True, tileScale=4
+                reducer=ee.Reducer.sum(), geometry=aoi, scale=100, maxPixels=10000, bestEffort=True, tileScale=4
             ).getInfo()
         )
 

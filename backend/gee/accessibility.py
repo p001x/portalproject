@@ -356,12 +356,12 @@ def compute_accessibility_stats(aoi_config: dict, amenities: list[str]) -> dict:
             lambda: travel_time.reduceRegion(
                 reducer=ee.Reducer.mean().combine(ee.Reducer.min(), sharedInputs=True)
                 .combine(ee.Reducer.max(), sharedInputs=True).combine(ee.Reducer.stdDev(), sharedInputs=True),
-                geometry=aoi, scale=500, maxPixels=1e6, bestEffort=True, tileScale=4,
+                geometry=aoi, scale=500, maxPixels=10000, bestEffort=True, tileScale=4,
             ).getInfo()
         )
         f_area = executor.submit(
             lambda: class_area_bands.reduceRegion(
-                reducer=ee.Reducer.sum(), geometry=aoi, scale=500, maxPixels=1e6, bestEffort=True, tileScale=4,
+                reducer=ee.Reducer.sum(), geometry=aoi, scale=500, maxPixels=10000, bestEffort=True, tileScale=4,
             ).getInfo()
         )
         stats_raw = f_stats.result()

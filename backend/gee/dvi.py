@@ -167,11 +167,11 @@ def compute_dvi(
                 reducer=ee.Reducer.mean().combine(ee.Reducer.min(), sharedInputs=True).combine(ee.Reducer.max(), sharedInputs=True).combine(ee.Reducer.stdDev(), sharedInputs=True),
                 geometry=geometry,
                 scale=100, 
-                maxPixels=1e6, bestEffort=True,
+                maxPixels=10000, bestEffort=True,
                 tileScale=4,
             ),
             "areas": class_area_bands.reduceRegion(
-                reducer=ee.Reducer.sum(), geometry=geometry, scale=100, maxPixels=1e6, bestEffort=True, tileScale=4
+                reducer=ee.Reducer.sum(), geometry=geometry, scale=100, maxPixels=10000, bestEffort=True, tileScale=4
             ),
             "bounds": geometry.bounds()
         })

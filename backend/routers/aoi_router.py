@@ -17,6 +17,9 @@ _gaul_cache = {
     "level2": {}
 }
 
+# In-memory cache for Rwanda hierarchy to avoid reading the shapefile multiple times
+_rwanda_hierarchy = None
+
 @router.get("/regions")
 def get_regions(country: Optional[str] = None, level1: Optional[str] = None):
     """
@@ -118,3 +121,51 @@ async def upload_shapefile(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Error processing shapefile: {str(e)}")
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+@router.get("/rwanda-hierarchy")
+def get_rwanda_hierarchy():
+    """
+    Reads the local sectrstu/sector.shp and returns a nested dictionary of:
+    { "ProvinceName": { "DistrictName": ["Sector1", "Sector2"] } }
+    """
+    global _rwanda_hierarchy
+    if _rwanda_hierarchy is not None:
+        return _rwanda_hierarchy
+
+    try:
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        shp_path = os.path.join(base_dir, "sectrstu", "sector.shp")
+        
+        if not os.path.exists(shp_path):
+            raise HTTPException(status_code=404, detail="Rwanda sector shapefile not found.")
+
+        gdf = gpd.read_file(shp_path)
+        
+        hierarchy = {}
+        for _, row in gdf.iterrows():
+            prov = row.get("REGION")
+            dist = row.get("DISTR")
+            sect = row.get("NOMSECT")
+            
+            if not prov or not dist or not sect:
+                continue
+                
+            if prov not in hierarchy:
+                hierarchy[prov] = {}
+            if dist not in hierarchy[prov]:
+                hierarchy[prov][dist] = []
+            if sect not in hierarchy[prov][dist]:
+                hierarchy[prov][dist].append(sect)
+                
+        # Sort everything alphabetically for the frontend
+        sorted_hierarchy = {}
+        for prov in sorted(hierarchy.keys()):
+            sorted_hierarchy[prov] = {}
+            for dist in sorted(hierarchy[prov].keys()):
+                sorted_hierarchy[prov][dist] = sorted(hierarchy[prov][dist])
+                
+        _rwanda_hierarchy = sorted_hierarchy
+        return _rwanda_hierarchy
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error reading Rwanda shapefile: {str(e)}")
+

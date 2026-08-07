@@ -1,0 +1,13 @@
+.git
+.github
+node_modules
+.venv
+__pycache__
+*.pyc
+artifacts
+frontend_deprecated
+scratch
+dist
+*.tif
+*.sqlite
+*.db

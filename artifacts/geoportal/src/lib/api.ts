@@ -420,12 +420,16 @@ export interface StaticMapPayload {
 
 export const api = {
   async getRegions(country?: string, level1?: string): Promise<{regions: string[]}> {
-    const params = new URLSearchParams();
-    if (country) params.append("country", country);
-    if (level1) params.append("level1", level1);
-    const res = await fetch(`${BASE}/aoi/regions?${params.toString()}`);
-    if (!res.ok) throw new Error("Failed to fetch regions");
-    return res.json();
+    let url = "/aoi/regions";
+    const p = new URLSearchParams();
+    if (country) p.append("country", country);
+    if (level1) p.append("level1", level1);
+    if (p.toString()) url += "?" + p.toString();
+    return get(url);
+  },
+
+  async getRwandaHierarchy(): Promise<Record<string, Record<string, string[]>>> {
+    return get("/aoi/rwanda-hierarchy");
   },
 
   async uploadShapefile(file: File): Promise<{geojson: any}> {

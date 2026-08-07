@@ -12,6 +12,12 @@ interface StudyAreaSelectorProps {
   onChange: (value: AOIConfig) => void;
 }
 
+interface RwandaHierarchy {
+  [province: string]: {
+    [district: string]: string[];
+  };
+}
+
 export function StudyAreaSelector({ value, onChange }: StudyAreaSelectorProps) {
   const [tab, setTab] = useState<"global" | "upload">(value.type === "geojson" ? "upload" : "global");
   const [uploading, setUploading] = useState(false);
@@ -31,26 +37,60 @@ export function StudyAreaSelector({ value, onChange }: StudyAreaSelectorProps) {
   const { data: level2Data, isLoading: loadingLevel2 } = useQuery({
     queryKey: ["regions", "level2", value.country, value.level1],
     queryFn: () => api.getRegions(value.country, value.level1),
-    enabled: !!value.country && !!value.level1 && value.type.startsWith("gaul"),
+    enabled: !!value.country && !!value.level1 && value.type.startsWith("gaul") && value.country !== "Rwanda",
+  });
+
+  const { data: rwandaHierarchy, isLoading: loadingRwanda } = useQuery({
+    queryKey: ["rwanda", "hierarchy"],
+    queryFn: () => api.getRwandaHierarchy(),
+    enabled: value.country === "Rwanda" || value.type === "rwanda",
   });
 
   const handleCountryChange = (c: string) => {
-    onChange({ type: "gaul0", country: c, name: c });
+    if (c === "Rwanda") {
+      onChange({ type: "rwanda", country: c, name: c });
+    } else {
+      onChange({ type: "gaul0", country: c, name: c });
+    }
   };
 
   const handleLevel1Change = (l1: string) => {
-    if (l1 === "none") {
-      onChange({ type: "gaul0", country: value.country, name: value.country });
+    if (value.country === "Rwanda") {
+      if (l1 === "none") {
+        onChange({ type: "rwanda", country: value.country, name: value.country });
+      } else {
+        onChange({ type: "rwanda", country: value.country, province: l1, name: l1 });
+      }
     } else {
-      onChange({ type: "gaul1", country: value.country, level1: l1, name: l1 });
+      if (l1 === "none") {
+        onChange({ type: "gaul0", country: value.country, name: value.country });
+      } else {
+        onChange({ type: "gaul1", country: value.country, level1: l1, name: l1 });
+      }
     }
   };
 
   const handleLevel2Change = (l2: string) => {
-    if (l2 === "none") {
-      onChange({ type: "gaul1", country: value.country, level1: value.level1, name: value.level1 });
+    if (value.country === "Rwanda") {
+      if (l2 === "none") {
+        onChange({ type: "rwanda", country: value.country, province: (value as any).province, name: (value as any).province });
+      } else {
+        onChange({ type: "rwanda", country: value.country, province: (value as any).province, district: l2, name: l2 });
+      }
     } else {
-      onChange({ type: "gaul2", country: value.country, level1: value.level1, level2: l2, name: l2 });
+      if (l2 === "none") {
+        onChange({ type: "gaul1", country: value.country, level1: value.level1, name: value.level1 });
+      } else {
+        onChange({ type: "gaul2", country: value.country, level1: value.level1, level2: l2, name: l2 });
+      }
+    }
+  };
+
+  const handleSectorChange = (sector: string) => {
+    if (sector === "none") {
+      onChange({ type: "rwanda", country: value.country, province: (value as any).province, district: value.district, name: value.district });
+    } else {
+      onChange({ type: "rwanda", country: value.country, province: (value as any).province, district: value.district, sector: sector, name: sector });
     }
   };
 
@@ -101,7 +141,7 @@ export function StudyAreaSelector({ value, onChange }: StudyAreaSelectorProps) {
             </Select>
           </div>
 
-          {value.country && (
+          {value.country && value.country !== "Rwanda" && (
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground">State / Province (Optional)</Label>
               <Select value={value.level1 || "none"} onValueChange={handleLevel1Change} disabled={loadingLevel1}>
@@ -118,7 +158,7 @@ export function StudyAreaSelector({ value, onChange }: StudyAreaSelectorProps) {
             </div>
           )}
 
-          {value.country && value.level1 && value.level1 !== "none" && (
+          {value.country && value.level1 && value.level1 !== "none" && value.country !== "Rwanda" && (
             <div className="space-y-1.5">
               <Label className="text-xs text-muted-foreground">District / County (Optional)</Label>
               <Select value={value.level2 || "none"} onValueChange={handleLevel2Change} disabled={loadingLevel2}>
@@ -133,6 +173,59 @@ export function StudyAreaSelector({ value, onChange }: StudyAreaSelectorProps) {
                 </SelectContent>
               </Select>
             </div>
+          )}
+
+          {value.country === "Rwanda" && rwandaHierarchy && (
+            <>
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Province (Optional)</Label>
+                <Select value={(value as any).province || "none"} onValueChange={handleLevel1Change} disabled={loadingRwanda}>
+                  <SelectTrigger className="w-full h-8 text-xs">
+                    <SelectValue placeholder="Select Province..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">-- All of Rwanda --</SelectItem>
+                    {Object.keys(rwandaHierarchy).map((p: string) => (
+                      <SelectItem key={p} value={p}>{p}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {(value as any).province && (value as any).province !== "none" && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">District (Optional)</Label>
+                  <Select value={value.district || "none"} onValueChange={handleLevel2Change}>
+                    <SelectTrigger className="w-full h-8 text-xs">
+                      <SelectValue placeholder="Select District..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">-- All of {(value as any).province} --</SelectItem>
+                      {Object.keys(rwandaHierarchy[(value as any).province] || {}).map((d: string) => (
+                        <SelectItem key={d} value={d}>{d}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              {(value as any).province && (value as any).province !== "none" && value.district && value.district !== "none" && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Sector (Optional)</Label>
+                  <Select value={(value as any).sector || "none"} onValueChange={handleSectorChange}>
+                    <SelectTrigger className="w-full h-8 text-xs">
+                      <SelectValue placeholder="Select Sector..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">-- All of {value.district} --</SelectItem>
+                      {(rwandaHierarchy[(value as any).province]?.[value.district] || []).map((s: string) => (
+                        <SelectItem key={s} value={s}>{s}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </>
           )}
         </TabsContent>
 

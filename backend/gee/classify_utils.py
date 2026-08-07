@@ -93,7 +93,7 @@ def quantile_classify(layers: list, aoi, scale: int, n_classes: int) -> dict:
             reducer=ee.Reducer.percentile(pct_steps),
             geometry=aoi,
             scale=scale,
-            maxPixels=1e6, bestEffort=True, tileScale=4,
+            maxPixels=10000, bestEffort=True, tileScale=4,
         ).getInfo()
 
     classified = []
@@ -112,7 +112,7 @@ def quantile_classify(layers: list, aoi, scale: int, n_classes: int) -> dict:
 
     area_img  = ee.Image.cat(area_bands)
     area_raw  = area_img.reduceRegion(
-        reducer=ee.Reducer.sum(), geometry=aoi, scale=scale, maxPixels=1e6, bestEffort=True, tileScale=4
+        reducer=ee.Reducer.sum(), geometry=aoi, scale=scale, maxPixels=10000, bestEffort=True, tileScale=4
     ).getInfo()
 
     panels = []

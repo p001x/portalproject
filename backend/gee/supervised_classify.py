@@ -335,7 +335,7 @@ def train_and_classify(samples: list, aoi=None, data_source="sentinel2", custom_
             geometry=aoi_geom,  # Use original geometry instead of bounds to avoid corners
             scale=calc_scale,
             tileScale=16,
-            maxPixels=1e6, bestEffort=True
+            maxPixels=10000, bestEffort=True
         )
         area_results = areas_computed.getInfo().get('groups', [])
         

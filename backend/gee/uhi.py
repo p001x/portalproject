@@ -61,10 +61,10 @@ def compute_uhi(aoi_config: dict, start_date: str, end_date: str, grid_size: int
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
         f_lst_pct = executor.submit(
-            lambda: lst_median.reduceRegion(reducer=ee.Reducer.percentile([2, 98]), geometry=aoi, scale=100, maxPixels=1e6, bestEffort=True, tileScale=4).getInfo()
+            lambda: lst_median.reduceRegion(reducer=ee.Reducer.percentile([2, 98]), geometry=aoi, scale=100, maxPixels=10000, bestEffort=True, tileScale=4).getInfo()
         )
         f_ndbi_pct = executor.submit(
-            lambda: ndbi_median.reduceRegion(reducer=ee.Reducer.percentile([2, 98]), geometry=aoi, scale=100, maxPixels=1e6, bestEffort=True, tileScale=4).getInfo()
+            lambda: ndbi_median.reduceRegion(reducer=ee.Reducer.percentile([2, 98]), geometry=aoi, scale=100, maxPixels=10000, bestEffort=True, tileScale=4).getInfo()
         )
         f_stats = executor.submit(
             lambda: stats_fc.getInfo()["features"]

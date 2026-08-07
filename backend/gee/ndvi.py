@@ -81,14 +81,14 @@ def compute_ndvi(
                 .combine(ee.Reducer.stdDev(), sharedInputs=True),
                 geometry=aoi,
                 scale=100,
-                maxPixels=1e6, bestEffort=True,
+                maxPixels=10000, bestEffort=True,
                 tileScale=4,
             ).getInfo()
         )
 
         f_area = executor.submit(
             lambda: area_img.reduceRegion(
-                reducer=ee.Reducer.sum(), geometry=aoi, scale=100, maxPixels=1e6, bestEffort=True, tileScale=4
+                reducer=ee.Reducer.sum(), geometry=aoi, scale=100, maxPixels=10000, bestEffort=True, tileScale=4
             ).getInfo()
         )
 
