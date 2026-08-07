@@ -57,7 +57,14 @@ def fetch_overpass_points(amenities: list[str], bbox: list[float]) -> tuple[list
             "https://overpass-api.de/api/interpreter",
             "https://lz4.overpass-api.de/api/interpreter",
             "https://z.overpass-api.de/api/interpreter",
+            "https://overpass.kumi.systems/api/interpreter",
+            "https://overpass.openstreetmap.fr/api/interpreter",
         ]
+        
+        # Force IPv4 because Render/Docker IPv6 stacks often throw "Network is unreachable"
+        import socket
+        import urllib3.util.connection as urllib3_cn
+        urllib3_cn.allowed_gai_family = lambda: socket.AF_INET
         
         last_error = None
         for url in endpoints:
