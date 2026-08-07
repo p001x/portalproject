@@ -13,7 +13,8 @@ services:
         sync: false # You will need to add this in the Render Dashboard
 
   # Frontend React App (Static Site)
-  - type: static
+  - type: web
+    env: static
     name: geoportal-ui
     buildCommand: npm i -g pnpm && pnpm install && pnpm run build
     staticPublishPath: ./artifacts/geoportal/dist/public
