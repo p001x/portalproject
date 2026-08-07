@@ -90,7 +90,7 @@ export function MapExportControls({ tileUrl, thumbUrl, district, title, classAre
     const debounceTimer = setTimeout(() => {
       timeoutId = setTimeout(() => abortController.abort(), 35000);
 
-      fetch("/api/static-map", {
+      fetch("https://geoportal-api-ygzi.onrender.com/api/static-map", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -176,7 +176,7 @@ export function MapExportControls({ tileUrl, thumbUrl, district, title, classAre
 
     const form = document.createElement("form");
     form.method = "POST";
-    form.action = "/api/static-map-download";
+    form.action = "https://geoportal-api-ygzi.onrender.com/api/static-map-download";
     form.style.display = "none";
 
     const addField = (name: string, value: any) => {

@@ -39,7 +39,7 @@ export function useAnalytics() {
     const module = module_name || getModuleName(currentPath);
     
     try {
-      await fetch('/api/analytics/event', {
+      await fetch("https://geoportal-api-ygzi.onrender.com/api/analytics/event", {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

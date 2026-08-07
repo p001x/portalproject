@@ -745,13 +745,13 @@ export function SampleDigitizationPage() {
 
       if (isTiff) {
         const rawUrl = key.startsWith("url::") ? key.slice(5) : key;
-        const tileUrl = `/api/native/imagery/tiles/{z}/{x}/{y}?url=${encodeURIComponent(rawUrl)}`;
+        const tileUrl = `https://geoportal-api-ygzi.onrender.com/api/native/imagery/tiles/{z}/{x}/{y}?url=${encodeURIComponent(rawUrl)}`;
         setNativePreviewUrl(tileUrl);
         setClassificationSource("native_cog");
         setCustomAssetId(rawUrl);
 
         if (!bbox) {
-          fetch(`/api/native/imagery/bounds?url=${encodeURIComponent(rawUrl)}`)
+          fetch(`https://geoportal-api-ygzi.onrender.com/api/native/imagery/bounds?url=${encodeURIComponent(rawUrl)}`)
             .then((r) => r.json())
             .then((bData) => {
               if (bData.bbox) setActiveBbox(bData.bbox);
@@ -806,7 +806,7 @@ export function SampleDigitizationPage() {
 
   const scrapeDirectoryMut = useMutation({
     mutationFn: async () => {
-      const res = await fetch(`http://127.0.0.1:8001/api/datasets/scrape-directory?url=${encodeURIComponent(linkUrl)}`);
+      const res = await fetch(`https://geoportal-api-ygzi.onrender.com/api/datasets/scrape-directory?url=${encodeURIComponent(linkUrl)}`);
       if (!res.ok) throw new Error(await res.text());
       return res.json();
     },
@@ -887,7 +887,7 @@ export function SampleDigitizationPage() {
         key.toLowerCase().includes(".tif") ||
         key.toLowerCase().includes(".tiff")
       ) {
-        setNativePreviewUrl(`/api/native/imagery/tiles/{z}/{x}/{y}?url=${encodeURIComponent(rawUrl)}`);
+        setNativePreviewUrl(`https://geoportal-api-ygzi.onrender.com/api/native/imagery/tiles/{z}/{x}/{y}?url=${encodeURIComponent(rawUrl)}`);
         setClassificationSource("native_cog");
         setCustomAssetId(rawUrl);
         setPreviewDatasetName(res.name);
@@ -895,7 +895,7 @@ export function SampleDigitizationPage() {
         if (res.bbox && res.bbox.length === 4) {
           setActiveBbox(res.bbox);
         } else {
-          fetch(`/api/native/imagery/bounds?url=${encodeURIComponent(rawUrl)}`)
+          fetch(`https://geoportal-api-ygzi.onrender.com/api/native/imagery/bounds?url=${encodeURIComponent(rawUrl)}`)
             .then((r) => r.json())
             .then((bData) => {
               if (bData.bbox) setActiveBbox(bData.bbox);
@@ -2613,7 +2613,7 @@ export function SampleDigitizationPage() {
                     variant="outline"
                     onClick={async () => {
                       try {
-                        const r = await fetch("/api/gee/config", {
+                        const r = await fetch(`https://geoportal-api-ygzi.onrender.com/api/gee/config`, {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({ project_id: targetGeeProjectId.trim() }),
@@ -2768,7 +2768,7 @@ export function SampleDigitizationPage() {
                   }
 
                   const targetUrl = key.startsWith("url::") ? key.slice(5) : key;
-                  fetch(`/api/native/imagery/bounds?url=${encodeURIComponent(targetUrl)}`)
+                  fetch(`https://geoportal-api-ygzi.onrender.com/api/native/imagery/bounds?url=${encodeURIComponent(targetUrl)}`)
                     .then((r) => r.json())
                     .then((data) => {
                       if (data.bbox) setActiveBbox(data.bbox);
@@ -2779,7 +2779,7 @@ export function SampleDigitizationPage() {
                     const rawUrl = key.slice(5);
                     setClassificationSource("native_cog");
                     setCustomAssetId(rawUrl);
-                    setNativePreviewUrl(`/api/native/imagery/tiles/{z}/{x}/{y}?url=${encodeURIComponent(rawUrl)}`);
+                    setNativePreviewUrl(`https://geoportal-api-ygzi.onrender.com/api/native/imagery/tiles/{z}/{x}/{y}?url=${encodeURIComponent(rawUrl)}`);
                     toast({
                       title: "Dataset Configured for Classification",
                       description: `Loaded ${d.name}. Flying to dataset location...`,
@@ -2796,7 +2796,7 @@ export function SampleDigitizationPage() {
                   } else {
                     setClassificationSource("native_cog");
                     setCustomAssetId(key);
-                    setNativePreviewUrl(`/api/native/imagery/tiles/{z}/{x}/{y}?url=${encodeURIComponent(key)}`);
+                    setNativePreviewUrl(`https://geoportal-api-ygzi.onrender.com/api/native/imagery/tiles/{z}/{x}/{y}?url=${encodeURIComponent(key)}`);
                     toast({
                       title: "Local Dataset Selected",
                       description: `Loaded ${d.name}. Flying to dataset location...`,
@@ -2857,8 +2857,8 @@ export function SampleDigitizationPage() {
                     setClassificationSource("native_cog");
                     setCustomAssetId(linkUrl);
                     setActiveTab("map");
-                    setNativePreviewUrl(`/api/native/imagery/tiles/{z}/{x}/{y}?url=${encodeURIComponent(linkUrl)}`);
-                    fetch(`/api/native/imagery/bounds?url=${encodeURIComponent(linkUrl)}`)
+                    setNativePreviewUrl(`https://geoportal-api-ygzi.onrender.com/api/native/imagery/tiles/{z}/{x}/{y}?url=${encodeURIComponent(linkUrl)}`);
+                    fetch(`https://geoportal-api-ygzi.onrender.com/api/native/imagery/bounds?url=${encodeURIComponent(linkUrl)}`)
                       .then((r) => r.json())
                       .then((d) => {
                         if (d.bbox) setActiveBbox(d.bbox);

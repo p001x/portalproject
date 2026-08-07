@@ -251,7 +251,7 @@ export function InteractiveMapEditor({
       return;
     }
 
-    fetch("/api/proxy-image", {
+    fetch("https://geoportal-api-ygzi.onrender.com/api/proxy-image", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

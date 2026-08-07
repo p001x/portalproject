@@ -36,31 +36,31 @@ export function DashboardPage() {
 
   const { data: summary, isLoading: loadingSummary } = useQuery({
     queryKey: ['analytics_summary', days],
-    queryFn: async () => (await fetch(`/api/analytics/summary${daysQuery}`)).json(),
+    queryFn: async () => (await fetch(`https://geoportal-api-ygzi.onrender.com/api/analytics/summary${daysQuery}`)).json(),
     enabled: isAuthenticated
   });
 
   const { data: timeseries, isLoading: loadingTimeseries } = useQuery({
     queryKey: ['analytics_timeseries', days],
-    queryFn: async () => (await fetch(`/api/analytics/timeseries${daysQuery}`)).json(),
+    queryFn: async () => (await fetch(`https://geoportal-api-ygzi.onrender.com/api/analytics/timeseries${daysQuery}`)).json(),
     enabled: isAuthenticated
   });
 
   const { data: modules, isLoading: loadingModules } = useQuery({
     queryKey: ['analytics_modules', days],
-    queryFn: async () => (await fetch(`/api/analytics/modules${daysQuery}`)).json(),
+    queryFn: async () => (await fetch(`https://geoportal-api-ygzi.onrender.com/api/analytics/modules${daysQuery}`)).json(),
     enabled: isAuthenticated
   });
 
   const { data: locations, isLoading: loadingLocations } = useQuery({
     queryKey: ['analytics_locations', days],
-    queryFn: async () => (await fetch(`/api/analytics/locations${daysQuery}`)).json(),
+    queryFn: async () => (await fetch(`https://geoportal-api-ygzi.onrender.com/api/analytics/locations${daysQuery}`)).json(),
     enabled: isAuthenticated
   });
 
   const { data: rawEvents, isLoading: loadingRaw } = useQuery({
     queryKey: ['analytics_raw'],
-    queryFn: async () => (await fetch(`/api/analytics/raw?limit=50`)).json(),
+    queryFn: async () => (await fetch(`https://geoportal-api-ygzi.onrender.com/api/analytics/raw?limit=50`)).json(),
     enabled: isAuthenticated,
     refetchInterval: 10000 // auto refresh every 10s
   });
