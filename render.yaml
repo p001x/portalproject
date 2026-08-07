@@ -17,7 +17,7 @@ services:
   - type: web
     env: static
     name: geoportal-ui
-    buildCommand: npm i -g pnpm && pnpm install && pnpm run build
+    buildCommand: pnpm install && pnpm run build
     staticPublishPath: ./artifacts/geoportal/dist/public
     envVars:
       - key: VITE_API_URL
