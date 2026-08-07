@@ -283,6 +283,9 @@ def compute_accessibility_map(aoi_config: dict, amenities: list[str]) -> dict:
 
     centroid = aoi.centroid(maxError=100).coordinates().getInfo()
     bounds = aoi.bounds().getInfo()["coordinates"][0]
+    lons = [p[0] for p in bounds]
+    lats = [p[1] for p in bounds]
+    bbox = [min(lons), min(lats), max(lons), max(lats)]
 
     raw_points = factors.get("raw_points", [])
     nearest, farthest = _get_nearest_farthest(aoi, raw_points)
@@ -296,7 +299,7 @@ def compute_accessibility_map(aoi_config: dict, amenities: list[str]) -> dict:
         farthest_road_geojson = _get_closest_road_geojson(roads, farthest['lon'], farthest['lat'])
 
     routes = []
-    incidents = fetch_sample_population(bounds)
+    incidents = fetch_sample_population(bbox)
     if incidents and raw_points:
         for inc in incidents:
             nearest_fac = None
