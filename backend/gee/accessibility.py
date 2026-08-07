@@ -48,15 +48,12 @@ def fetch_overpass_points(amenities: list[str], bbox: list[float]) -> tuple[list
             
         overpass_bbox = f"{miny:.6f},{minx:.6f},{maxy:.6f},{maxx:.6f}"
     
-        query = f"""
-        [out:json][timeout:90];
-        (
-          node["amenity"~"^{'$|^'.join(amenities)}$"]({overpass_bbox});
-          way["amenity"~"^{'$|^'.join(amenities)}$"]({overpass_bbox});
-          relation["amenity"~"^{'$|^'.join(amenities)}$"]({overpass_bbox});
-        );
-        out center tags;
-        """
+        query = "[out:json][timeout:90];\n(\n"
+        for am in amenities:
+            query += f'  node["amenity"="{am}"]({overpass_bbox});\n'
+            query += f'  way["amenity"="{am}"]({overpass_bbox});\n'
+            query += f'  relation["amenity"="{am}"]({overpass_bbox});\n'
+        query += ");\nout center tags;\n"
         
         endpoints = [
             "https://overpass-api.de/api/interpreter",
@@ -94,10 +91,11 @@ def fetch_overpass_points(amenities: list[str], bbox: list[float]) -> tuple[list
                     
                 if not features:
                     # Successfully queried, but genuinely 0 results. Don't try other endpoints.
-                    logger.warning(f"Overpass returned no features for {amenities} in bbox {overpass_bbox}. Response: {str(data)[:200]}")
+                    debug_resp = str(data)[:300]
+                    logger.warning(f"Overpass returned no features for {amenities} in bbox {overpass_bbox}. Response: {debug_resp}")
                     # We return [] to let the calling function handle it with a clean error
-                    _cache_overpass[cache_key] = ([], [])
-                    return [], []
+                    _cache_overpass[cache_key] = ([], [{"debug": f"Query:\n{query}\n\nResponse:\n{debug_resp}"}])
+                    return [], [{"debug": f"Query:\n{query}\n\nResponse:\n{debug_resp}"}]
                     
                 _cache_overpass[cache_key] = (features, raw_points)
                 return features, raw_points
@@ -143,7 +141,11 @@ def _build_accessibility_images(aoi_config: dict, amenities: list[str]):
     points, raw_points = fetch_overpass_points(amenities, bbox)
 
     if not points:
-        raise ValueError(f"No {' or '.join(amenities)} found in or near this study area. Try selecting a different area or different amenities.")
+        debug_info = ""
+        if raw_points and len(raw_points) > 0 and "debug" in raw_points[0]:
+            debug_info = "\n\nDEBUG INFO:\n" + raw_points[0]["debug"]
+            
+        raise ValueError(f"No {' or '.join(amenities)} found in or near this study area. Try selecting a different area or different amenities.{debug_info}")
         
     # Cap to avoid GEE payload limits
     max_points = 1500
