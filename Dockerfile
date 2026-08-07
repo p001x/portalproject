@@ -21,7 +21,7 @@ COPY backend /app/backend
 COPY sectrstu /app/sectrstu
 
 # Copy the local vector datasets needed for Accessibility
-COPY "dataset vector" "/app/dataset vector"
+COPY ["dataset vector", "/app/dataset vector"]
 
 # Set the working directory to backend so uvicorn finds main.py easily
 WORKDIR /app/backend
