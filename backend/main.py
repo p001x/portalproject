@@ -300,8 +300,9 @@ def login(req: LoginRequest):
 def forgot_password(req: ForgotPasswordRequest):
     try:
         token = generate_reset_token(req.email)
-        # In a real app, send this via email. We mock it by printing.
-        logger.info(f"MOCK EMAIL to {req.email}: Password reset link -> /reset-password?token={token}")
+        reset_link = f"https://geoportal-ui.onrender.com/reset-password?token={token}"
+        from email_sender import send_reset_email
+        send_reset_email(req.email, reset_link)
         return {"ok": True, "message": "If the email is registered, a reset link has been sent."}
     except ValueError:
         # Don't leak whether email exists for security
