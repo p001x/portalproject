@@ -109,11 +109,25 @@ def compute_ndvi(
             lambda: median.getThumbURL({**vis_params, "region": aoi.bounds(), "dimensions": 512, "format": "png"})
         )
 
+        f_download = executor.submit(
+            lambda: median.getDownloadURL({
+                "name": "NDVI", 
+                "region": aoi.bounds(), 
+                "scale": 30, 
+                "format": "GEO_TIFF", 
+                "maxPixels": 1e9
+            })
+        )
+
         stats = f_stats.result()
         area_dict = f_area.result()
         classify = f_classify.result()
         bounds = f_bounds.result()
         thumb_url = f_thumb.result()
+        try:
+            download_url = f_download.result()
+        except Exception:
+            download_url = None
 
     class_areas = {
         lbl: round((area_dict.get(f"c{i}", 0) or 0) / 1e6, 2)
@@ -126,6 +140,7 @@ def compute_ndvi(
     result = {
         "tile_url": map_id["tile_fetcher"].url_format,
         "thumb_url": thumb_url,
+        "download_url": download_url,
         "stats": {
             "Mean NDVI": round(stats.get("NDVI_mean") or 0, 4),
             "Min NDVI": round(stats.get("NDVI_min") or 0, 4),

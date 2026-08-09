@@ -37,26 +37,17 @@ export function ReportDownloadButton({
     setLoading(true);
     setError(null);
     try {
-      const blob = await api.report({
-        module_name: moduleName,
-        aoi,
-        district,
-        date_range: dateRange,
-        stats,
-        class_areas: classAreas,
-        extra_notes: extraNotes,
-        maps,
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename ?? `${moduleName.replace(/\s+/g, "_")}_${district}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      // Import dynamically to avoid SSR issues if ever ported to Next.js
+      const { generatePDFReport } = await import('@/lib/pdf-generator');
+      
+      // We assume the main content is wrapped in a container with id 'report-container'
+      // If not found, it falls back to 'root'
+      const containerId = document.getElementById('report-container') ? 'report-container' : 'root';
+      
+      await generatePDFReport(containerId, moduleName);
     } catch (e: any) {
-      setError(e.message ?? "Report generation failed");
+      console.error(e);
+      setError(e.message ?? "Client-side report generation failed");
     } finally {
       setLoading(false);
     }

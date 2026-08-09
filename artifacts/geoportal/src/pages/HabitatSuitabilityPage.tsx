@@ -9,22 +9,16 @@ import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { api, HabitatResult, AOIConfig, fetchHabitatSuitability, fetchHabitatAhp, AhpData } from "@/lib/api";
+import { api, HabitatExportResult, AOIConfig, AhpData } from "@/lib/api";
 import { DistrictMap, LegendItem } from "@/components/DistrictMap";
 import { StudyAreaSelector } from "@/components/StudyAreaSelector";
 import { MapExportControls } from "@/components/MapExportControls";
 
-const DISTRICTS = [
-  "Bugesera","Burera","Gakenke","Gasabo","Gatsibo","Gicumbi","Gisagara",
-  "Huye","Kamonyi","Karongi","Kayonza","Kicukiro","Kirehe","Muhanga",
-  "Musanze","Ngoma","Ngororero","Nyabihu","Nyagatare","Nyamagabe",
-  "Nyamasheke","Nyanza","Nyarugenge","Nyaruguru","Rubavu","Ruhango",
-  "Rulindo","Rusizi","Rutsiro","Rwamagana",
-  "Custom Study Area",
-];
+
 
 const FACTOR_KEYS = [
   "wetlands", "water", "landcover", "rainfall", "buildings",
@@ -111,7 +105,7 @@ function SmallNorthArrow() {
 /** Factor map card with cartographic overlays */
 function FactorMapCard({ factorKey, factor, analysisDate }: {
   factorKey: string;
-  factor: HabitatResult["factors"][string];
+  factor: HabitatExportResult["factors"][string];
   analysisDate: string;
 }) {
   return (
@@ -182,43 +176,55 @@ function FactorMapCard({ factorKey, factor, analysisDate }: {
 
 
 export function HabitatSuitabilityPage() {
-  const [district, setDistrict] = useState("Kigali City");
-  const [customAoi, setCustomAoi] = useState<AOIConfig | null>(null);
+  const [aoi, setAoi] = useState<AOIConfig>({ type: "rwanda", country: "Rwanda", province: "Kigali City", name: "Kigali City" });
+  const effectiveDistrictName = aoi.name || "Custom Study Area";
+  const [activeLayer, setActiveLayer] = useState<string>("suitability");
   const [weights, setWeights] = useState<Record<FactorKey, number>>(loadWeights("Kigali City"));
   const [ahpData, setAhpData] = useState<AhpData | null>(null);
   const [reverseFlags, setReverseFlags] = useState<Record<string, boolean>>({});
   const [nClasses, setNClasses] = useState(5);
   const [activeTab, setActiveTab] = useState("map");
 
-  const aoiConfig: AOIConfig = customAoi || (
-    district === "Kigali City" ? { type: "kigali" } : { type: "district", name: district }
-  );
+  const getReq = useCallback(() => {
+    const norm = normalize(weights);
+    const custom_weights: Record<string, number> = {};
+    Object.entries(norm).forEach(([k, v]) => { custom_weights[k] = v / 100.0; });
+    return {
+      aoi: aoi,
+      reverse_flags: reverseFlags,
+      n_classes: nClasses,
+      custom_weights,
+    };
+  }, [weights, aoi, reverseFlags, nClasses]);
 
-  const effectiveDistrictName = customAoi ? (customAoi.name || "Custom Study Area") : (district === "Kigali City" ? "Kigali City" : district);
-
-  const { data, mutate: runAnalysis, isPending } = useMutation({
-    mutationFn: async () => {
-      // Create decimals that sum to 1.0
-      const norm = normalize(weights);
-      const custom_weights: Record<string, number> = {};
-      Object.entries(norm).forEach(([k, v]) => { custom_weights[k] = v / 100.0; });
-      
-      return fetchHabitatSuitability({
-        aoi: aoiConfig,
-        reverse_flags: reverseFlags,
-        n_classes: nClasses,
-        custom_weights,
-      });
-    },
+  const mapMutation = useMutation({
+    mutationFn: async () => api.habitat.map(getReq()),
     onSuccess: () => setActiveTab("map"),
   });
+  const statsMutation = useMutation({ mutationFn: async () => api.habitat.stats(getReq()) });
+  const classifyMutation = useMutation({ mutationFn: async () => api.habitat.classify(getReq()) });
+  const exportMutation = useMutation({ mutationFn: async () => api.habitat.export(getReq()) });
+
+  const runAnalysis = () => {
+    mapMutation.mutate();
+    statsMutation.mutate();
+    classifyMutation.mutate();
+    exportMutation.mutate();
+  };
+
+  const isPending = mapMutation.isPending || statsMutation.isPending || classifyMutation.isPending || exportMutation.isPending;
+  const anyData = mapMutation.data || statsMutation.data || classifyMutation.data || exportMutation.data;
+  const mapData = mapMutation.data;
+  const statsData = statsMutation.data;
+  const classifyData = classifyMutation.data;
+  const exportData = exportMutation.data;
 
   const { mutate: updateAhp } = useMutation({
     mutationFn: async (w: Record<FactorKey, number>) => {
       const norm = normalize(w);
       const custom_weights: Record<string, number> = {};
       Object.entries(norm).forEach(([k, v]) => { custom_weights[k] = v / 100.0; });
-      return fetchHabitatAhp(custom_weights);
+      return api.habitat.ahp(custom_weights);
     },
     onSuccess: (res) => setAhpData(res),
   });
@@ -243,16 +249,9 @@ export function HabitatSuitabilityPage() {
     setReverseFlags({});
   };
 
-  const handleAoiSelect = useCallback((aoi: AOIConfig) => {
-    setCustomAoi(aoi);
-    if (aoi.type === 'district' && aoi.name) {
-      setDistrict(aoi.name);
-    } else {
-      setDistrict("Custom Study Area");
-    }
-  }, []);
 
-  const chartData = data ? Object.entries(data.class_areas_km2).map(([name, area]) => ({ name, area })) : [];
+
+  const chartData = statsData ? Object.entries(statsData.class_areas_km2).map(([name, area]) => ({ name, area })) : [];
 
   return (
     <div className="space-y-6 max-w-[1600px] mx-auto">
@@ -267,20 +266,17 @@ export function HabitatSuitabilityPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* Left Sidebar: Controls */}
-        <div className="lg:col-span-1 space-y-6">
-          <div className="bg-card border rounded-lg p-5 shadow-sm space-y-5">
-            <h3 className="font-semibold text-lg flex items-center border-b pb-2">
+        <div className="lg:col-span-1">
+          <div className="bg-card border rounded-lg shadow-sm flex flex-col h-[calc(100vh-140px)] sticky top-20">
+            <h3 className="font-semibold text-lg flex items-center border-b p-5 shrink-0">
               Configuration
             </h3>
             
-            <div className="space-y-3">
+            <ScrollArea className="flex-1 px-5 py-4">
+              <div className="space-y-5">
+                <div className="space-y-3">
               <Label>Study Area</Label>
-              <StudyAreaSelector
-                districts={DISTRICTS}
-                selectedDistrict={district}
-                onDistrictChange={(d) => { setDistrict(d); setCustomAoi(null); }}
-                onAoiChange={handleAoiSelect}
-              />
+              <StudyAreaSelector value={aoi} onChange={setAoi} />
             </div>
 
             <div className="space-y-3">
@@ -317,135 +313,253 @@ export function HabitatSuitabilityPage() {
                 </div>
               )}
 
-              <div className="space-y-5 max-h-[500px] overflow-y-auto pr-2">
+              <div className="space-y-3">
                 {FACTOR_KEYS.map((k) => (
-                  <div key={k} className="space-y-2 bg-slate-50/50 p-3 rounded-md border border-slate-100">
-                    <div className="flex justify-between text-sm">
-                      <span className="font-medium text-slate-700">{FACTOR_LABELS[k]}</span>
-                      <span className="font-mono text-slate-500 bg-white px-1.5 rounded shadow-sm border border-slate-200">
-                        {weights[k]}
-                      </span>
+                  <div key={k} className="space-y-1.5">
+                    <div className="flex justify-between text-xs font-medium text-slate-700">
+                      <span>{FACTOR_LABELS[k]}</span>
+                      <span className="font-mono text-slate-500">{weights[k]}</span>
                     </div>
                     <Slider
                       value={[weights[k]]}
                       min={0} max={100} step={1}
+                      className="py-1"
                       onValueChange={([val]) => handleWeightChange(k, val)}
                     />
-                    <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-100">
-                      <Label htmlFor={`rev-${k}`} className="text-xs text-slate-500 cursor-pointer">
-                        Reverse Polarity
-                      </Label>
-                      <Switch
-                        id={`rev-${k}`}
-                        checked={reverseFlags[k] || false}
-                        onCheckedChange={(c) => setReverseFlags({ ...reverseFlags, [k]: c })}
-                      />
-                    </div>
                   </div>
                 ))}
               </div>
             </div>
 
-            <Button onClick={() => runAnalysis()} disabled={isPending} className="w-full h-11 text-base">
-              {isPending && <Loader2 className="mr-2 h-5 w-5 animate-spin" />}
-              {isPending ? "Computing AHP Model..." : "Run AHP Overlay"}
-            </Button>
+            {/* Factor Reversal Section */}
+            <div className="space-y-2.5 pt-2 border-t">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Reverse Polarity
+              </Label>
+              <div className="space-y-2 text-xs">
+                {FACTOR_KEYS.map((k) => (
+                  <div key={k} className="flex items-center justify-between">
+                    <span>{FACTOR_LABELS[k]}</span>
+                    <Switch
+                      checked={reverseFlags[k] || false}
+                      onCheckedChange={(c) => setReverseFlags({ ...reverseFlags, [k]: c })}
+                    />
+                  </div>
+                ))}
+              </div>
+              </div>
+            </div>
+            </ScrollArea>
+
+            <div className="p-5 border-t shrink-0">
+              <Button onClick={runAnalysis} disabled={isPending} className="w-full h-11 text-base">
+                {isPending && <Loader2 className="mr-2 h-5 w-5 animate-spin" />}
+                {isPending ? "Generating Map..." : "Run AHP Overlay"}
+              </Button>
+            </div>
           </div>
         </div>
 
         {/* Right Content Area */}
-        <div className="lg:col-span-3 space-y-6">
-          {data ? (
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <div className="lg:col-span-3 flex flex-col h-[calc(100vh-140px)] sticky top-20">
+          {isPending && !anyData ? (
+            <div className="h-[600px] border rounded-lg flex flex-col items-center justify-center bg-slate-50/50 text-slate-400">
+              <Loader2 className="w-8 h-8 animate-spin mb-4" />
+              <p>Analyzing Habitat Suitability...</p>
+            </div>
+          ) : anyData ? (
+            <Tabs value={activeTab} onValueChange={(v: any) => setActiveTab(v)} className="h-full flex flex-col w-full">
               <div className="flex items-center justify-between mb-4">
-                <TabsList className="grid w-full max-w-[400px] grid-cols-2">
-                  <TabsTrigger value="map">Final Suitability Map</TabsTrigger>
-                  <TabsTrigger value="factors">Factor Scores</TabsTrigger>
+                <TabsList className="self-start">
+                  <TabsTrigger value="map">Map</TabsTrigger>
+                  <TabsTrigger value="stats">Statistics</TabsTrigger>
+                  <TabsTrigger value="factors">Factor Maps</TabsTrigger>
+                  <TabsTrigger value="static-map">Static Maps</TabsTrigger>
+                  <TabsTrigger value="report" className="gap-1.5"><FileText className="w-3.5 h-3.5" />Report</TabsTrigger>
                 </TabsList>
                 
                 <div className="flex gap-2">
-                  {data.download_url && (
+                  {exportData?.download_url ? (
                     <Button variant="outline" size="sm" asChild>
-                      <a href={data.download_url} download target="_blank" rel="noreferrer">
+                      <a href={exportData.download_url} download target="_blank" rel="noreferrer">
                         <FileText className="w-4 h-4 mr-2" /> Download Final TIF
                       </a>
                     </Button>
+                  ) : (
+                    <Button variant="outline" size="sm" disabled>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Preparing TIF...
+                    </Button>
                   )}
-                  <MapExportControls
-                    mapUrl={data.tile_url}
-                    district={effectiveDistrictName}
-                    title="Crane Habitat Suitability"
-                    bbox={data.classify?.panels?.[0]?.bbox || undefined}
-                    classAreas={data.class_areas_km2}
-                  />
                 </div>
               </div>
 
-              <TabsContent value="map" className="mt-0 space-y-6">
+              {/* Map Tab */}
+              <TabsContent value="map" className="flex-1 min-h-[500px] mt-0">
                 <div className="bg-card border rounded-lg p-5 shadow-sm">
                   <h3 className="font-semibold text-lg mb-4">
                     Habitat Suitability (Weighted Overlay) — {effectiveDistrictName}
                   </h3>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div className="md:col-span-2">
-                      <div className="aspect-[4/3] rounded-md overflow-hidden border shadow-inner">
-                        <DistrictMap tileUrl={data.tile_url} legend={SUITABILITY_LEGEND} />
+                  <div className="h-[520px] rounded-lg overflow-hidden border">
+                    {mapData ? (
+                      <DistrictMap center={mapData.center} bbox={mapData.bbox as any} tileUrl={mapData.tile_url} legend={SUITABILITY_LEGEND} />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center bg-slate-50">
+                        <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
                       </div>
-                    </div>
-                    
-                    <div className="space-y-6">
-                      <div className="bg-slate-50 rounded-lg p-4 border">
-                        <h4 className="font-medium mb-3 flex items-center">
-                          Area Statistics
-                        </h4>
-                        <div className="h-[250px]">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <BarChart data={chartData} layout="vertical" margin={{ left: 10, right: 30, top: 0, bottom: 0 }}>
-                              <XAxis type="number" unit=" km²" fontSize={11} />
-                              <YAxis dataKey="name" type="category" width={80} fontSize={11} tickFormatter={(val) => val.split(" ")[0]} />
-                              <Tooltip formatter={(val: number) => [`${val} km²`, "Area"]} cursor={{fill: 'transparent'}} />
-                              <Bar dataKey="area" radius={[0, 4, 4, 0]} barSize={20}>
-                                {chartData.map((entry, index) => (
-                                  <Cell key={`cell-${index}`} fill={CLASS_COLOR_LIST[index % CLASS_COLOR_LIST.length]} />
-                                ))}
-                              </Bar>
-                            </BarChart>
-                          </ResponsiveContainer>
-                        </div>
-                      </div>
+                    )}
+                  </div>
+                </div>
+              </TabsContent>
 
-                      <div className="bg-slate-50 rounded-lg p-4 border text-sm">
-                        <h4 className="font-medium mb-2">AHP Weights Applied</h4>
-                        <div className="space-y-1.5 max-h-[160px] overflow-y-auto pr-2">
-                          {Object.entries(data.factors).map(([k, v]) => (
-                            <div key={k} className="flex justify-between items-center text-xs">
-                              <span className="text-muted-foreground">{v.label}</span>
-                              <span className="font-medium">{v.weight_pct.toFixed(1)}%</span>
-                            </div>
-                          ))}
+              {/* Statistics Tab */}
+              <TabsContent value="stats" className="flex-1 overflow-y-auto space-y-6 mt-0">
+                <div>
+                  <h2 className="font-semibold text-lg mb-1">Statistics — {effectiveDistrictName}</h2>
+                  <p className="text-sm text-muted-foreground">Area distribution and AHP Weights Applied.</p>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="bg-card rounded-lg p-5 border shadow-sm">
+                    <h4 className="font-medium mb-4 flex items-center">Area Statistics</h4>
+                    <div className="h-[300px]">
+                      {statsData ? (
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart data={chartData} layout="vertical" margin={{ left: 10, right: 30, top: 0, bottom: 0 }}>
+                            <XAxis type="number" unit=" km²" fontSize={11} />
+                            <YAxis dataKey="name" type="category" width={80} fontSize={11} tickFormatter={(val: string) => val.split(" ")[0]} />
+                            <Tooltip formatter={(val: number) => [`${val} km²`, "Area"]} cursor={{fill: 'transparent'}} />
+                            <Bar dataKey="area" radius={[0, 4, 4, 0]} barSize={20}>
+                              {chartData.map((entry: any, index: number) => (
+                                <Cell key={`cell-${index}`} fill={CLASS_COLOR_LIST[index % CLASS_COLOR_LIST.length]} />
+                              ))}
+                            </Bar>
+                          </BarChart>
+                        </ResponsiveContainer>
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
                         </div>
-                      </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="bg-card rounded-lg p-5 border text-sm shadow-sm">
+                    <h4 className="font-medium mb-4">AHP Weights Applied</h4>
+                    <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2">
+                      {exportData ? (
+                        Object.entries(exportData.factors).map(([k, v]) => (
+                          <div key={k} className="flex justify-between items-center text-sm p-2 bg-slate-50/50 rounded border border-slate-100">
+                            <span className="text-muted-foreground">{v.label}</span>
+                            <span className="font-semibold">{v.weight_pct.toFixed(1)}%</span>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="flex items-center justify-center py-4">
+                          <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
               </TabsContent>
 
-              <TabsContent value="factors" className="mt-0">
+              {/* Factor Maps Tab */}
+              <TabsContent value="factors" className="flex-1 overflow-y-auto space-y-6 mt-0">
                 <div className="bg-card border rounded-lg p-5 shadow-sm">
                   <div className="flex items-center justify-between mb-4">
-                    <h3 className="font-semibold text-lg">Reclassified Criterion Maps (Scores 1-5)</h3>
+                    <div>
+                      <h3 className="font-semibold text-lg">Reclassified Criterion Maps (Scores 1-5)</h3>
+                      <p className="text-sm text-muted-foreground">Individual factor maps reclassified into suitability scores based on AHP polarity.</p>
+                    </div>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {exportData ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                      {FACTOR_KEYS.map((k) => (
+                        <FactorMapCard
+                          key={k}
+                          factorKey={k}
+                          factor={exportData.factors[k]}
+                          analysisDate={new Date().toLocaleDateString()}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="h-64 flex flex-col items-center justify-center text-muted-foreground">
+                      <Loader2 className="w-8 h-8 animate-spin mb-4" />
+                      <p>Generating factor maps...</p>
+                    </div>
+                  )}
+                </div>
+              </TabsContent>
+
+              {/* Static Maps Tab */}
+              <TabsContent value="static-map" className="flex-1 overflow-y-auto space-y-4 mt-0">
+                <div>
+                  <h2 className="font-semibold text-lg mb-1">Professional Cartography</h2>
+                  <p className="text-sm text-muted-foreground">High-quality static maps ready for presentation.</p>
+                </div>
+                
+                <div className="flex flex-col gap-2">
+                  <span className="text-sm font-medium">Select Map to Export:</span>
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    <Button
+                      size="sm"
+                      variant={activeLayer === "suitability" ? "default" : "outline"}
+                      onClick={() => setActiveLayer("suitability")}
+                    >
+                      Final Suitability
+                    </Button>
                     {FACTOR_KEYS.map((k) => (
-                      <FactorMapCard
+                      <Button
                         key={k}
-                        factorKey={k}
-                        factor={data.factors[k]}
-                        analysisDate={new Date().toLocaleDateString()}
-                      />
+                        size="sm"
+                        variant={activeLayer === k ? "default" : "outline"}
+                        onClick={() => setActiveLayer(k)}
+                      >
+                        {FACTOR_LABELS[k]}
+                      </Button>
                     ))}
                   </div>
+                </div>
+
+                {exportMutation.isPending && !exportData ? (
+                   <div className="flex items-center justify-center py-10"><Loader2 className="w-6 h-6 animate-spin text-muted-foreground" /></div>
+                ) : exportData && mapData ? (
+                  <div className="bg-card border rounded-lg p-4">
+                    <MapExportControls
+                      tileUrl={activeLayer === "suitability" ? mapData.tile_url : mapData.factor_maps?.[activeLayer]?.tile_url || mapData.tile_url}
+                      thumbUrl={activeLayer === "suitability" ? exportData.thumb_url : exportData.factors[activeLayer]?.thumb_url}
+                      downloadUrl={activeLayer === "suitability" ? exportData.download_url : exportData.factors[activeLayer]?.download_url}
+                      district={effectiveDistrictName}
+                      title={activeLayer === "suitability" ? "Crane Habitat Suitability" : `${FACTOR_LABELS[activeLayer as FactorKey]} Factor`}
+                      classAreas={activeLayer === "suitability" ? (statsData?.class_areas_km2 || {}) : undefined}
+                    />
+                  </div>
+                ) : (
+                  <div className="text-sm text-muted-foreground">Waiting for map data to load...</div>
+                )}
+              </TabsContent>
+
+              {/* Report Tab */}
+              <TabsContent value="report" className="space-y-6 mt-0">
+                <div>
+                  <h2 className="font-semibold text-lg mb-1">PDF Report — {effectiveDistrictName}</h2>
+                  <p className="text-sm text-muted-foreground">
+                    Download a full PDF report including habitat suitability statistics, area analysis, and factor maps.
+                  </p>
+                </div>
+                <div className="bg-card border rounded-lg p-5 space-y-4 shadow-sm">
+                  <p className="text-sm text-muted-foreground leading-relaxed">
+                    <strong>Contents:</strong> Study area metadata · Suitability class area table · Reclassified criterion maps · AHP methodology notes.
+                  </p>
+                  
+                  {isPending ? (
+                     <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin"/> Gathering report data...</div>
+                  ) : (
+                    <div className="text-sm text-muted-foreground italic border-l-2 border-primary/50 pl-4 py-1">
+                      Automated PDF Report generation for the Habitat module is coming soon. Please use the Static Maps tab to export print-ready cartography in the meantime.
+                    </div>
+                  )}
                 </div>
               </TabsContent>
             </Tabs>

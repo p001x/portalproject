@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "C:\Users\user\Documents\blacportal\backend\routers\aoi_router.py", line 33, in get_regions
+    _require_gee()
+  File "C:\Users\user\Documents\blacportal\backend\main.py", line 99, in _require_gee
+    raise HTTPException(status_code=503, detail="GEE is still initializing — please retry in ~30 seconds.")
+fastapi.exceptions.HTTPException: 503: GEE is still initializing — please retry in ~30 seconds.

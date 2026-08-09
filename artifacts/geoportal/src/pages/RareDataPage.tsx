@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useAuth } from "@/hooks/use-auth";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Trash2, Download, Upload, Link as LinkIcon, Database, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -343,8 +344,6 @@ function CommunityTab() {
 }
 
 function AdminTab() {
-  const [passcode, setPasscode] = useState("");
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [uploadName, setUploadName] = useState("");
   const [uploadDesc, setUploadDesc] = useState("");
@@ -352,7 +351,6 @@ function AdminTab() {
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["datasets", "all"],
     queryFn: () => api.datasets.list("all"),
-    enabled: isAuthenticated,
   });
   const records = data?.records ?? [];
 
@@ -385,41 +383,6 @@ function AdminTab() {
       qc.invalidateQueries({ queryKey: ["datasets", "community"] });
     },
   });
-
-  if (!isAuthenticated) {
-    return (
-      <div className="flex flex-col items-center justify-center p-12 space-y-4 border rounded-lg bg-muted/20">
-        <div className="p-3 bg-background border rounded-full">
-          <Lock className="w-6 h-6 text-muted-foreground" />
-        </div>
-        <div className="text-center">
-          <h3 className="text-lg font-medium">Admin Access Required</h3>
-          <p className="text-sm text-muted-foreground">Enter the admin passcode to manage datasets.</p>
-        </div>
-        <div className="flex gap-2 max-w-sm w-full pt-2">
-          <input 
-            type="password" 
-            placeholder="Passcode"
-            value={passcode}
-            onChange={(e) => setPasscode(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                if (passcode === "admin123") setIsAuthenticated(true);
-                else alert("Incorrect passcode.");
-              }
-            }}
-            className="flex-1 rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-          />
-          <Button onClick={() => {
-            if (passcode === "admin123") setIsAuthenticated(true);
-            else alert("Incorrect passcode.");
-          }}>
-            Unlock
-          </Button>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-6">
@@ -485,6 +448,9 @@ function AdminTab() {
 }
 
 export function RareDataPage() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
+
   return (
     <div className="flex h-full overflow-y-auto">
       <main className="flex-1 p-6">
@@ -500,7 +466,7 @@ export function RareDataPage() {
           <TabsList className="mb-4">
             <TabsTrigger value="official">Official Datasets</TabsTrigger>
             <TabsTrigger value="community">Community Uploads</TabsTrigger>
-            <TabsTrigger value="admin">Admin Upload</TabsTrigger>
+            {isAdmin && <TabsTrigger value="admin">Admin Upload</TabsTrigger>}
           </TabsList>
 
           <TabsContent value="official">
@@ -509,9 +475,11 @@ export function RareDataPage() {
           <TabsContent value="community">
             <CommunityTab />
           </TabsContent>
-          <TabsContent value="admin">
-            <AdminTab />
-          </TabsContent>
+          {isAdmin && (
+            <TabsContent value="admin">
+              <AdminTab />
+            </TabsContent>
+          )}
         </Tabs>
       </main>
     </div>

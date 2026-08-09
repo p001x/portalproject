@@ -366,6 +366,18 @@ def process_and_store_upload(filename: str, file_bytes: bytes, name: str,
     try:
         if size_mb > MAX_UPLOAD_MB:
             raise ValueError(f"File is {size_mb:.1f} MB, exceeds {MAX_UPLOAD_MB} MB cap.")
+            
+        # Prevent nested zip bombs
+        if filename.lower().endswith(".zip") or file_type == "shapefile":
+            try:
+                with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
+                    for member in zf.infolist():
+                        ext = member.filename.lower()
+                        if ext.endswith(".zip") or ext.endswith(".tar") or ext.endswith(".gz") or ext.endswith(".rar") or ext.endswith(".7z"):
+                            raise ValueError(f"Nested archive found: '{member.filename}'. To prevent system overload, please unzip and upload the raw files or a single unnested zip.")
+            except zipfile.BadZipFile:
+                raise ValueError("The uploaded file is not a valid zip archive or is corrupted.")
+
         if file_type == "shapefile":
             storage_key = f"{data_prefix}{dataset_id}.zip"
             

@@ -109,10 +109,24 @@ def compute_no2(aoi_config: dict, start_date: str, end_date: str, n_classes: int
             lambda: aoi.bounds().getInfo()["coordinates"][0]
         )
 
+        f_download = executor.submit(
+            lambda: composite.getDownloadURL({
+                "name": "NO2_umol_m2", 
+                "region": aoi.bounds(), 
+                "scale": 1113, 
+                "format": "GEO_TIFF", 
+                "maxPixels": 1e9
+            })
+        )
+
         stats = f_stats.result()
         monthly_dict = f_monthly.result()
         classify = f_classify.result()
         bounds = f_bounds.result()
+        try:
+            download_url = f_download.result()
+        except Exception:
+            download_url = None
 
     time_series = [
         {"month": m, "year": y, "NO2 (µmol/m²)": round(monthly_dict.get(f"m{i}") or 0, 2)}
@@ -125,6 +139,7 @@ def compute_no2(aoi_config: dict, start_date: str, end_date: str, n_classes: int
     result = {
         "tile_url": map_id["tile_fetcher"].url_format,
         "thumb_url": composite.getThumbURL({**vis_params, "region": aoi.bounds(), "dimensions": 800, "format": "png"}),
+        "download_url": download_url,
         "stats": {
             "Mean NO2 (µmol/m²)": mean_no2,
             "Max NO2 (µmol/m²)": round(stats.get("NO2_umol_m2_max") or 0, 2),

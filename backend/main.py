@@ -13,10 +13,11 @@ import zipfile
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, File, UploadFile, Form, Query, Request
+from fastapi import FastAPI, HTTPException, File, UploadFile, Form, Query, Request, Depends, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
+
 
 from gee.auth import initialize_gee
 from gee.auth import (
@@ -24,13 +25,25 @@ from gee.auth import (
     verify_individual_session,
     logout_individual,
 )
+from auth_users import get_current_user_or_api_key, generate_api_key_for_user, get_current_user
+
+from gee.irrigation import compute_irrigation_map, compute_irrigation_stats, compute_irrigation_export
+from gee.water_harvesting import compute_water_harvesting_map, compute_water_harvesting_stats, compute_water_harvesting_export
+from gee.wellscope import compute_wellscope
+from gee.biomass import compute_biomass_depletion
 from gee.aoi_utils import RWANDA_DISTRICTS
 from gee.ndvi import compute_ndvi
 from gee.lst import compute_lst
 from gee.rusle import compute_rusle
 from gee.slope import compute_slope
 from gee.landfill import compute_landfill_suitability
-from gee.habitat import compute_habitat_suitability, compute_ahp_data as compute_habitat_ahp
+from gee.habitat import (
+    compute_habitat_map,
+    compute_habitat_stats,
+    compute_habitat_classify,
+    compute_habitat_export,
+    compute_ahp_data as compute_habitat_ahp
+)
 from gee.air_pollution import compute_no2
 from gee.landslide import (
     compute_landslide_map,
@@ -47,6 +60,7 @@ from gee.accessibility import (
 from gee.uhi import compute_uhi
 from gee.drought import compute_agricultural_drought
 from gee.flood import compute_flood_susceptibility
+from gee.change_detection import compute_change_detection
 from reports.cartography import enhance_map_cartography
 
 from storage.dataset_storage import (
@@ -151,6 +165,57 @@ async def track_analytics(request: Request, call_next):
     response = await call_next(request)
     return response
 
+@app.middleware("http")
+async def check_rate_limit_middleware(request: Request, call_next):
+    path = request.url.path
+    heavy_prefixes = [
+        "/api/biomass", "/api/wellscope", "/api/ndvi", "/api/flood",
+        "/api/change-detection", "/api/lst", "/api/rusle", "/api/slope",
+        "/api/landfill", "/api/habitat", "/api/air-pollution", "/api/landslide",
+        "/api/accessibility", "/api/uhi", "/api/drought", "/api/irrigation",
+        "/api/water-harvesting", "/api/report", "/api/static-map"
+    ]
+    if request.method in ["POST", "GET"] and any(path.startswith(prefix) for prefix in heavy_prefixes):
+        from auth_users import decode_token
+        import auth_db
+        from fastapi.responses import JSONResponse
+        
+        api_key = request.headers.get("X-API-Key")
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer sk_"):
+            api_key = auth_header[7:]
+        
+        email = None
+        role = "user"
+        if api_key:
+            user_rec = auth_db.get_user_by_api_key(api_key)
+            if not user_rec:
+                return JSONResponse({"detail": "Invalid API Key"}, status_code=401)
+            email = user_rec["email"]
+            role = user_rec["role"]
+        elif auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+            payload = decode_token(token)
+            if not payload or not payload.get("sub"):
+                return JSONResponse({"detail": "Invalid or expired token. Please log in again."}, status_code=401, headers={"WWW-Authenticate": "Bearer"})
+            email = payload.get("sub")
+            role = payload.get("role", "user")
+        else:
+            return JSONResponse({"detail": "Authentication required for map processing. Please log in."}, status_code=401, headers={"WWW-Authenticate": "Bearer"})
+        
+        # Retroactive admin check from auth_users logic
+        if email.lower() in ["petersonyang8@gmail.com", "pierrendorimana16@gmail.com"]:
+            role = "admin"
+
+        if role != "admin":
+            usage = auth_db.increment_and_check_gee_usage(email, max_requests=15)
+            if not usage["allowed"]:
+                return JSONResponse(
+                    {"detail": "Daily GEE processing limit exceeded (15/day). Please try again tomorrow."},
+                    status_code=429
+                )
+    
+    return await call_next(request)
 
 @app.middleware("http")
 async def add_cache_control_header(request: Request, call_next):
@@ -171,6 +236,134 @@ app.include_router(analytics_router)
 
 from routers.analytics import router as new_analytics_router
 app.include_router(new_analytics_router)
+
+# ── Auth Endpoints ───────────────────────────────────────────────────────────
+
+from auth_users import create_new_user, verify_user, create_access_token, get_current_user, generate_reset_token, reset_password_with_token, get_current_user_or_api_key
+from auth_db import increment_and_check_gee_usage, get_gee_usage
+
+from pydantic import BaseModel, Field
+from typing import Optional
+from fastapi import Depends, HTTPException
+
+class RegisterRequest(BaseModel):
+    name: str = Field(..., min_length=2)
+    email: str
+    password: str = Field(..., min_length=8)
+
+@app.get("/api/auth/gee-usage", tags=["auth"])
+def get_gee_usage_endpoint(user: dict = Depends(get_current_user)):
+    # Admins don't have limits
+    if user.get("role") == "admin":
+        return {"used": 0, "limit": "Unlimited"}
+    
+    used = get_gee_usage(user["email"])
+    return {"used": used, "limit": 15}
+
+class LoginRequest(BaseModel):
+    email: str = Field(..., min_length=5)
+    password: str = Field(..., max_length=15)
+
+class ForgotPasswordRequest(BaseModel):
+    email: str = Field(..., min_length=5)
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(...)
+    new_password: str = Field(..., min_length=8, max_length=15)
+
+class UpdateProfileRequest(BaseModel):
+    name: str = Field(..., min_length=2)
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str = Field(..., min_length=8, max_length=15)
+
+
+@app.post("/api/auth/register", tags=["auth"])
+def register(req: RegisterRequest):
+    try:
+        user = create_new_user(req.name, req.email, req.password)
+        token = create_access_token({"sub": user["email"], "name": user["name"], "role": user["role"]})
+        return {"ok": True, "token": token, "user": user}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+@app.post("/api/auth/login", tags=["auth"])
+def login(req: LoginRequest):
+    user = verify_user(req.email, req.password)
+    if not user:
+        raise HTTPException(401, "Invalid email or password")
+    token = create_access_token({"sub": user["email"], "name": user["name"], "role": user["role"]})
+    return {"ok": True, "token": token, "user": user}
+
+@app.post("/api/auth/forgot-password", tags=["auth"])
+def forgot_password(req: ForgotPasswordRequest):
+    try:
+        token = generate_reset_token(req.email)
+        # In a real app, send this via email. We mock it by printing.
+        logger.info(f"MOCK EMAIL to {req.email}: Password reset link -> /reset-password?token={token}")
+        return {"ok": True, "message": "If the email is registered, a reset link has been sent."}
+    except ValueError:
+        # Don't leak whether email exists for security
+        return {"ok": True, "message": "If the email is registered, a reset link has been sent."}
+
+@app.post("/api/auth/reset-password", tags=["auth"])
+def reset_password(req: ResetPasswordRequest):
+    try:
+        reset_password_with_token(req.token, req.new_password)
+        return {"ok": True, "message": "Password has been reset successfully."}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+@app.get("/api/auth/me", tags=["auth"])
+def get_me(user: dict = Depends(get_current_user)):
+    return {"ok": True, "user": user}
+
+@app.get("/api/auth/api-key", tags=["auth"])
+def get_api_key(user: dict = Depends(get_current_user)):
+    user_db = auth_db.get_user_by_email(user["email"])
+    return {"api_key": user_db.get("api_key") if user_db else None}
+
+@app.post("/api/auth/api-key", tags=["auth"])
+def generate_api_key(user: dict = Depends(get_current_user)):
+    new_key = generate_api_key_for_user(user["email"])
+    return {"api_key": new_key}
+
+@app.put("/api/auth/profile", tags=["auth"])
+def update_profile(req: UpdateProfileRequest, user: dict = Depends(get_current_user)):
+    auth_db.update_user_name(user["email"], req.name)
+    user["name"] = req.name
+    token = create_access_token({"sub": user["email"], "name": user["name"], "role": user["role"]})
+    return {"ok": True, "token": token, "user": user}
+
+@app.post("/api/auth/change-password", tags=["auth"])
+def change_password(req: ChangePasswordRequest, user: dict = Depends(get_current_user)):
+    try:
+        from auth_users import change_user_password
+        change_user_password(user["email"], req.old_password, req.new_password)
+        return {"ok": True, "message": "Password changed successfully."}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+class ServiceRequestModel(BaseModel):
+    service_type: str
+    message: str
+
+import services_db
+import email_notifier
+
+@app.post("/api/services/request", tags=["services"])
+def request_service_endpoint(req: ServiceRequestModel, background_tasks: BackgroundTasks, user: dict = Depends(get_current_user)):
+    try:
+        services_db.create_request(user["email"], req.service_type, req.message)
+        background_tasks.add_task(email_notifier.send_consultation_alert, user["email"], req.service_type, req.message)
+        return {"ok": True}
+    except Exception as exc:
+        raise HTTPException(400, str(exc))
+
+@app.get("/api/services/requests", tags=["services"])
+def get_service_requests_endpoint(user: dict = Depends(get_current_user)):
+    return {"requests": services_db.get_all_requests()}
 
 # ── Meta ─────────────────────────────────────────────────────────────────────
 
@@ -288,6 +481,15 @@ class NDVIRequest(BaseModel):
     start_date: str = Field(..., examples=["2024-01-01"])
     end_date: str = Field(..., examples=["2024-06-30"])
     n_classes: int = Field(5, ge=2, le=10)
+
+
+class ChangeDetectionRequest(BaseModel):
+    aoi: dict = Field(default_factory=dict, description="AOI Configuration object")
+    district: Optional[str] = Field(None, examples=["Gasabo"])
+    before_start: str = Field(..., examples=["2023-01-01"])
+    before_end: str = Field(..., examples=["2023-06-30"])
+    after_start: str = Field(..., examples=["2024-01-01"])
+    after_end: str = Field(..., examples=["2024-06-30"])
 
 
 class LSTRequest(BaseModel):
@@ -527,6 +729,182 @@ def static_map_endpoint(req: StaticMapRequest):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+class IrrigationRequest(BaseModel):
+    aoi: dict
+    start_date: str
+    end_date: str
+    crop_type: str
+
+@app.post("/api/irrigation/map", tags=["analysis"])
+def irrigation_map_endpoint(req: IrrigationRequest):
+    _require_gee()
+    try:
+        res = compute_irrigation_map(req.aoi, req.start_date, req.end_date, req.crop_type)
+        return res
+    except Exception as exc:
+        logger.exception("Irrigation map failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.post("/api/irrigation/stats", tags=["analysis"])
+def irrigation_stats_endpoint(req: IrrigationRequest):
+    _require_gee()
+    try:
+        res = compute_irrigation_stats(req.aoi, req.start_date, req.end_date, req.crop_type)
+        return res
+    except Exception as exc:
+        logger.exception("Irrigation stats failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.post("/api/irrigation/export", tags=["analysis"])
+def irrigation_export_endpoint(req: IrrigationRequest):
+    _require_gee()
+    try:
+        res = compute_irrigation_export(req.aoi, req.start_date, req.end_date, req.crop_type)
+        return res
+    except Exception as exc:
+        logger.exception("Irrigation export failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+class WaterHarvestingRequest(BaseModel):
+    aoi: dict
+    year: int
+    runoff_coefficient: float = 0.8
+    manual_area_m2: Optional[float] = None
+    use_building_footprint: bool = False
+
+@app.post("/api/water-harvesting/map", tags=["analysis"])
+def water_harvesting_map_endpoint(req: WaterHarvestingRequest):
+    _require_gee()
+    try:
+        return compute_water_harvesting_map(req.aoi, req.year)
+    except Exception as exc:
+        logger.exception("Water harvesting map failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.post("/api/water-harvesting/stats", tags=["analysis"])
+def water_harvesting_stats_endpoint(req: WaterHarvestingRequest):
+    _require_gee()
+    try:
+        return compute_water_harvesting_stats(req.aoi, req.year, req.runoff_coefficient, req.manual_area_m2, req.use_building_footprint)
+    except Exception as exc:
+        logger.exception("Water harvesting stats failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.post("/api/water-harvesting/export", tags=["analysis"])
+def water_harvesting_export_endpoint(req: WaterHarvestingRequest):
+    _require_gee()
+    try:
+        return compute_water_harvesting_export(req.aoi, req.year)
+    except Exception as exc:
+        logger.exception("Water harvesting export failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+class WellScopeRequest(BaseModel):
+    aoi: dict
+    custom_weights: Optional[dict] = None
+
+@app.post("/api/wellscope/map", tags=["analysis"])
+def wellscope_map_endpoint(req: WellScopeRequest):
+    _require_gee()
+    try:
+        res = compute_wellscope(req.aoi, req.custom_weights)
+        return {
+            "tile_url": res["tile_url"],
+            "thumb_url": res["thumb_url"],
+            "center": res["center"],
+            "bbox": res["bbox"],
+            "factor_maps": res["factor_maps"],
+            "ahp_data": res["ahp_data"]
+        }
+    except Exception as exc:
+        logger.exception("WellScope map failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+class BiomassRequest(BaseModel):
+    aoi: dict
+    buffer_km: Optional[float] = 3.0
+    year_start: Optional[int] = 2019
+    year_end: Optional[int] = 2023
+
+@app.post("/api/biomass/map", tags=["analysis"])
+def biomass_map_endpoint(req: BiomassRequest):
+    # trigger reload
+    _require_gee()
+    try:
+        res = compute_biomass_depletion(req.aoi, req.buffer_km, req.year_start, req.year_end)
+        return {
+            "tile_url": res["tile_url"],
+            "thumb_url": res.get("thumb_url"),
+            "factor_maps": res.get("factor_maps", {}),
+            "center": res["center"],
+            "bbox": res["bbox"]
+        }
+    except Exception as exc:
+        logger.exception("Biomass map failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.post("/api/biomass/stats", tags=["analysis"])
+def biomass_stats_endpoint(req: BiomassRequest):
+    _require_gee()
+    try:
+        res = compute_biomass_depletion(req.aoi, req.buffer_km, req.year_start, req.year_end)
+        return {
+            "stats": res["stats"],
+            "class_areas_km2": res["class_areas_km2"],
+            "district": res["district"]
+        }
+    except Exception as exc:
+        logger.exception("Biomass stats failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+class BiomassFactorExportRequest(BaseModel):
+    aoi: dict
+    factor_key: str
+    palette: Optional[list] = None
+    buffer_km: Optional[float] = 3.0
+    year_start: Optional[int] = 2019
+    year_end: Optional[int] = 2023
+
+@app.post("/api/biomass/factor-export", tags=["analysis"])
+def biomass_factor_export_endpoint(req: BiomassFactorExportRequest):
+    _require_gee()
+    try:
+        from gee.biomass import export_factor_map
+        return export_factor_map(req.aoi, req.factor_key, req.palette, req.buffer_km, req.year_start, req.year_end)
+    except Exception as exc:
+        logger.exception("Biomass factor export failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.post("/api/wellscope/stats", tags=["analysis"])
+def wellscope_stats_endpoint(req: WellScopeRequest):
+    _require_gee()
+    try:
+        res = compute_wellscope(req.aoi, req.custom_weights)
+        return {
+            "stats": res["stats"],
+            "class_areas_km2": res["class_areas_km2"],
+            "district": res["district"]
+        }
+    except Exception as exc:
+        logger.exception("WellScope stats failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+class WellScopeFactorExportRequest(BaseModel):
+    aoi: dict
+    factor_key: str
+    palette: Optional[list] = None
+
+@app.post("/api/wellscope/factor-export", tags=["analysis"])
+def wellscope_factor_export_endpoint(req: WellScopeFactorExportRequest):
+    _require_gee()
+    try:
+        from gee.wellscope import export_factor_map
+        return export_factor_map(req.aoi, req.factor_key, req.palette)
+    except Exception as exc:
+        logger.exception("WellScope factor export failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
 class ProxyImageRequest(BaseModel):
     url: str
 
@@ -598,7 +976,7 @@ def static_map_download_endpoint(
 
 
 @app.post("/api/flood", tags=["analysis"])
-def flood_endpoint(req: FloodRequest):
+def flood_endpoint(req: FloodRequest, user: dict = Depends(get_current_user_or_api_key)):
     _require_gee()
     try:
         reverse_flags = {
@@ -627,7 +1005,7 @@ def flood_endpoint(req: FloodRequest):
 
 
 @app.post("/api/ndvi", tags=["analysis"])
-def ndvi_endpoint(req: NDVIRequest):
+def ndvi_endpoint(req: NDVIRequest, user: dict = Depends(get_current_user_or_api_key)):
     _require_gee()
     try:
         return compute_ndvi(req.aoi, req.start_date, req.end_date, req.n_classes)
@@ -636,8 +1014,18 @@ def ndvi_endpoint(req: NDVIRequest):
         raise HTTPException(500, str(exc)) from exc
 
 
+@app.post("/api/change-detection", tags=["analysis"])
+def change_detection_endpoint(req: ChangeDetectionRequest, user: dict = Depends(get_current_user_or_api_key)):
+    _require_gee()
+    try:
+        return compute_change_detection(req.aoi, req.before_start, req.before_end, req.after_start, req.after_end)
+    except Exception as exc:
+        logger.exception("Change Detection failed for %s", req.district)
+        raise HTTPException(500, str(exc)) from exc
+
+
 @app.post("/api/lst", tags=["analysis"])
-def lst_endpoint(req: LSTRequest):
+def lst_endpoint(req: LSTRequest, user: dict = Depends(get_current_user_or_api_key)):
     _require_gee()
     try:
         return compute_lst(req.aoi, req.start_date, req.end_date, req.n_classes)
@@ -647,7 +1035,7 @@ def lst_endpoint(req: LSTRequest):
 
 
 @app.post("/api/rusle", tags=["analysis"])
-def rusle_endpoint(req: RUSLERequest):
+def rusle_endpoint(req: RUSLERequest, user: dict = Depends(get_current_user_or_api_key)):
     _require_gee()
     try:
         return compute_rusle(req.aoi, req.year, req.n_classes,
@@ -659,7 +1047,7 @@ def rusle_endpoint(req: RUSLERequest):
 
 
 @app.post("/api/slope", tags=["analysis"])
-def slope_endpoint(req: SlopeRequest):
+def slope_endpoint(req: SlopeRequest, user: dict = Depends(get_current_user_or_api_key)):
     _require_gee()
     try:
         return compute_slope(req.aoi, req.n_classes)
@@ -669,7 +1057,7 @@ def slope_endpoint(req: SlopeRequest):
 
 
 @app.post("/api/landfill", tags=["analysis"])
-def landfill_endpoint(req: LandfillRequest):
+def landfill_endpoint(req: LandfillRequest, user: dict = Depends(get_current_user_or_api_key)):
     _require_gee()
     try:
         return compute_landfill_suitability(req.aoi, req.reverse_river, req.reverse_residential,
@@ -681,15 +1069,40 @@ def landfill_endpoint(req: LandfillRequest):
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-@app.post("/api/habitat", tags=["analysis"])
-def habitat_endpoint(req: HabitatRequest):
+@app.post("/api/habitat/map", tags=["analysis"])
+def habitat_map_endpoint(req: HabitatRequest):
     _require_gee()
     try:
-        return compute_habitat_suitability(
-            req.aoi, req.reverse_flags, req.n_classes, req.custom_weights
-        )
+        return compute_habitat_map(req.aoi, req.reverse_flags, req.custom_weights)
     except Exception as exc:
-        logger.exception("Habitat suitability failed for %s", req.aoi.get("name", "unknown"))
+        logger.exception("Habitat map failed for %s", req.aoi.get("name", "unknown"))
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.post("/api/habitat/stats", tags=["analysis"])
+def habitat_stats_endpoint(req: HabitatRequest):
+    _require_gee()
+    try:
+        return compute_habitat_stats(req.aoi, req.reverse_flags, req.custom_weights)
+    except Exception as exc:
+        logger.exception("Habitat stats failed for %s", req.aoi.get("name", "unknown"))
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.post("/api/habitat/classify", tags=["analysis"])
+def habitat_classify_endpoint(req: HabitatRequest):
+    _require_gee()
+    try:
+        return compute_habitat_classify(req.aoi, req.reverse_flags, req.n_classes, req.custom_weights)
+    except Exception as exc:
+        logger.exception("Habitat classify failed for %s", req.aoi.get("name", "unknown"))
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.post("/api/habitat/export", tags=["analysis"])
+def habitat_export_endpoint(req: HabitatRequest):
+    _require_gee()
+    try:
+        return compute_habitat_export(req.aoi, req.reverse_flags, req.custom_weights)
+    except Exception as exc:
+        logger.exception("Habitat export failed for %s", req.aoi.get("name", "unknown"))
         raise HTTPException(status_code=500, detail=str(exc))
 
 @app.post("/api/habitat/ahp", tags=["analysis"])
@@ -1706,7 +2119,7 @@ class IngestUrlRequest(BaseModel):
     creator: str = "link_import"
 
 @app.post("/api/samples/ingest-url", tags=["samples"])
-def ingest_url_endpoint(req: IngestUrlRequest, request: Request):
+def ingest_url_endpoint(req: IngestUrlRequest, background_tasks: BackgroundTasks, request: Request):
     _require_individual_gee(request)
     url = req.url
     import re
@@ -1726,40 +2139,23 @@ def ingest_url_endpoint(req: IngestUrlRequest, request: Request):
     is_vector = info.get("format") == "geojson" or req.url.lower().endswith(".geojson")
     is_raster = not is_vector
     if is_raster:
-        import sys, os as _os
-        sys.path.insert(0, _os.path.join(_os.path.dirname(__file__), '..', 'rwanda-geoportal'))
-        from gee_scripts.gee_asset_upload import push_raster_to_gee
+        import uuid as _uuid
+        import ee
         try:
-            if req.url.startswith("kaggle://"):
-                from storage.dataset_storage import download_dataset_bytes
-                file_bytes = download_dataset_bytes(req.url)
-            else:
-                req_obj = urllib.request.Request(req.url, headers={'User-Agent': 'Mozilla/5.0'})
-                with urllib.request.urlopen(req_obj, timeout=60) as resp:
-                    file_bytes = resp.read()
-                
-            filename = _os.path.basename(req.url) or "imported_raster.tif"
-            if not filename.endswith(".tif") and not filename.endswith(".tiff"):
-                filename += ".tif"
-            import uuid as _uuid
             asset_name = "url_import_" + _uuid.uuid4().hex[:8]
+            project = ee.data._cloud_api_user_project
+            if not project:
+                # fallback to service account project or default
+                project = "ee-petersonyang87"
             
-            result = push_raster_to_gee(file_bytes, filename, asset_name)
+            asset_id = f"projects/{project}/assets/{asset_name}"
             
-            from storage.dataset_storage import add_dataset, DatasetRecord
-            new_dataset = DatasetRecord(
-                id=_uuid.uuid4().hex,
-                name=req.class_label or filename,
-                source="community",
-                category="Raster Imagery",
-                description=f"Imported from {req.url}",
-                storage_key=result.asset_id,
-                file_type="tiff",
-                layer_type="raster",
-            )
-            add_dataset(new_dataset)
+            # Start the background task (reusing the one we built for cloud ingestion)
+            background_tasks.add_task(background_download_and_ingest, req.url, asset_id, project)
             
-            return {"imported_count": 0, "asset_id": result.asset_id, "kind": "raster", "info": info}
+            # We don't save the dataset record yet because it's not finished, 
+            # or we could save a placeholder. Let's just return background=True
+            return {"imported_count": 0, "asset_id": asset_id, "kind": "raster", "info": info, "background": True}
         except Exception as exc:
             logger.warning("Could not ingest raster URL %s: %s", req.url, exc)
             raise HTTPException(status_code=400, detail=f"Failed to ingest raster URL to GEE: {str(exc)}")
@@ -1949,3 +2345,214 @@ def import_dataset_endpoint(req: ImportDatasetRequest, request: Request):
     raise HTTPException(status_code=400, detail="This dataset does not contain vector features (e.g. GeoJSON/JSON) suitable for importing as Machine Learning training samples, nor is it a valid raster (TIFF) for asset ingestion. Please download it or view its preview instead.")
 
     raise HTTPException(400, f"No spatial features or bounding box available for dataset '{record.get('name')}'")
+
+
+# ── Community Forum Endpoints ────────────────────────────────────────────────
+import community_db
+import security_middleware
+from fastapi.staticfiles import StaticFiles
+
+from pydantic import BaseModel, Field
+from typing import Optional
+from fastapi import UploadFile, File
+
+class CommentCreateRequest(BaseModel):
+    author: str = Field(..., min_length=2, max_length=50)
+    content: str = Field(..., min_length=1, max_length=5000)
+    tag: Optional[str] = None
+    image_url: Optional[str] = None
+
+@app.get("/api/community/comments", tags=["community"])
+def api_get_comments(tag: Optional[str] = None):
+    return {
+        "comments": community_db.get_comments(tag_filter=tag),
+        "is_frozen": community_db.is_forum_frozen(),
+        "blocked_users": community_db.get_blocked_users()
+    }
+
+import time
+from fastapi import Request
+
+_COMMUNITY_RATE_LIMITS = {}
+
+@app.post("/api/community/comments", tags=["community"])
+def api_post_comment(req: CommentCreateRequest, request: Request):
+    if community_db.is_forum_frozen():
+        raise HTTPException(403, "The community forum is currently frozen. No new comments can be posted.")
+        
+    if community_db.is_user_blocked(req.author):
+        raise HTTPException(403, "You have been blocked from posting in the community forum.")
+
+    client_ip = request.client.host if request.client else "unknown_ip"
+    current_time = time.time()
+    
+    # Check rate limit (2 minutes = 120 seconds)
+    author_key = f"author_{req.author.lower()}"
+    ip_key = f"ip_{client_ip}"
+    
+    for key in [author_key, ip_key]:
+        last_time = _COMMUNITY_RATE_LIMITS.get(key, 0)
+        if current_time - last_time < 120:
+            raise HTTPException(status_code=429, detail="Rate limit exceeded. You can only send 1 message every 2 minutes.")
+            
+    try:
+        safe_content = security_middleware.validate_and_sanitize_text(req.content)
+        safe_author = security_middleware.validate_and_sanitize_text(req.author)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+        
+    # Update rate limits
+    _COMMUNITY_RATE_LIMITS[author_key] = current_time
+    _COMMUNITY_RATE_LIMITS[ip_key] = current_time
+        
+    comment_id = community_db.add_comment(
+        author=safe_author,
+        content=safe_content,
+        tag=req.tag,
+        image_url=req.image_url
+    )
+    return {"status": "success", "id": comment_id}
+
+@app.delete("/api/community/comments/{comment_id}", tags=["community"])
+def api_delete_comment(comment_id: int, user: dict = Depends(get_current_user)):
+    if user.get("role") != "admin":
+        raise HTTPException(403, "Admin access required.")
+    community_db.delete_comment(comment_id)
+    return {"ok": True}
+
+class ForumFreezeRequest(BaseModel):
+    frozen: bool
+
+@app.post("/api/community/settings/freeze", tags=["community"])
+def api_freeze_forum(req: ForumFreezeRequest, user: dict = Depends(get_current_user)):
+    if user.get("role") != "admin":
+        raise HTTPException(403, "Admin access required.")
+    community_db.set_forum_frozen(req.frozen)
+    return {"ok": True}
+
+class BlockUserRequest(BaseModel):
+    author: str
+
+@app.post("/api/community/users/block", tags=["community"])
+def api_block_user(req: BlockUserRequest, user: dict = Depends(get_current_user)):
+    if user.get("role") != "admin":
+        raise HTTPException(403, "Admin access required.")
+    community_db.block_user(req.author)
+    return {"ok": True}
+
+@app.post("/api/community/users/unblock", tags=["community"])
+def api_unblock_user(req: BlockUserRequest, user: dict = Depends(get_current_user)):
+    if user.get("role") != "admin":
+        raise HTTPException(403, "Admin access required.")
+    community_db.unblock_user(req.author)
+    return {"ok": True}
+    
+@app.post("/api/community/upload", tags=["community"])
+async def api_upload_community_image(file: UploadFile = File(...)):
+    file_bytes = await file.read()
+    
+    try:
+        safe_jpg_bytes = security_middleware.validate_and_reencode_image(file_bytes)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+        
+    import uuid
+    filename = f"{uuid.uuid4().hex}.jpg"
+    
+    upload_dir = os.path.join(os.path.dirname(__file__), "static", "uploads")
+    os.makedirs(upload_dir, exist_ok=True)
+    
+    file_path = os.path.join(upload_dir, filename)
+    with open(file_path, "wb") as f:
+        f.write(safe_jpg_bytes)
+        
+    return {"url": f"/api/static/uploads/{filename}"}
+
+# Mount static files for community images
+static_upload_dir = os.path.join(os.path.dirname(__file__), "static", "uploads")
+os.makedirs(static_upload_dir, exist_ok=True)
+try:
+    app.mount("/api/static/uploads", StaticFiles(directory=static_upload_dir), name="uploads")
+except Exception as e:
+    import logging
+    logging.getLogger(__name__).warning(f"Failed to mount static uploads (aiofiles missing?): {e}")
+
+class IngestRasterModel(BaseModel):
+    source_url: str
+    target_asset_id: Optional[str] = None
+
+def background_download_and_ingest(url: str, asset_id: str, custom_project: Optional[str] = None):
+    import requests
+    import os
+    import tempfile
+    import subprocess
+    import logging
+    
+    temp_filepath = None
+    try:
+        logging.info(f"Background Ingest: Downloading {url} to temp file...")
+        resp = requests.get(url, stream=True)
+        resp.raise_for_status()
+        
+        fd, temp_filepath = tempfile.mkstemp(suffix=".tif")
+        with os.fdopen(fd, 'wb') as f:
+            for chunk in resp.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+                    
+        logging.info(f"Background Ingest: Download complete. Pushing to GEE...")
+        
+        cmd = ["earthengine", "upload", "image", "--asset_id", asset_id, temp_filepath]
+        if custom_project:
+            cmd.extend(["--project", custom_project])
+            
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            logging.error(f"Error uploading to GEE: {result.stderr}")
+        else:
+            logging.info(f"Successfully started GEE upload task for {asset_id}")
+            
+    except Exception as e:
+        logging.error(f"Background ingest failed for {url}: {e}")
+    finally:
+        if temp_filepath and os.path.exists(temp_filepath):
+            os.remove(temp_filepath)
+            logging.info(f"Background Ingest: Cleaned up temporary file {temp_filepath}")
+
+@app.post("/api/gee/ingest-raster", tags=["gee"])
+def api_ingest_raster(req: IngestRasterModel, background_tasks: BackgroundTasks, user: dict = Depends(get_current_user)):
+    try:
+        import ee
+        import uuid
+        
+        url = req.source_url
+        asset_id = req.target_asset_id
+        project = ee.data._cloud_api_user_project
+        
+        if not asset_id:
+            if not project:
+                raise ValueError("Could not determine GEE project. Please provide a full target_asset_id.")
+            asset_id = f"projects/{project}/assets/ingest_{uuid.uuid4().hex[:8]}"
+
+        if url.startswith("gs://"):
+            # Direct server-side ingestion
+            request_id = uuid.uuid4().hex
+            manifest = {
+                "name": asset_id,
+                "tilesets": [{"id": "t1", "sources": [{"uris": [url]}]}]
+            }
+            ee.data.startIngestion(request_id, manifest)
+            return {"ok": True, "message": f"Direct GCS Ingestion task started. Target: {asset_id}"}
+        
+        elif url.startswith("http://") or url.startswith("https://"):
+            # Background pipeline
+            background_tasks.add_task(background_download_and_ingest, url, asset_id, project)
+            return {"ok": True, "message": f"HTTP Download started in background. Target: {asset_id}"}
+        
+        else:
+            raise ValueError("URL must start with gs://, http://, or https://")
+            
+    except Exception as exc:
+        raise HTTPException(400, str(exc))
+

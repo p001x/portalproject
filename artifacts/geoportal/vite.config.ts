@@ -3,6 +3,20 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
+import fs from "fs";
+
+try {
+  const src = 'C:/Users/user/.gemini/antigravity-ide/brain/8eeefed3-4a22-421f-8ab3-86b345afa2e0/media__1786211480953.png';
+  const dest = path.resolve(import.meta.dirname, 'public/logo.png');
+  if (fs.existsSync(src)) {
+    if (!fs.existsSync(path.dirname(dest))) {
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+    }
+    fs.copyFileSync(src, dest);
+  }
+} catch (e) {
+  console.error('Failed to copy logo:', e);
+}
 
 const rawPort = process.env.PORT || "5000";
 const port = Number(rawPort);

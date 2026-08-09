@@ -108,10 +108,24 @@ def compute_lst(aoi_config: dict, start_date: str, end_date: str, n_classes: int
             lambda: aoi.bounds().getInfo()["coordinates"][0]
         )
 
+        f_download = executor.submit(
+            lambda: lst_median.getDownloadURL({
+                "name": "LST", 
+                "region": aoi.bounds(), 
+                "scale": 30, 
+                "format": "GEO_TIFF", 
+                "maxPixels": 1e9
+            })
+        )
+
         stats = f_stats.result()
         area_dict = f_area.result()
         classify = f_classify.result()
         bounds = f_bounds.result()
+        try:
+            download_url = f_download.result()
+        except Exception:
+            download_url = None
 
     class_areas = {lbl: round((area_dict.get(f"c{i}", 0) or 0) / 1e6, 2) for i, lbl in enumerate(labels)}
 
@@ -120,6 +134,7 @@ def compute_lst(aoi_config: dict, start_date: str, end_date: str, n_classes: int
     result = {
         "tile_url": map_id["tile_fetcher"].url_format,
         "thumb_url": lst_median.getThumbURL({**vis_params, "region": aoi.bounds(), "dimensions": 800, "format": "png"}),
+        "download_url": download_url,
         "stats": {
             "Mean LST (°C)": round(stats.get("LST_mean") or 0, 2),
             "Min LST (°C)": round(stats.get("LST_min") or 0, 2),

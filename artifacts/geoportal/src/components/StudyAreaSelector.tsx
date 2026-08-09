@@ -23,7 +23,7 @@ export function StudyAreaSelector({ value, onChange }: StudyAreaSelectorProps) {
   const [uploading, setUploading] = useState(false);
 
   // Queries for GAUL hierarchies
-  const { data: countriesData, isLoading: loadingCountries } = useQuery({
+  const { data: countriesData, isLoading: loadingCountries, error: countriesError } = useQuery({
     queryKey: ["regions", "countries"],
     queryFn: () => api.getRegions(),
   });
@@ -139,6 +139,11 @@ export function StudyAreaSelector({ value, onChange }: StudyAreaSelectorProps) {
                 ))}
               </SelectContent>
             </Select>
+            {countriesError && (
+              <div className="text-red-500 text-xs font-semibold p-1 border border-red-500 rounded bg-red-50 mt-1">
+                Error loading regions: {String(countriesError)}
+              </div>
+            )}
           </div>
 
           {value.country && value.country !== "Rwanda" && (

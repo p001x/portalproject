@@ -150,6 +150,19 @@ def authenticate_individual(token_credential: str, project_name: str | None = No
             logger.info("Reusing existing GEE individual session for %s", email)
             return {"ok": True, "token": token, "email": email, "project_name": project_name}
 
+    # Strict Validation for GEE Project ID and Email Ownership
+    if project_name:
+        project_name = project_name.strip()
+        if not re.match(r"^[a-z][a-z0-9-]{4,28}[a-z0-9]$", project_name):
+            raise ValueError(f"Project ID '{project_name}' is not a valid Google Cloud Project ID format.")
+            
+        try:
+            # 1. Verify Project Exists and Service Account has basic access
+            ee.data.getList({'id': f'projects/{project_name}/assets'})
+        except Exception as e:
+            logger.warning("Project verification failed for %s: %s", project_name, e)
+            raise ValueError(f"GEE Project '{project_name}' is either invalid, does not exist, or the backend Service Account lacks access to it.")
+
     # Create a new session
     session_token = secrets.token_urlsafe(32)
     _individual_sessions[session_token] = {

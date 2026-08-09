@@ -11,6 +11,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { InteractiveMapEditor } from "./InteractiveMapEditor";
+import { BASE } from "@/lib/api";
 
 const PALETTES = [
   { name: "Default (Module specific)", value: "default", hexes: [] },
@@ -90,9 +91,12 @@ export function MapExportControls({ tileUrl, thumbUrl, district, title, classAre
     const debounceTimer = setTimeout(() => {
       timeoutId = setTimeout(() => abortController.abort(), 35000);
 
-      fetch("https://geoportal-api-ygzi.onrender.com/api/static-map", {
+      fetch(`${BASE}/static-map`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          "Content-Type": "application/json",
+          ...(localStorage.getItem("spetro_token") ? { "Authorization": `Bearer ${localStorage.getItem("spetro_token")}` } : {})
+        },
         body: JSON.stringify({
           district,
           title,
@@ -164,7 +168,7 @@ export function MapExportControls({ tileUrl, thumbUrl, district, title, classAre
     retryCount,
   ]);
 
-  const handleDownload = () => {
+  const handleDownload = async () => {
     // If the user wants a RAW TIF and the module provided a raw data download URL, use it directly!
     if (exportFormat === "TIF" && downloadUrl) {
       window.open(downloadUrl, "_blank");
@@ -174,37 +178,48 @@ export function MapExportControls({ tileUrl, thumbUrl, district, title, classAre
     const targetUrl = thumbUrl || tileUrl;
     if (!targetUrl) return;
 
-    const form = document.createElement("form");
-    form.method = "POST";
-    form.action = "https://geoportal-api-ygzi.onrender.com/api/static-map-download";
-    form.style.display = "none";
+    try {
+      const res = await fetch(`${BASE}/static-map-download`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          ...(localStorage.getItem("spetro_token") ? { "Authorization": `Bearer ${localStorage.getItem("spetro_token")}` } : {})
+        },
+        body: new URLSearchParams({
+          district,
+          title,
+          url: targetUrl,
+          ...(classAreas ? { class_areas_json: classAreas } : {}),
+          ...(resolvedPalette ? { override_palette_json: resolvedPalette } : {}),
+          show_frame: String(showFrame),
+          show_grid: String(showGrid),
+          show_legend: String(showLegend),
+          show_scale: String(showScale),
+          show_compass: String(showCompass),
+          size_multiplier: String(sizeMultiplier),
+          output_format: exportFormat
+        })
+      });
 
-    const addField = (name: string, value: any) => {
-      const input = document.createElement("input");
-      input.type = "hidden";
-      input.name = name;
-      input.value = typeof value === "object" ? JSON.stringify(value) : String(value);
-      form.appendChild(input);
-    };
+      if (!res.ok) {
+        const err = await res.text();
+        throw new Error(err || "Failed to download map");
+      }
 
-    addField("district", district);
-    addField("title", title);
-    addField("url", targetUrl);
-    if (classAreas) addField("class_areas_json", classAreas);
-    if (resolvedPalette) addField("override_palette_json", resolvedPalette);
-    addField("show_frame", showFrame);
-    addField("show_grid", showGrid);
-    addField("show_legend", showLegend);
-    addField("show_scale", showScale);
-    addField("show_compass", showCompass);
-    addField("size_multiplier", sizeMultiplier);
-    addField("output_format", exportFormat);
-
-    document.body.appendChild(form);
-    form.submit();
-    document.body.removeChild(form);
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Map_Export_${district}_${exportFormat}.${exportFormat.toLowerCase()}`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      a.remove();
+    } catch (err) {
+      console.error("Download failed:", err);
+      alert("Download failed. Please check your connection or quota and try again.");
+    }
   };
-
   return (
     <div className="flex flex-col gap-6">
       {/* Mode Switcher Header */}

@@ -19,5 +19,37 @@
     "source": "community",
     "contributor": null,
     "source_url": null
+  },
+  {
+    "id": "90cb03fd-cfca-4dd2-bc62-114f7b17118f",
+    "name": "j",
+    "description": "",
+    "file_type": "shapefile",
+    "storage_key": "local://rare_data/community_files/90cb03fd-cfca-4dd2-bc62-114f7b17118f.zip",
+    "original_filename": "overww.zip",
+    "bbox": null,
+    "upload_date": "2026-08-09T21:19:01.439151+00:00",
+    "file_size_mb": 0.012,
+    "status": "ok",
+    "error_message": null,
+    "source": "community",
+    "contributor": null,
+    "source_url": null
+  },
+  {
+    "id": "51f92beb-94fe-4315-97b4-ba50cee43f8d",
+    "name": "ov",
+    "description": "",
+    "file_type": "shapefile",
+    "storage_key": "rare_data/community_files/51f92beb-94fe-4315-97b4-ba50cee43f8d_overww.zip",
+    "original_filename": "overww.zip",
+    "bbox": null,
+    "upload_date": "2026-08-09T21:20:15.920024+00:00",
+    "file_size_mb": 0.012,
+    "status": "error",
+    "error_message": "Nested archive found: 'overww/shyira.zip'. To prevent system overload, please unzip and upload the raw files or a single unnested zip.",
+    "source": "community",
+    "contributor": null,
+    "source_url": null
   }
 ]

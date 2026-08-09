@@ -28,8 +28,16 @@ def get_regions(country: Optional[str] = None, level1: Optional[str] = None):
     If country: returns list of level1 regions for that country.
     If country and level1: returns list of level2 regions for that level1 region.
     """
-    from main import _require_gee
-    _require_gee()
+    try:
+        from main import _require_gee
+        _require_gee()
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        with open("import_error.txt", "w") as f:
+            f.write(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Import error: {str(e)}")
     
     try:
         if not country:

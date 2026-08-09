@@ -95,68 +95,68 @@
 
 /* ── Satellite Dark theme ───────────────────────────────────────────────── */
 :root {
-  --button-outline: rgba(255,255,255, .08);
-  --badge-outline: rgba(255,255,255, .05);
+  --button-outline: rgba(0,0,0, .08);
+  --badge-outline: rgba(0,0,0, .05);
 
-  --opaque-button-border-intensity: 9;
+  --opaque-button-border-intensity: -9;
 
-  /* Dark surface elevations */
-  --elevate-1: rgba(255,255,255, .04);
-  --elevate-2: rgba(255,255,255, .09);
+  /* Light surface elevations */
+  --elevate-1: rgba(0,0,0, .04);
+  --elevate-2: rgba(0,0,0, .09);
 
   /* Base */
-  --background: 213 29% 6%;       /* #0b0f14 — deep space */
-  --foreground: 210 32% 84%;      /* #c9d6e3 — cool white */
-  --border:     211 34% 18%;      /* #1e2d3d — subtle divider */
-  --input:      211 34% 18%;
-  --ring:       168 100% 42%;     /* #00d4aa — teal focus ring */
+  --background: 0 0% 100%;
+  --foreground: 213 29% 9%;
+  --border:     214 32% 91%;
+  --input:      214 32% 91%;
+  --ring:       168 100% 42%;
 
   /* Card — controls panels */
-  --card:             214 45% 11%; /* #0f1a28 */
-  --card-foreground:  210 32% 84%;
-  --card-border:      211 34% 18%;
+  --card:             0 0% 100%;
+  --card-foreground:  213 29% 9%;
+  --card-border:      214 32% 91%;
 
-  /* Sidebar — darkest layer */
-  --sidebar:                    216 43% 9%;  /* #0d1521 */
-  --sidebar-foreground:         210 32% 84%;
-  --sidebar-border:             211 34% 18%;
-  --sidebar-primary:            168 100% 42%; /* #00d4aa teal */
-  --sidebar-primary-foreground: 213 29% 6%;
-  --sidebar-accent:             214 39% 14%; /* subtle hover */
-  --sidebar-accent-foreground:  168 100% 42%;
+  /* Sidebar */
+  --sidebar:                    210 40% 96%;
+  --sidebar-foreground:         213 29% 9%;
+  --sidebar-border:             214 32% 91%;
+  --sidebar-primary:            168 100% 42%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent:             214 32% 91%;
+  --sidebar-accent-foreground:  213 29% 9%;
   --sidebar-ring:               168 100% 42%;
 
   /* Popover / dropdown */
-  --popover:            214 45% 11%;
-  --popover-foreground: 210 32% 84%;
-  --popover-border:     211 34% 18%;
+  --popover:            0 0% 100%;
+  --popover-foreground: 213 29% 9%;
+  --popover-border:     214 32% 91%;
 
   /* Primary — teal accent */
-  --primary:            168 100% 42%; /* #00d4aa */
-  --primary-foreground: 213 29% 6%;
+  --primary:            168 100% 42%;
+  --primary-foreground: 0 0% 100%;
 
   /* Secondary — muted surface */
-  --secondary:            211 34% 18%;
-  --secondary-foreground: 205 22% 52%;
+  --secondary:            210 40% 96%;
+  --secondary-foreground: 213 29% 9%;
 
   /* Muted */
-  --muted:            214 39% 14%;
-  --muted-foreground: 206 27% 40%; /* #4a6a82 */
+  --muted:            210 40% 96%;
+  --muted-foreground: 215 16% 47%;
 
-  /* Accent — same as sidebar hover */
-  --accent:            214 39% 14%;
-  --accent-foreground: 168 100% 42%;
+  /* Accent */
+  --accent:            210 40% 96%;
+  --accent-foreground: 213 29% 9%;
 
   /* Destructive */
-  --destructive:            0 72% 51%;
+  --destructive:            0 84% 60%;
   --destructive-foreground: 0 0% 100%;
 
   /* Data-vis chart palette */
-  --chart-1: 168 100% 42%; /* teal */
-  --chart-2: 213 100% 56%; /* blue */
-  --chart-3: 271  91% 65%; /* violet */
-  --chart-4:  38  92% 50%; /* amber */
-  --chart-5:   0  84% 60%; /* red */
+  --chart-1: 168 100% 42%;
+  --chart-2: 213 100% 56%;
+  --chart-3: 271  91% 65%;
+  --chart-4:  38  92% 50%;
+  --chart-5:   0  84% 60%;
 
   --app-font-sans: 'Inter', sans-serif;
   --app-font-serif: Georgia, serif;

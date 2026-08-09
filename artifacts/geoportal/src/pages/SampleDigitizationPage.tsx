@@ -838,16 +838,23 @@ export function SampleDigitizationPage() {
 
   const ingestUrlMut = useMutation({
     mutationFn: () => api.samples.ingestUrl({ url: linkUrl, class_label: importClassLabel || "Url_Import" }),
-    onSuccess: (res) => {
+    onSuccess: (res: any) => {
       qc.invalidateQueries({ queryKey: ["samples"] });
       if (res.kind === "raster" && res.asset_id) {
-        toast({
-          title: "Raster Ingested!",
-          description: `URL downloaded and pushed to GEE as ${res.asset_id}. It is now selected as your classification source.`,
-        });
-        setCustomAssetId(res.asset_id);
-        setClassificationSource("custom");
-        setActiveTab("map");
+        if (res.background) {
+          toast({
+            title: "Background Ingestion Started!",
+            description: `The raster is downloading in the background and will be pushed to GEE as ${res.asset_id}. This will save you processing time.`,
+          });
+        } else {
+          toast({
+            title: "Raster Ingested!",
+            description: `URL downloaded and pushed to GEE as ${res.asset_id}. It is now selected as your classification source.`,
+          });
+          setCustomAssetId(res.asset_id);
+          setClassificationSource("custom");
+          setActiveTab("map");
+        }
         loadImageryMut.mutate({ dataSource: "custom", customAssetId: res.asset_id });
       } else {
         toast({
@@ -2434,9 +2441,12 @@ export function SampleDigitizationPage() {
                 <LinkIcon className="w-5 h-5 text-purple-500" />
                 Ingest from External URL / STAC / COG
               </div>
-              <p className="text-xs text-muted-foreground">
-                Paste a direct GeoJSON URL, STAC catalog link, or spatial dataset URL to parse and ingest features into training samples.
-              </p>
+              <div className="text-xs text-muted-foreground space-y-2">
+                <p>Paste a direct GeoJSON URL, STAC catalog link, or spatial dataset URL.</p>
+                <div className="p-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-md">
+                  <strong>Fast Processing:</strong> Massive <code className="px-1 bg-emerald-500/20 rounded">http://</code> rasters are now safely downloaded and pushed to GEE entirely in the background, saving you time!
+                </div>
+              </div>
 
               <div className="space-y-1">
                 <div className="flex justify-between items-end">

@@ -4,7 +4,7 @@
  * so the same code works in production behind the reverse proxy.
  */
 
-export const BASE = "https://geoportal-api-ygzi.onrender.com/api";
+export const BASE = import.meta.env.PROD ? "https://geoportal-api-ygzi.onrender.com/api" : "/api";
 
 // ── GEE Individual Auth Token Management ────────────────────────────────────
 const GEE_TOKEN_KEY = "gee_individual_token";
@@ -85,6 +85,30 @@ export interface NDVIResult {
   end_date: string;
 }
 
+export interface ChangeDetectionRequest {
+  aoi: AOIConfig;
+  district?: string;
+  before_start: string;
+  before_end: string;
+  after_start: string;
+  after_end: string;
+}
+
+export interface ChangeDetectionResult {
+  tile_url: string;
+  thumb_url: string;
+  download_url?: string;
+  stats: Record<string, number>;
+  class_areas_km2: Record<string, number>;
+  center: [number, number];
+  bbox?: number[];
+  district?: string;
+  before_start: string;
+  before_end: string;
+  after_start: string;
+  after_end: string;
+}
+
 export interface LSTResult {
   tile_url: string;
   stats: Record<string, number>;
@@ -163,22 +187,7 @@ export const fetchLandfillAhp = async (
   return data;
 };
 
-export const fetchHabitatSuitability = async (payload: {
-  aoi: AOIConfig;
-  reverse_flags?: Record<string, boolean>;
-  n_classes?: number;
-  custom_weights?: Record<string, number> | null;
-}): Promise<HabitatResult> => {
-  const { data } = await api.post("/habitat", payload);
-  return data;
-};
 
-export const fetchHabitatAhp = async (
-  customWeights: Record<string, number> | null
-): Promise<AhpData> => {
-  const { data } = await api.post("/habitat/ahp", { custom_weights: customWeights || {} });
-  return data;
-};
 
 export interface LandfillFactorMap {
   label: string;
@@ -217,15 +226,25 @@ export interface HabitatFactorMap {
   download_url: string;
 }
 
-export interface HabitatResult {
+export interface HabitatMapResult {
   tile_url: string;
+  factor_maps: Record<string, { tile_url: string }>;
+  center: [number, number];
+  bbox: number[];
+}
+
+export interface HabitatStatsResult {
+  class_areas_km2: Record<string, number>;
+}
+
+export interface HabitatClassifyResult {
+  classify: { panels: ClassifyPanel[]; n_classes: number; percentile_steps: number[] };
+}
+
+export interface HabitatExportResult {
   thumb_url: string;
   download_url?: string;
-  class_areas_km2: Record<string, number>;
-  classify: { panels: ClassifyPanel[]; n_classes: number; percentile_steps: number[] };
   factors: Record<string, HabitatFactorMap>;
-  map_id: string;
-  token: string;
 }
 
 export interface AirPollutionResult {
@@ -252,6 +271,29 @@ export interface LandslideMapResult {
   district?: string;
   start_year: number;
   end_year: number;
+}
+
+export interface IrrigationMapResult {
+  tile_url: string;
+  factor_maps: Record<string, { tile_url: string }>;
+  center: [number, number];
+  bbox: number[];
+}
+
+export interface IrrigationStatsResult {
+  mean_deficit_mm: number;
+  mean_etc_mm: number;
+  mean_precip_mm: number;
+  mean_sm_mm: number;
+  recommendation: string;
+  status: "irrigate" | "monitor" | "skip";
+  kc_used: number;
+}
+
+export interface IrrigationExportResult {
+  download_url?: string;
+  thumb_url?: string;
+  factors: Record<string, { download_url?: string; thumb_url?: string }>;
 }
 export interface LandslideStatsResult {
   stats: Record<string, number>;
@@ -415,6 +457,10 @@ function parseApiError(err: any, fallback: string): string {
 
 async function post<T>(path: string, body: unknown, opts?: { withGeeAuth?: boolean }): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const appToken = localStorage.getItem("spetro_token");
+  if (appToken) {
+    headers["Authorization"] = `Bearer ${appToken}`;
+  }
   if (opts?.withGeeAuth) {
     const token = getGeeToken();
     if (token) headers["X-GEE-Token"] = token;
@@ -428,11 +474,39 @@ async function post<T>(path: string, body: unknown, opts?: { withGeeAuth?: boole
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(parseApiError(err, res.statusText));
   }
+  const data = await res.json() as T;
+  window.dispatchEvent(new Event("gee-usage-update"));
+  return data;
+}
+
+async function put<T>(path: string, body: unknown, opts?: { withGeeAuth?: boolean }): Promise<T> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const appToken = localStorage.getItem("spetro_token");
+  if (appToken) {
+    headers["Authorization"] = `Bearer ${appToken}`;
+  }
+  if (opts?.withGeeAuth) {
+    const token = getGeeToken();
+    if (token) headers["X-GEE-Token"] = token;
+  }
+  const res = await fetch(`${BASE}${path}`, {
+    method: "PUT",
+    headers,
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(parseApiError(err, res.statusText));
+  }
   return res.json() as Promise<T>;
 }
 
 async function get<T>(path: string, opts?: { withGeeAuth?: boolean }): Promise<T> {
   const headers: Record<string, string> = {};
+  const appToken = localStorage.getItem("spetro_token");
+  if (appToken) {
+    headers["Authorization"] = `Bearer ${appToken}`;
+  }
   if (opts?.withGeeAuth) {
     const token = getGeeToken();
     if (token) headers["X-GEE-Token"] = token;
@@ -491,6 +565,7 @@ export const api = {
   health: () => get<{ status: string }>("/health"),
   districts: () => get<{ districts: string[] }>("/districts"),
   ndvi: (req: NDVIRequest) => post<NDVIResult>("/ndvi", req),
+  changeDetection: (req: ChangeDetectionRequest) => post<ChangeDetectionResult>("/change-detection", req),
   lst: (req: { aoi: AOIConfig; district?: string; start_date: string; end_date: string; n_classes: number }) =>
     post<LSTResult>("/lst", req),
   rusle: (req: {
@@ -563,7 +638,23 @@ export const api = {
   }) => post<FloodResult>("/flood", req),
   uhi: (req: any) => post<UHIResult>("/uhi", req),
   adminVerify: (password: string) => post<{ ok: boolean }>("/admin/verify", { password }),
-  /** Download a PDF report as a Blob */
+  habitat: {
+    map: (req: any) => post<HabitatMapResult>("/habitat/map", req),
+    stats: (req: any) => post<HabitatStatsResult>("/habitat/stats", req),
+    classify: (req: any) => post<HabitatClassifyResult>("/habitat/classify", req),
+    export: (req: any) => post<HabitatExportResult>("/habitat/export", req),
+    ahp: (customWeights: Record<string, number> | null) => post<AhpData>("/habitat/ahp", { custom_weights: customWeights || {} }),
+  },
+  waterHarvesting: {
+    map: (req: { aoi: AOIConfig; year: number; runoff_coefficient?: number; manual_area_m2?: number; use_building_footprint?: boolean }) => post<any>("/water-harvesting/map", req),
+    stats: (req: { aoi: AOIConfig; year: number; runoff_coefficient?: number; manual_area_m2?: number; use_building_footprint?: boolean }) => post<any>("/water-harvesting/stats", req),
+    export: (req: { aoi: AOIConfig; year: number; runoff_coefficient?: number; manual_area_m2?: number; use_building_footprint?: boolean }) => post<any>("/water-harvesting/export", req),
+  },
+  wellscope: {
+    map: (req: { aoi: AOIConfig; custom_weights?: Record<string, number> }) => post<any>("/wellscope/map", req),
+    stats: (req: { aoi: AOIConfig; custom_weights?: Record<string, number> }) => post<any>("/wellscope/stats", req),
+    factorExport: (req: { aoi: AOIConfig; factor_key: string; palette?: string[] }) => post<{ thumb_url: string; download_url: string }>("/wellscope/factor-export", req),
+  },
   report: async (body: {
     module_name: string;
     aoi: AOIConfig;
@@ -574,9 +665,14 @@ export const api = {
     extra_notes?: string;
     maps?: Array<[string, string]>;
   }): Promise<Blob> => {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const appToken = localStorage.getItem("spetro_token");
+    if (appToken) {
+      headers["Authorization"] = `Bearer ${appToken}`;
+    }
     const res = await fetch(`${BASE}/report`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify(body),
     });
     if (!res.ok) {
@@ -586,9 +682,14 @@ export const api = {
     return res.blob();
   },
   staticMap: async (body: StaticMapPayload): Promise<Blob> => {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    const appToken = localStorage.getItem("spetro_token");
+    if (appToken) {
+      headers["Authorization"] = `Bearer ${appToken}`;
+    }
     const res = await fetch(`${BASE}/static-map`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify(body),
     });
     if (!res.ok) {
@@ -596,6 +697,21 @@ export const api = {
       throw new Error((err as any).detail ?? res.statusText);
     }
     return res.blob();
+  },
+
+  irrigation: {
+    map: (req: { aoi: AOIConfig; start_date: string; end_date: string; crop_type: string }) =>
+      post<IrrigationMapResult>("/irrigation/map", req),
+    stats: (req: { aoi: AOIConfig; start_date: string; end_date: string; crop_type: string }) =>
+      post<IrrigationStatsResult>("/irrigation/stats", req),
+    export: (req: { aoi: AOIConfig; start_date: string; end_date: string; crop_type: string }) =>
+      post<IrrigationExportResult>("/irrigation/export", req),
+  },
+
+  biomass: {
+    map: (body: any) => post<{ tile_url: string; thumb_url?: string; factor_maps?: Record<string, any>; center: [number, number]; bbox: number[] }>("/biomass/map", body),
+    stats: (body: any) => post<{ stats: Record<string, number>; class_areas_km2: Record<string, number>; district: string }>("/biomass/stats", body),
+    factorExport: (req: { aoi: AOIConfig; factor_key: string; palette?: string[]; buffer_km?: number; year_start?: number; year_end?: number }) => post<{ download_url: string }>("/biomass/factor-export", req),
   },
 
   // ── GEE Individual Auth ─────────────────────────────────────────────────
@@ -625,7 +741,6 @@ export const api = {
       clearGeeAuth();
     },
   },
-
   // ── Sample Digitization (requires individual GEE auth) ──────────────────
   samples: {
     list: () => get<{ samples: TrainingSample[] }>("/samples", { withGeeAuth: true }),
@@ -651,6 +766,8 @@ export const api = {
       post<{ imported_count: number; dataset_name: string }>("/samples/import-from-dataset", body, { withGeeAuth: true }),
   },
   gee: {
+    ingestRaster: (body: { source_url: string; target_asset_id?: string }) =>
+      post<{ ok: boolean; message: string }>("/gee/ingest-raster", body),
     previewImagery: (body: { aoi_bounds?: number[], data_source: string, custom_asset_id?: string }) =>
       post<{ tile_url: string }>("/gee/preview-imagery", body, { withGeeAuth: true }),
     timelapseTile: (body: {
@@ -699,4 +816,37 @@ export const api = {
         r.json()
       ) as Promise<{ ok: boolean }>,
   },
+
+  community: {
+    getComments: (tag?: string) => get<{ comments: Array<{id: number, author: string, content: string, tag: string, image_url: string, timestamp: string}>, is_frozen: boolean, blocked_users: string[] }>(`/community/comments${tag ? '?tag=' + tag : ''}`),
+    postComment: (body: { author: string, content: string, tag?: string, image_url?: string }) => post<{ status: string, id: number }>("/community/comments", body),
+    deleteComment: (id: number) => fetch(BASE + "/community/comments/" + id, { method: "DELETE", headers: { "Authorization": `Bearer ${localStorage.getItem("spetro_token")}` } }).then(r => r.json()),
+    setFreeze: (frozen: boolean) => post<{ok: boolean}>("/community/settings/freeze", { frozen }),
+    blockUser: (author: string) => post<{ok: boolean}>("/community/users/block", { author }),
+    unblockUser: (author: string) => post<{ok: boolean}>("/community/users/unblock", { author }),
+    uploadImage: async (fd: FormData) => {
+      const headers: Record<string, string> = {};
+      const appToken = localStorage.getItem("spetro_token");
+      if (appToken) headers["Authorization"] = `Bearer ${appToken}`;
+      const r = await fetch(BASE + "/community/upload", { method: "POST", headers, body: fd });
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({ detail: r.statusText }));
+        throw new Error(e.detail ?? r.statusText);
+      }
+      return r.json() as Promise<{ url: string }>;
+    }
+  },
+  developer: {
+    getApiKey: () => get<{ api_key: string | null }>("/auth/api-key"),
+    generateApiKey: () => post<{ api_key: string }>("/auth/api-key", {}),
+  },
+  auth: {
+    updateProfile: (name: string) => put<{ ok: boolean, token: string, user: any }>("/auth/profile", { name }),
+    changePassword: (old_password: string, new_password: string) => post<{ ok: boolean, message: string }>("/auth/change-password", { old_password, new_password }),
+    getGeeUsage: () => get<{ used: number, limit: number | string }>("/auth/gee-usage"),
+  },
+  services: {
+    requestService: (body: { service_type: string; message: string }) => post<{ ok: boolean }>("/services/request", body),
+    getRequests: () => get<{ requests: any[] }>("/services/requests"),
+  }
 };

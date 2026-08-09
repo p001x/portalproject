@@ -4,24 +4,26 @@ import json
 import logging
 import os
 import secrets
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any
 
 import jwt
-from passlib.context import CryptContext
+import bcrypt
 from fastapi import HTTPException, Request
+
+import auth_db
 
 logger = logging.getLogger(__name__)
 
 # ── Password hashing ────────────────────────────────────────────────────────
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# pwd_context removed, using raw bcrypt instead
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 
 _HERE = Path(__file__).resolve().parent
-_USERS_FILE = _HERE / "users.json"
 _ENV_FILE = _HERE / ".env"
 
 # ── JWT Configuration ────────────────────────────────────────────────────────
@@ -36,7 +38,6 @@ def _get_jwt_secret() -> str:
     if secret:
         return secret
 
-    # Try to read from .env
     if _ENV_FILE.exists():
         for line in _ENV_FILE.read_text(encoding="utf-8").splitlines():
             line = line.strip()
@@ -46,7 +47,6 @@ def _get_jwt_secret() -> str:
                     os.environ["JWT_SECRET"] = secret
                     return secret
 
-    # Generate a new secret and append to .env
     secret = secrets.token_urlsafe(48)
     os.environ["JWT_SECRET"] = secret
     with open(_ENV_FILE, "a", encoding="utf-8") as f:
@@ -55,56 +55,67 @@ def _get_jwt_secret() -> str:
     return secret
 
 
-# ── User Store ───────────────────────────────────────────────────────────────
+# ── Password Validation ──────────────────────────────────────────────────────
 
-_DEFAULT_USERS = {
-    "admin": {
-        "username": "admin",
-        "password_hash": pwd_context.hash("geoportal2024"),
-        "role": "admin",
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    }
-}
-
-
-def _load_users() -> dict:
-    """Load users from users.json, creating it with defaults if missing."""
-    if not _USERS_FILE.exists():
-        _save_users(_DEFAULT_USERS)
-        logger.info("Created default users.json with admin account.")
-        return _DEFAULT_USERS.copy()
-
-    try:
-        data = json.loads(_USERS_FILE.read_text(encoding="utf-8"))
-        return data
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.error("Failed to load users.json: %s — using defaults", exc)
-        return _DEFAULT_USERS.copy()
-
-
-def _save_users(users: dict) -> None:
-    """Persist the user dict to users.json."""
-    _USERS_FILE.write_text(
-        json.dumps(users, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
+def validate_password(password: str) -> bool:
+    """Validate password strength: 8-15 chars, 1 uppercase, 1 lowercase, 1 number."""
+    if len(password) < 8 or len(password) > 15:
+        return False
+    if not re.search(r'[A-Z]', password):
+        return False
+    if not re.search(r'[a-z]', password):
+        return False
+    if not re.search(r'[0-9]', password):
+        return False
+    return True
 
 
 # ── Public API ───────────────────────────────────────────────────────────────
 
-def verify_user(username: str, password: str) -> Optional[dict]:
+def verify_user(email: str, password: str) -> Optional[dict]:
     """Verify credentials. Returns sanitized user dict (no hash) or None."""
-    users = _load_users()
-    user = users.get(username)
+    user = auth_db.get_user_by_email(email)
     if not user:
         return None
-    if not pwd_context.verify(password, user["password_hash"]):
+    if not bcrypt.checkpw(password.encode('utf-8'), user["password_hash"].encode('utf-8')):
         return None
-    # Return a safe copy without the hash
+    
+    role = user["role"]
+    if email.lower() in ["petersonyang8@gmail.com", "pierrendorimana16@gmail.com"]:
+        role = "admin"
+        
     return {
-        "username": user["username"],
-        "role": user.get("role", "user"),
-        "created_at": user.get("created_at", ""),
+        "id": user["id"],
+        "name": user["name"],
+        "email": user["email"],
+        "role": role,
+    }
+
+
+def create_new_user(name: str, email: str, password: str) -> dict:
+    """Creates a new user. Raises ValueError if validation fails."""
+    if not validate_password(password):
+        raise ValueError("Password must be 8-15 characters long and contain uppercase, lowercase, and numbers.")
+    
+    existing = auth_db.get_user_by_email(email)
+    if existing:
+        raise ValueError("Email already registered.")
+    
+    password_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    
+    role = 'user'
+    if email.lower() in ["petersonyang8@gmail.com", "pierrendorimana16@gmail.com"]:
+        role = 'admin'
+        
+    auth_db.create_user(name, email, password_hash, role)
+    
+    # Return created user
+    new_user = auth_db.get_user_by_email(email)
+    return {
+        "id": new_user["id"],
+        "name": new_user["name"],
+        "email": new_user["email"],
+        "role": new_user["role"],
     }
 
 
@@ -130,10 +141,7 @@ def decode_token(token: str) -> Optional[dict]:
 
 
 def get_current_user(request: Request) -> dict:
-    """FastAPI dependency: extract and verify JWT from Authorization header.
-
-    Raises HTTP 401 if missing or invalid.
-    """
+    """FastAPI dependency: extract and verify JWT from Authorization header."""
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
         raise HTTPException(
@@ -142,7 +150,7 @@ def get_current_user(request: Request) -> dict:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    token = auth_header[7:]  # strip "Bearer "
+    token = auth_header[7:]
     payload = decode_token(token)
     if payload is None:
         raise HTTPException(
@@ -151,33 +159,144 @@ def get_current_user(request: Request) -> dict:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    username = payload.get("sub")
-    if not username:
+    email = payload.get("sub")
+    if not email:
         raise HTTPException(
             status_code=401,
             detail="Invalid token payload.",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    role = payload.get("role", "user")
+    if email.lower() in ["petersonyang8@gmail.com", "pierrendorimana16@gmail.com"]:
+        role = "admin"
+
     return {
-        "username": username,
-        "role": payload.get("role", "user"),
+        "email": email,
+        "name": payload.get("name", email.split("@")[0]),
+        "role": role,
     }
 
 
-def change_password(username: str, old_password: str, new_password: str) -> bool:
-    """Change a user's password. Returns True on success."""
-    users = _load_users()
-    user = users.get(username)
+def get_current_user_or_api_key(request: Request) -> dict:
+    """FastAPI dependency: extract and verify JWT from Authorization header or API Key."""
+    # 1. Try API Key
+    api_key = request.headers.get("X-API-Key")
+    
+    # Also support Authorization: Bearer <API_KEY> (which usually starts with sk_live_)
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer sk_"):
+        api_key = auth_header[7:]
+        
+    if api_key:
+        user = auth_db.get_user_by_api_key(api_key)
+        if user:
+            return {
+                "email": user["email"],
+                "name": user["name"],
+                "role": user["role"],
+            }
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid API Key.",
+        )
+        
+    # 2. Try JWT Auth
+    if not auth_header.startswith("Bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication required. Please provide an API key or log in.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    token = auth_header[7:]
+    payload = decode_token(token)
+    if payload is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired token. Please log in again.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    email = payload.get("sub")
+    if not email:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid token payload.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    role = payload.get("role", "user")
+    if email.lower() in ["petersonyang8@gmail.com", "pierrendorimana16@gmail.com"]:
+        role = "admin"
+
+    return {
+        "email": email,
+        "name": payload.get("name", email.split("@")[0]),
+        "role": role,
+    }
+
+
+def generate_api_key_for_user(email: str) -> str:
+    """Generate and store a new API key for the user."""
+    new_key = "sk_live_" + secrets.token_hex(32)
+    auth_db.set_api_key(email, new_key)
+    return new_key
+
+
+def generate_reset_token(email: str) -> str:
+    """Generate a password reset token for the given email."""
+    user = auth_db.get_user_by_email(email)
     if not user:
-        return False
-    if not pwd_context.verify(old_password, user["password_hash"]):
-        return False
+        raise ValueError("User not found.")
+    
+    token = secrets.token_urlsafe(32)
+    expiry = datetime.now(timezone.utc) + timedelta(hours=1)
+    
+    auth_db.set_reset_token(email, token, expiry.isoformat())
+    return token
 
-    if len(new_password) < 6:
-        raise ValueError("New password must be at least 6 characters.")
 
-    user["password_hash"] = pwd_context.hash(new_password)
-    _save_users(users)
-    logger.info("Password changed for user: %s", username)
+def reset_password_with_token(token: str, new_password: str) -> bool:
+    """Reset password using a token."""
+    user = auth_db.get_user_by_reset_token(token)
+    if not user:
+        raise ValueError("Invalid or expired reset token.")
+    
+    expiry = datetime.fromisoformat(user["reset_token_expiry"])
+    if datetime.now(timezone.utc) > expiry:
+        raise ValueError("Reset token has expired.")
+    
+    if not validate_password(new_password):
+        raise ValueError("Password must be 8-15 characters long and contain uppercase, lowercase, and numbers.")
+    
+    password_hash = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    auth_db.update_user_password(user["email"], password_hash)
+    return True
+
+def generate_api_key_for_user(email: str) -> str:
+    """Generate and store a new API key for the user."""
+    user = auth_db.get_user_by_email(email)
+    if not user:
+        raise ValueError("User not found.")
+    
+    # Generate a random 32-character hex string
+    new_key = "sk_live_" + secrets.token_hex(32)
+    auth_db.set_api_key(email, new_key)
+    return new_key
+
+def change_user_password(email: str, old_password: str, new_password: str) -> bool:
+    """Change a user's password after verifying the old password."""
+    user = auth_db.get_user_by_email(email)
+    if not user:
+        raise ValueError("User not found.")
+        
+    if not bcrypt.checkpw(old_password.encode('utf-8'), user["password_hash"].encode('utf-8')):
+        raise ValueError("Incorrect current password.")
+        
+    if not validate_password(new_password):
+        raise ValueError("New password must be 8-15 characters long and contain uppercase, lowercase, and numbers.")
+        
+    password_hash = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+    auth_db.update_user_password(email, password_hash)
     return True

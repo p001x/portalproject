@@ -23,6 +23,17 @@ from gee.landslide import (
 )
 from gee.drought import compute_agricultural_drought
 from gee.flood import compute_flood_susceptibility
+from gee.habitat import (
+    compute_habitat_map, compute_habitat_stats,
+    compute_habitat_classify, compute_habitat_export,
+    compute_ahp_data as compute_habitat_ahp
+)
+from gee.irrigation import (
+    compute_irrigation_map, compute_irrigation_stats, compute_irrigation_export
+)
+from gee.water_harvesting import (
+    compute_water_harvesting_map, compute_water_harvesting_stats, compute_water_harvesting_export
+)
 
 from storage.dataset_storage import (
     load_metadata, delete_record, download_dataset_bytes,
@@ -245,6 +256,18 @@ class ReportRequest(BaseModel):
     extra_notes: str = ""
     maps: list[tuple[str, str]] = None
 
+class IrrigationRequest(BaseModel):
+    aoi: dict
+    start_date: str
+    end_date: str
+    crop_type: str
+
+class WaterHarvestingRequest(BaseModel):
+    aoi: dict
+    year: int
+    runoff_coefficient: float = 0.8
+    manual_area_m2: Optional[float] = None
+
 # ── Analysis Endpoints ─────────────────────────────────────────────────────────
 
 @app.route("/api/report", methods=["POST"])
@@ -306,6 +329,78 @@ def lst_endpoint():
     except Exception as exc:
         logger.exception("LST failed")
         return jsonify({"detail": str(exc)}), 500
+
+@app.route("/api/irrigation/map", methods=["POST"])
+def irrigation_map_endpoint():
+    err = _require_gee()
+    if err: return err
+    try:
+        req = IrrigationRequest(**request.json)
+        res = compute_irrigation_map(req.aoi, req.start_date, req.end_date, req.crop_type)
+        return jsonify(res)
+    except Exception as e:
+        logger.exception("Irrigation map failed")
+        return jsonify({"detail": str(e)}), 500
+
+@app.route("/api/irrigation/stats", methods=["POST"])
+def irrigation_stats_endpoint():
+    err = _require_gee()
+    if err: return err
+    try:
+        req = IrrigationRequest(**request.json)
+        res = compute_irrigation_stats(req.aoi, req.start_date, req.end_date, req.crop_type)
+        return jsonify(res)
+    except Exception as e:
+        logger.exception("Irrigation stats failed")
+        return jsonify({"detail": str(e)}), 500
+
+@app.route("/api/irrigation/export", methods=["POST"])
+def irrigation_export_endpoint():
+    err = _require_gee()
+    if err: return err
+    try:
+        req = IrrigationRequest(**request.json)
+        res = compute_irrigation_export(req.aoi, req.start_date, req.end_date, req.crop_type)
+        return jsonify(res)
+    except Exception as e:
+        logger.exception("Irrigation export failed")
+        return jsonify({"detail": str(e)}), 500
+
+@app.route("/api/water-harvesting/map", methods=["POST"])
+def water_harvesting_map_endpoint():
+    err = _require_gee()
+    if err: return err
+    try:
+        req = WaterHarvestingRequest(**request.json)
+        res = compute_water_harvesting_map(req.aoi, req.year)
+        return jsonify(res)
+    except Exception as e:
+        logger.exception("Water harvesting map failed")
+        return jsonify({"detail": str(e)}), 500
+
+@app.route("/api/water-harvesting/stats", methods=["POST"])
+def water_harvesting_stats_endpoint():
+    err = _require_gee()
+    if err: return err
+    try:
+        req = WaterHarvestingRequest(**request.json)
+        res = compute_water_harvesting_stats(req.aoi, req.year, req.runoff_coefficient, req.manual_area_m2)
+        return jsonify(res)
+    except Exception as e:
+        logger.exception("Water harvesting stats failed")
+        return jsonify({"detail": str(e)}), 500
+
+@app.route("/api/water-harvesting/export", methods=["POST"])
+def water_harvesting_export_endpoint():
+    err = _require_gee()
+    if err: return err
+    try:
+        req = WaterHarvestingRequest(**request.json)
+        res = compute_water_harvesting_export(req.aoi, req.year)
+        return jsonify(res)
+    except Exception as e:
+        logger.exception("Water harvesting export failed")
+        return jsonify({"detail": str(e)}), 500
 
 @app.route("/api/rusle", methods=["POST"])
 def rusle_endpoint():
@@ -531,7 +626,73 @@ def flood_endpoint():
         )
         return jsonify(res)
     except Exception as exc:
-        logger.exception("Flood failed")
+        return jsonify({"detail": str(exc)}), 500
+
+class HabitatRequest(BaseModel):
+    aoi: dict
+    reverse_flags: dict = {}
+    n_classes: int = 5
+    custom_weights: dict = None
+
+class HabitatAhpRequest(BaseModel):
+    custom_weights: dict = None
+
+@app.route("/api/habitat/map", methods=["POST"])
+def habitat_map_endpoint():
+    err = _require_gee()
+    if err: return err
+    try:
+        req = HabitatRequest(**request.json)
+        res = compute_habitat_map(req.aoi, req.reverse_flags, req.custom_weights)
+        return jsonify(res)
+    except Exception as exc:
+        logger.exception("Habitat map failed")
+        return jsonify({"detail": str(exc)}), 500
+
+@app.route("/api/habitat/stats", methods=["POST"])
+def habitat_stats_endpoint():
+    err = _require_gee()
+    if err: return err
+    try:
+        req = HabitatRequest(**request.json)
+        res = compute_habitat_stats(req.aoi, req.reverse_flags, req.custom_weights)
+        return jsonify(res)
+    except Exception as exc:
+        logger.exception("Habitat stats failed")
+        return jsonify({"detail": str(exc)}), 500
+
+@app.route("/api/habitat/classify", methods=["POST"])
+def habitat_classify_endpoint():
+    err = _require_gee()
+    if err: return err
+    try:
+        req = HabitatRequest(**request.json)
+        res = compute_habitat_classify(req.aoi, req.reverse_flags, req.n_classes, req.custom_weights)
+        return jsonify(res)
+    except Exception as exc:
+        logger.exception("Habitat classify failed")
+        return jsonify({"detail": str(exc)}), 500
+
+@app.route("/api/habitat/export", methods=["POST"])
+def habitat_export_endpoint():
+    err = _require_gee()
+    if err: return err
+    try:
+        req = HabitatRequest(**request.json)
+        res = compute_habitat_export(req.aoi, req.reverse_flags, req.custom_weights)
+        return jsonify(res)
+    except Exception as exc:
+        logger.exception("Habitat export failed")
+        return jsonify({"detail": str(exc)}), 500
+
+@app.route("/api/habitat/ahp", methods=["POST"])
+def habitat_ahp_endpoint():
+    try:
+        req = HabitatAhpRequest(**request.json)
+        res = compute_habitat_ahp(req.custom_weights or {})
+        return jsonify(res)
+    except Exception as exc:
+        logger.exception("Habitat AHP failed")
         return jsonify({"detail": str(exc)}), 500
 
 # ── GEE Individual Authentication ───────────────────────────────────────────
@@ -1326,6 +1487,42 @@ def _cached_cartographic_png(
     )
     return buf.read()
 
+
+@app.route("/api/irrigation/map", methods=["POST"])
+def irrigation_map_endpoint():
+    err = _require_gee()
+    if err: return err
+    try:
+        req = IrrigationRequest(**request.json)
+        res = compute_irrigation_map(req.aoi, req.start_date, req.end_date, req.crop_type)
+        return jsonify(res)
+    except Exception as exc:
+        logger.exception("Irrigation map failed")
+        return jsonify({"detail": str(exc)}), 500
+
+@app.route("/api/irrigation/stats", methods=["POST"])
+def irrigation_stats_endpoint():
+    err = _require_gee()
+    if err: return err
+    try:
+        req = IrrigationRequest(**request.json)
+        res = compute_irrigation_stats(req.aoi, req.start_date, req.end_date, req.crop_type)
+        return jsonify(res)
+    except Exception as exc:
+        logger.exception("Irrigation stats failed")
+        return jsonify({"detail": str(exc)}), 500
+
+@app.route("/api/irrigation/export", methods=["POST"])
+def irrigation_export_endpoint():
+    err = _require_gee()
+    if err: return err
+    try:
+        req = IrrigationRequest(**request.json)
+        res = compute_irrigation_export(req.aoi, req.start_date, req.end_date, req.crop_type)
+        return jsonify(res)
+    except Exception as exc:
+        logger.exception("Irrigation export failed")
+        return jsonify({"detail": str(exc)}), 500
 
 @app.route("/api/static-map", methods=["POST"])
 def static_map():

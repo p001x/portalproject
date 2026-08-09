@@ -137,7 +137,7 @@ export function NDVIPage() {
       </aside>
 
       {/* ── Results ──────────────────────────────────────────────── */}
-      <main className="flex-1 overflow-y-auto p-6">
+      <main id="report-container" className="flex-1 overflow-y-auto p-6 bg-background">
         {!data && !isPending && (
           <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
             Select a district and date range, then click <strong className="mx-1">Calculate NDVI</strong>.

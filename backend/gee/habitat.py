@@ -7,7 +7,10 @@ from threading import Lock
 import concurrent.futures
 from gee.classify_utils import quantile_classify
 
-_cache: TTLCache = TTLCache(maxsize=128, ttl=86400)
+_cache_map: TTLCache = TTLCache(maxsize=64, ttl=3600)
+_cache_stats: TTLCache = TTLCache(maxsize=64, ttl=3600)
+_cache_classify: TTLCache = TTLCache(maxsize=64, ttl=3600)
+_cache_export: TTLCache = TTLCache(maxsize=64, ttl=3600)
 _lock = Lock()
 
 # Default AHP weights matching the poster
@@ -96,21 +99,8 @@ def _normalize_weights(custom: dict | None) -> dict:
     return {k: v / total for k, v in raw.items()}
 
 
-def compute_habitat_suitability(
-    aoi_config: dict,
-    reverse_flags: dict,
-    n_classes: int = 5,
-    custom_weights: dict | None = None,
-) -> dict:
+def _build_habitat_images(aoi_config: dict, reverse_flags: dict, custom_weights: dict | None = None):
     weights = _normalize_weights(custom_weights)
-    weights_tuple = tuple(round(weights[k], 6) for k in FACTOR_ORDER)
-    rev_tuple = tuple(reverse_flags.get(k, False) for k in FACTOR_ORDER)
-    cache_key = (json.dumps(aoi_config, sort_keys=True), rev_tuple, n_classes, weights_tuple)
-    
-    with _lock:
-        if cache_key in _cache:
-            return _cache[cache_key]
-
     from gee.aoi_utils import get_aoi_geometry
     aoi = get_aoi_geometry(aoi_config)
 
@@ -147,9 +137,11 @@ def compute_habitat_suitability(
     irrigated_dist = _distance_km(irrigated_mask, aoi)
     irrigated_score = _apply_reverse(_reclass_near_is_good(irrigated_dist), reverse_flags.get("irrigated", False)).rename("irrigated_score")
 
-    # Distance from Roads (Using proxy: nightlights or high intensity built up, or just buffer buildings)
-    # We will use buildings as a fallback proxy for roads since robust global vector roads are heavy.
-    roads_score = _apply_reverse(_reclass_far_is_good(buildings_dist), reverse_flags.get("roads", False)).rename("roads_score")
+    # Distance from Roads (Using GRIP4 Africa roads dataset)
+    roads = ee.FeatureCollection("projects/sat-io/open-datasets/GRIP4/Africa").filterBounds(aoi)
+    roads_dist_m = roads.distance(searchRadius=20000, maxError=500).clip(aoi)
+    roads_dist_km = roads_dist_m.divide(1000)
+    roads_score = _apply_reverse(_reclass_far_is_good(roads_dist_km), reverse_flags.get("roads", False)).rename("roads_score")
 
     # DEM (SRTM)
     dem = ee.Image("USGS/SRTMGL1_003").select("elevation").clip(aoi)
@@ -170,18 +162,14 @@ def compute_habitat_suitability(
     elev_score = _apply_reverse(elev_score, reverse_flags.get("elevation", False)).rename("elevation_score")
 
     # Climate (CHIRPS Precipitation & MODIS LST)
-    # Mean annual rainfall (2020-2023)
     rainfall = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY").filterDate("2020-01-01", "2023-12-31").sum().divide(4).clip(aoi)
-    # Kigali rainfall ~1000mm. Higher is better for wetlands.
     rainfall_score = (
         ee.Image(1).where(rainfall.gt(800), 2).where(rainfall.gt(900), 3)
         .where(rainfall.gt(1000), 4).where(rainfall.gt(1100), 5)
     )
     rainfall_score = _apply_reverse(rainfall_score, reverse_flags.get("rainfall", False)).rename("rainfall_score")
     
-    # Mean annual temperature (MODIS LST)
     lst = ee.ImageCollection("MODIS/061/MOD11A1").filterDate("2020-01-01", "2020-12-31").select("LST_Day_1km").mean().multiply(0.02).subtract(273.15).clip(aoi)
-    # Optimal temp around 20-25C
     temp_score = (
         ee.Image(1).where(lst.gt(15).And(lst.lt(30)), 3)
         .where(lst.gt(20).And(lst.lt(28)), 4).where(lst.gt(22).And(lst.lt(26)), 5)
@@ -189,9 +177,9 @@ def compute_habitat_suitability(
     temp_score = _apply_reverse(temp_score, reverse_flags.get("temperature", False)).rename("temperature_score")
 
     score_images = {
-        "wetlands": wetlands_score, "water": water_score, "landcover": landcover_score,
-        "rainfall": rainfall_score, "buildings": buildings_score, "irrigated": irrigated_score,
-        "slope": slope_score, "roads": roads_score, "elevation": elev_score, "temperature": temp_score
+        "wetlands": wetlands_score.clip(aoi), "water": water_score.clip(aoi), "landcover": landcover_score.clip(aoi),
+        "rainfall": rainfall_score.clip(aoi), "buildings": buildings_score.clip(aoi), "irrigated": irrigated_score.clip(aoi),
+        "slope": slope_score.clip(aoi), "roads": roads_score.clip(aoi), "elevation": elev_score.clip(aoi), "temperature": temp_score.clip(aoi)
     }
 
     # Weighted Overlay
@@ -199,10 +187,58 @@ def compute_habitat_suitability(
     for factor in FACTOR_ORDER:
         suitability = suitability.add(score_images[factor].multiply(weights[factor]))
 
+    return aoi, suitability, score_images, weights
+
+
+def compute_habitat_map(
+    aoi_config: dict, reverse_flags: dict, custom_weights: dict | None = None
+) -> dict:
+    weights = _normalize_weights(custom_weights)
+    weights_tuple = tuple(round(weights[k], 6) for k in FACTOR_ORDER)
+    rev_tuple = tuple(reverse_flags.get(k, False) for k in FACTOR_ORDER)
+    cache_key = (json.dumps(aoi_config, sort_keys=True), rev_tuple, weights_tuple)
+    
+    with _lock:
+        if cache_key in _cache_map:
+            return _cache_map[cache_key]
+
+    aoi, suitability, score_images, _ = _build_habitat_images(aoi_config, reverse_flags, custom_weights)
     map_id = suitability.getMapId(_SCORE_VIS)
-    final_thumb_url = suitability.getThumbURL({
-        **_SCORE_VIS, "region": aoi.bounds(), "dimensions": 512, "format": "png",
-    })
+    
+    factor_maps = {}
+    for key, img in score_images.items():
+        factor_maps[key] = {
+            "tile_url": img.getMapId(_SCORE_VIS)["tile_fetcher"].url_format
+        }
+
+    centroid = aoi.centroid(maxError=100).coordinates().getInfo()
+    bounds = aoi.bounds().getInfo()["coordinates"][0]
+
+    result = {
+        "tile_url": map_id["tile_fetcher"].url_format,
+        "factor_maps": factor_maps,
+        "center": [centroid[1], centroid[0]],
+        "bbox": bounds,
+    }
+
+    with _lock:
+        _cache_map[cache_key] = result
+    return result
+
+
+def compute_habitat_stats(
+    aoi_config: dict, reverse_flags: dict, custom_weights: dict | None = None
+) -> dict:
+    weights = _normalize_weights(custom_weights)
+    weights_tuple = tuple(round(weights[k], 6) for k in FACTOR_ORDER)
+    rev_tuple = tuple(reverse_flags.get(k, False) for k in FACTOR_ORDER)
+    cache_key = (json.dumps(aoi_config, sort_keys=True), rev_tuple, weights_tuple)
+    
+    with _lock:
+        if cache_key in _cache_stats:
+            return _cache_stats[cache_key]
+
+    aoi, suitability, _, _ = _build_habitat_images(aoi_config, reverse_flags, custom_weights)
 
     classes = {
         "Very Low Suitability": suitability.lt(2),
@@ -214,17 +250,63 @@ def compute_habitat_suitability(
     labels = list(classes.keys())
     area_img = ee.Image.cat([classes[lbl].multiply(ee.Image.pixelArea()).rename(f"c{i}") for i, lbl in enumerate(labels)])
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-        f_area = executor.submit(lambda: area_img.reduceRegion(reducer=ee.Reducer.sum(), geometry=aoi, scale=100, maxPixels=1e8, bestEffort=True).getInfo())
-        f_classify = executor.submit(lambda: quantile_classify(
-            layers=[{"name": "suitability", "image": suitability, "title": "Habitat Suitability"}] + 
-                   [{"name": f"{k}_score", "image": v, "title": FACTOR_META[k]["label"]} for k,v in score_images.items()],
-            aoi=aoi, scale=100, n_classes=n_classes,
-        ))
-        area_dict = f_area.result()
-        classify = f_classify.result()
+    area_dict = area_img.reduceRegion(
+        reducer=ee.Reducer.sum(), geometry=aoi, scale=100, maxPixels=1e8, bestEffort=True
+    ).getInfo()
 
     class_areas = {lbl: round((area_dict.get(f"c{i}") or 0) / 1e6, 2) for i, lbl in enumerate(labels)}
+
+    result = {
+        "class_areas_km2": class_areas,
+    }
+
+    with _lock:
+        _cache_stats[cache_key] = result
+    return result
+
+
+def compute_habitat_classify(
+    aoi_config: dict, reverse_flags: dict, n_classes: int = 5, custom_weights: dict | None = None
+) -> dict:
+    weights = _normalize_weights(custom_weights)
+    weights_tuple = tuple(round(weights[k], 6) for k in FACTOR_ORDER)
+    rev_tuple = tuple(reverse_flags.get(k, False) for k in FACTOR_ORDER)
+    cache_key = (json.dumps(aoi_config, sort_keys=True), rev_tuple, n_classes, weights_tuple)
+    
+    with _lock:
+        if cache_key in _cache_classify:
+            return _cache_classify[cache_key]
+
+    aoi, suitability, score_images, _ = _build_habitat_images(aoi_config, reverse_flags, custom_weights)
+
+    classify = quantile_classify(
+        layers=[{"name": "suitability", "image": suitability, "title": "Habitat Suitability"}] + 
+               [{"name": f"{k}_score", "image": v, "title": FACTOR_META[k]["label"]} for k,v in score_images.items()],
+        aoi=aoi, scale=100, n_classes=n_classes,
+    )
+
+    result = {
+        "classify": classify,
+    }
+
+    with _lock:
+        _cache_classify[cache_key] = result
+    return result
+
+
+def compute_habitat_export(
+    aoi_config: dict, reverse_flags: dict, custom_weights: dict | None = None
+) -> dict:
+    weights = _normalize_weights(custom_weights)
+    weights_tuple = tuple(round(weights[k], 6) for k in FACTOR_ORDER)
+    rev_tuple = tuple(reverse_flags.get(k, False) for k in FACTOR_ORDER)
+    cache_key = (json.dumps(aoi_config, sort_keys=True), rev_tuple, weights_tuple)
+    
+    with _lock:
+        if cache_key in _cache_export:
+            return _cache_export[cache_key]
+
+    aoi, suitability, score_images, _ = _build_habitat_images(aoi_config, reverse_flags, custom_weights)
 
     def safe_url(img, name):
         try:
@@ -238,27 +320,26 @@ def compute_habitat_suitability(
         except Exception:
             return None
 
+    final_thumb_url = safe_thumb(suitability)
+    download_url = safe_url(suitability, "Habitat_Suitability")
+
+    factors = {}
+    for k in FACTOR_ORDER:
+        factors[k] = {
+            "label": FACTOR_META[k]["label"],
+            "weight_pct": weights[k] * 100,
+            "reversed": bool(reverse_flags.get(k, False)),
+            "description": FACTOR_META[k]["reversed_desc"] if reverse_flags.get(k, False) else FACTOR_META[k]["normal_desc"],
+            "thumb_url": safe_thumb(score_images[k]),
+            "download_url": safe_url(score_images[k], f"Habitat_{k}_score")
+        }
+
     result = {
-        "map_id": map_id["mapid"],
-        "token": map_id["token"],
-        "tile_url": map_id["tile_fetcher"].url_format,
         "thumb_url": final_thumb_url,
-        "download_url": safe_url(suitability, "Habitat_Suitability"),
-        "class_areas_km2": class_areas,
-        "factors": {
-            k: {
-                "label": FACTOR_META[k]["label"],
-                "weight_pct": weights[k] * 100,
-                "reversed": bool(reverse_flags.get(k, False)),
-                "description": FACTOR_META[k]["reversed_desc"] if reverse_flags.get(k, False) else FACTOR_META[k]["normal_desc"],
-                "tile_url": score_images[k].getMapId(_SCORE_VIS)["tile_fetcher"].url_format,
-                "thumb_url": safe_thumb(score_images[k]),
-                "download_url": safe_url(score_images[k], f"Habitat_{k}_score")
-            } for k in FACTOR_ORDER
-        },
-        "classify": classify,
+        "download_url": download_url,
+        "factors": factors,
     }
 
     with _lock:
-        _cache[cache_key] = result
+        _cache_export[cache_key] = result
     return result

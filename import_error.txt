@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "C:\Users\user\Documents\blacportal\backend\debug.py", line 5, in <module>
+    import main
+  File "C:\Users\user\Documents\blacportal\backend\main.py", line 30, in <module>
+    from gee.biomass import compute_biomass_depletion
+  File "C:\Users\user\Documents\blacportal\backend\gee\biomass.py", line 3, in <module>
+    from .auth import _require_gee
+ImportError: cannot import name '_require_gee' from 'gee.auth' (C:\Users\user\Documents\blacportal\backend\gee\auth.py)

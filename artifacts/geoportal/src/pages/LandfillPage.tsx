@@ -322,8 +322,8 @@ function printReport(data: LandfillResult, analysisDate: string) {
   <h2>Interpretation</h2>
   <div class="interpretation">${interpretation}</div>
 
-  <div class="footer">
-    Rwanda Environmental GeoPortal · Powered by Google Earth Engine · Generated ${analysisDate}<br/>
+    <div style="font-size: 10px; color: #666; text-align: center; border-top: 1px solid #eee; padding-top: 10px; margin-top: 20px;">
+    SPETRO Geoportal Analysis · Powered by Google Earth Engine · Generated ${analysisDate}<br/>
     This report is for planning and research purposes only. Field verification is required before site selection.
   </div>
 </body>
