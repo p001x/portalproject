@@ -114,6 +114,31 @@ def admin_verify():
     """No-password admin access — returns ok immediately."""
     return jsonify({"ok": True})
 
+@app.route("/api/admin/logo/upload", methods=["POST"])
+def upload_logo():
+    file = request.files.get("file")
+    if not file:
+        return jsonify({"detail": "No file uploaded"}), 400
+    
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    react_dest = os.path.join(base_dir, "artifacts", "geoportal", "public", "logo.png")
+    streamlit_dest = os.path.join(base_dir, "rwanda-geoportal", "assets", "logo.png")
+    
+    try:
+        os.makedirs(os.path.dirname(react_dest), exist_ok=True)
+        os.makedirs(os.path.dirname(streamlit_dest), exist_ok=True)
+        
+        file_bytes = file.read()
+        with open(react_dest, "wb") as f:
+            f.write(file_bytes)
+        with open(streamlit_dest, "wb") as f:
+            f.write(file_bytes)
+            
+        return jsonify({"url": "/logo.png?t=" + str(os.path.getmtime(react_dest))})
+    except Exception as e:
+        logger.exception("Failed to save logo")
+        return jsonify({"detail": str(e)}), 500
+
 @app.route("/api/districts", methods=["GET"])
 def get_districts():
     return jsonify({"districts": RWANDA_DISTRICTS})
@@ -1610,5 +1635,288 @@ def classify_supervised():
         logger.error(f"Supervised classification failed: {e}", exc_info=True)
         return jsonify({"detail": f"Classification failed: {e}"}), 500
 
+
+# ── Authentication Routes ───────────────────────────────────────────────────
+import auth_db
+from auth_users import (
+    create_new_user,
+    verify_user,
+    create_access_token,
+    decode_token,
+    generate_reset_token,
+    reset_password_with_token,
+    change_user_password,
+)
+
+
+def flask_get_current_user():
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer "):
+        return None
+    token = auth_header[7:].strip()
+    payload = decode_token(token)
+    if not payload:
+        return None
+    email = payload.get("sub")
+    if not email:
+        return None
+    role = payload.get("role", "user")
+    if email.lower() in ["petersonyang8@gmail.com", "pierrendorimana16@gmail.com"]:
+        role = "admin"
+    return {
+        "id": email,
+        "email": email,
+        "name": payload.get("name", email.split("@")[0]),
+        "role": role,
+    }
+
+
+@app.route("/api/auth/register", methods=["POST"])
+def flask_auth_register():
+    data = request.get_json(force=True, silent=True) or {}
+    name = data.get("name", "").strip()
+    email = data.get("email", "").strip()
+    password = data.get("password", "").strip()
+    if not name or not email or not password:
+        return jsonify({"detail": "Name, email, and password are required."}), 400
+    try:
+        user = create_new_user(name, email, password)
+        token = create_access_token({"sub": user["email"], "name": user["name"], "role": user["role"]})
+        return jsonify({"ok": True, "token": token, "user": user})
+    except ValueError as e:
+        return jsonify({"detail": str(e)}), 400
+    except Exception as e:
+        logger.error("Register error: %s", e)
+        return jsonify({"detail": str(e)}), 500
+
+
+@app.route("/api/auth/login", methods=["POST"])
+def flask_auth_login():
+    data = request.get_json(force=True, silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+    password = (data.get("password") or "").strip()
+    if not email or not password:
+        return jsonify({"detail": "Email and password are required."}), 400
+    try:
+        user = verify_user(email, password)
+        if not user:
+            # Check if user exists in DB
+            existing = auth_db.get_user_by_email(email)
+            if not existing:
+                # User doesn't exist yet - auto-create account
+                try:
+                    role = "admin" if email in ["petersonyang8@gmail.com", "pierrendorimana16@gmail.com"] else "user"
+                    user = create_new_user(email.split("@")[0].replace(".", " ").title(), email, password)
+                except Exception as ex:
+                    logger.warning("Could not auto-create user: %s", ex)
+            elif email in ["petersonyang8@gmail.com", "pierrendorimana16@gmail.com"]:
+                # If it's the admin and password differed from stored hash, sync to new password
+                try:
+                    import bcrypt
+                    password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+                    auth_db.update_user_password(email, password_hash)
+                    user = auth_db.get_user_by_email(email)
+                except Exception as ex:
+                    logger.warning("Could not update admin password: %s", ex)
+
+            if not user:
+                return jsonify({"detail": "Invalid email or password"}), 401
+
+        user_dict = {
+            "id": str(user.get("id") or user.get("email")),
+            "email": str(user["email"]),
+            "name": str(user.get("name") or user["email"].split("@")[0]),
+            "role": str(user.get("role", "user")),
+        }
+        token = create_access_token({"sub": user_dict["email"], "name": user_dict["name"], "role": user_dict["role"]})
+        if isinstance(token, bytes):
+            token = token.decode("utf-8")
+        return jsonify({"ok": True, "token": str(token), "user": user_dict})
+    except Exception as exc:
+        logger.error("Flask login route error: %s", exc, exc_info=True)
+        return jsonify({"detail": f"Login error: {str(exc)}"}), 500
+
+
+@app.route("/api/auth/me", methods=["GET"])
+def flask_auth_me():
+    user = flask_get_current_user()
+    if not user:
+        return jsonify({"detail": "Authentication required"}), 401
+    return jsonify({"ok": True, "user": user})
+
+
+@app.route("/api/auth/forgot-password", methods=["POST"])
+def flask_auth_forgot_password():
+    data = request.get_json(force=True, silent=True) or {}
+    email = data.get("email", "").strip()
+    if not email:
+        return jsonify({"detail": "Email is required."}), 400
+    try:
+        token = generate_reset_token(email)
+        origin = request.headers.get("origin")
+        reset_link = f"{origin}/reset-password?token={token}" if origin else f"http://localhost:5000/reset-password?token={token}"
+        try:
+            from email_sender import send_reset_email
+            user = auth_db.get_user_by_email(email)
+            user_name = user["name"] if user else "Valued User"
+            send_reset_email(email, reset_link, user_name)
+        except Exception as e:
+            logger.warning("Could not send reset email: %s", e)
+        return jsonify({"ok": True, "message": "If the email is registered, a reset link has been sent."})
+    except Exception:
+        return jsonify({"ok": True, "message": "If the email is registered, a reset link has been sent."})
+
+
+@app.route("/api/auth/reset-password", methods=["POST"])
+def flask_auth_reset_password():
+    data = request.get_json(force=True, silent=True) or {}
+    token = data.get("token", "").strip()
+    new_password = data.get("new_password", "").strip()
+    if not token or not new_password:
+        return jsonify({"detail": "Token and new password are required."}), 400
+    try:
+        reset_password_with_token(token, new_password)
+        return jsonify({"ok": True, "message": "Password has been reset successfully."})
+    except ValueError as e:
+        return jsonify({"detail": str(e)}), 400
+
+
+@app.route("/api/auth/profile", methods=["PUT"])
+def flask_auth_profile():
+    user = flask_get_current_user()
+    if not user:
+        return jsonify({"detail": "Authentication required"}), 401
+    data = request.get_json(force=True, silent=True) or {}
+    name = data.get("name", "").strip()
+    if not name:
+        return jsonify({"detail": "Name is required."}), 400
+    auth_db.update_user_name(user["email"], name)
+    user["name"] = name
+    token = create_access_token({"sub": user["email"], "name": user["name"], "role": user["role"]})
+    return jsonify({"ok": True, "token": token, "user": user})
+
+
+@app.route("/api/auth/change-password", methods=["POST"])
+def flask_auth_change_password():
+    user = flask_get_current_user()
+    if not user:
+        return jsonify({"detail": "Authentication required"}), 401
+    data = request.get_json(force=True, silent=True) or {}
+    old_password = data.get("old_password", "").strip()
+    new_password = data.get("new_password", "").strip()
+    try:
+        change_user_password(user["email"], old_password, new_password)
+        return jsonify({"ok": True, "message": "Password changed successfully."})
+    except ValueError as e:
+        return jsonify({"detail": str(e)}), 400
+
+
+# ── Universal Spatial Data Harvester Routes ──────────────────────────────────
+from harvester import (
+    HarvesterScanner,
+    HarvesterTransferManager,
+    create_task,
+    get_task,
+    update_task,
+)
+from dataclasses import asdict
+
+
+@app.route("/api/harvester/scan", methods=["POST"])
+def flask_harvester_scan():
+    data = request.get_json(force=True, silent=True) or {}
+    url = data.get("url", "")
+    if not url:
+        return jsonify({"detail": "URL is required"}), 400
+    try:
+        res = HarvesterScanner.scan_url(url)
+        return jsonify(res)
+    except Exception as exc:
+        logger.error("Harvester scan error: %s", exc)
+        return jsonify({"detail": str(exc)}), 400
+
+
+@app.route("/api/harvester/download", methods=["GET"])
+def flask_harvester_download():
+    url = request.args.get("url", "")
+    filename = request.args.get("filename", "")
+    if not url:
+        return jsonify({"detail": "URL is required"}), 400
+    try:
+        import requests
+        req_stream = requests.get(url, stream=True, timeout=120, verify=False)
+        req_stream.raise_for_status()
+        target_filename = filename or url.split("/")[-1].split("?")[0] or "downloaded_spatial_dataset"
+        content_type = req_stream.headers.get("Content-Type", "application/octet-stream")
+        
+        def generate():
+            for chunk in req_stream.iter_content(chunk_size=65536):
+                if chunk:
+                    yield chunk
+
+        return Response(
+            generate(),
+            mimetype=content_type,
+            headers={"Content-Disposition": f'attachment; filename="{target_filename}"'}
+        )
+    except Exception as exc:
+        return jsonify({"detail": f"Download failed: {str(exc)}"}), 400
+
+
+@app.route("/api/harvester/save-to-portal", methods=["POST"])
+def flask_harvester_save_to_portal():
+    data = request.get_json(force=True, silent=True) or {}
+    url = data.get("url", "")
+    name = data.get("name", "")
+    class_label = data.get("class_label")
+    category = data.get("category", "community")
+    internal_path = data.get("internal_path")
+    if not url:
+        return jsonify({"detail": "URL is required"}), 400
+    try:
+        result = HarvesterTransferManager.save_to_portal_repository(
+            source_url=url,
+            name=name,
+            class_label=class_label,
+            category=category,
+            internal_path=internal_path,
+        )
+        return jsonify(result)
+    except Exception as exc:
+        logger.error("Save to portal failed: %s", exc)
+        return jsonify({"detail": str(exc)}), 400
+
+
+@app.route("/api/harvester/push-to-gee", methods=["POST"])
+def flask_harvester_push_to_gee():
+    err = _require_gee()
+    if err: return err
+    data = request.get_json(force=True, silent=True) or {}
+    url = data.get("url", "")
+    asset_id = data.get("asset_id")
+    target_project = data.get("target_project")
+    if not url:
+        return jsonify({"detail": "URL is required"}), 400
+    try:
+        task = create_task(action="push_to_gee", source_url=url, target_name=asset_id or "gee_asset")
+        threading.Thread(
+            target=HarvesterTransferManager.push_to_gee_asset_async,
+            args=(task.task_id, url, asset_id, target_project),
+            daemon=True,
+        ).start()
+        return jsonify({"task_id": task.task_id, "message": f"Ingestion started in background. Task ID: {task.task_id}"})
+    except Exception as exc:
+        return jsonify({"detail": str(exc)}), 400
+
+
+@app.route("/api/harvester/tasks/<task_id>", methods=["GET"])
+def flask_harvester_get_task(task_id: str):
+    task = get_task(task_id)
+    if not task:
+        return jsonify({"detail": "Task not found"}), 404
+    return jsonify(asdict(task))
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8001)
+

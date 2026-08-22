@@ -4,6 +4,18 @@ import json
 import logging
 import ee
 
+# --- Workaround for Google API ConnectionResetError on Windows (IPv6 / Proxies) ---
+os.environ["NO_PROXY"] = "*"
+try:
+    import socket
+    import urllib3.util.connection as urllib3_cn
+    def allowed_gai_family():
+        return socket.AF_INET
+    urllib3_cn.allowed_gai_family = allowed_gai_family
+except ImportError:
+    pass
+# ---------------------------------------------------------------------------------
+
 logger = logging.getLogger(__name__)
 _initialized = False
 _active_project_id: str | None = None

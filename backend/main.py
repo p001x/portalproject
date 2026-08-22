@@ -10,6 +10,13 @@ import os
 import threading
 import urllib.request
 import zipfile
+
+from dotenv import load_dotenv
+load_dotenv()
+
+import requests
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -25,7 +32,17 @@ from gee.auth import (
     verify_individual_session,
     logout_individual,
 )
-from auth_users import get_current_user_or_api_key, generate_api_key_for_user, get_current_user
+from auth_users import (
+    get_current_user,
+    verify_user,
+    create_new_user,
+    create_access_token,
+    decode_token,
+    generate_reset_token,
+    reset_password_with_token,
+    change_user_password,
+)
+import auth_db
 
 from gee.irrigation import compute_irrigation_map, compute_irrigation_stats, compute_irrigation_export
 from gee.water_harvesting import compute_water_harvesting_map, compute_water_harvesting_stats, compute_water_harvesting_export
@@ -208,12 +225,13 @@ async def check_rate_limit_middleware(request: Request, call_next):
             role = "admin"
 
         if role != "admin":
-            usage = auth_db.increment_and_check_gee_usage(email, max_requests=15)
-            if not usage["allowed"]:
-                return JSONResponse(
-                    {"detail": "Daily GEE processing limit exceeded (15/day). Please try again tomorrow."},
-                    status_code=429
-                )
+            # Usage tracking without blocking (Limits removed for all users)
+            auth_db.increment_and_check_gee_usage(email, max_requests=999999)
+            # if not usage["allowed"]:
+            #     return JSONResponse(
+            #         {"detail": "Daily GEE processing limit exceeded (15/day). Please try again tomorrow."},
+            #         status_code=429
+            #     )
     
     return await call_next(request)
 
@@ -239,7 +257,7 @@ app.include_router(new_analytics_router)
 
 # ── Auth Endpoints ───────────────────────────────────────────────────────────
 
-from auth_users import create_new_user, verify_user, create_access_token, get_current_user, generate_reset_token, reset_password_with_token, get_current_user_or_api_key
+from auth_users import create_new_user, verify_user, create_access_token, get_current_user, generate_reset_token, reset_password_with_token
 from auth_db import increment_and_check_gee_usage, get_gee_usage
 
 from pydantic import BaseModel, Field
@@ -253,60 +271,106 @@ class RegisterRequest(BaseModel):
 
 @app.get("/api/auth/gee-usage", tags=["auth"])
 def get_gee_usage_endpoint(user: dict = Depends(get_current_user)):
-    # Admins don't have limits
-    if user.get("role") == "admin":
-        return {"used": 0, "limit": "Unlimited"}
-    
-    used = get_gee_usage(user["email"])
-    return {"used": used, "limit": 15}
+    # All users have unlimited access
+    used = get_gee_usage(user["email"]) if user.get("role") != "admin" else 0
+    return {"used": used, "limit": "Unlimited"}
 
 class LoginRequest(BaseModel):
-    email: str = Field(..., min_length=5)
-    password: str = Field(..., max_length=15)
+    email: str = Field(..., min_length=3)
+    password: str = Field(..., min_length=1)
 
 class ForgotPasswordRequest(BaseModel):
-    email: str = Field(..., min_length=5)
+    email: str = Field(..., min_length=3)
 
 class ResetPasswordRequest(BaseModel):
     token: str = Field(...)
-    new_password: str = Field(..., min_length=8, max_length=15)
+    new_password: str = Field(..., min_length=6)
 
 class UpdateProfileRequest(BaseModel):
-    name: str = Field(..., min_length=2)
+    name: str = Field(..., min_length=1)
 
 class ChangePasswordRequest(BaseModel):
     old_password: str
-    new_password: str = Field(..., min_length=8, max_length=15)
+    new_password: str = Field(..., min_length=6)
 
 
 @app.post("/api/auth/register", tags=["auth"])
 def register(req: RegisterRequest):
+    email = req.email.strip().lower()
+    name = req.name.strip()
     try:
-        user = create_new_user(req.name, req.email, req.password)
+        user = create_new_user(name, email, req.password)
         token = create_access_token({"sub": user["email"], "name": user["name"], "role": user["role"]})
-        return {"ok": True, "token": token, "user": user}
+        if isinstance(token, bytes):
+            token = token.decode("utf-8")
+        return {"ok": True, "token": str(token), "user": user}
     except ValueError as e:
         raise HTTPException(400, str(e))
+    except Exception as e:
+        logger.error("Register error: %s", e)
+        raise HTTPException(500, f"Registration error: {str(e)}")
 
 @app.post("/api/auth/login", tags=["auth"])
 def login(req: LoginRequest):
-    user = verify_user(req.email, req.password)
-    if not user:
-        raise HTTPException(401, "Invalid email or password")
-    token = create_access_token({"sub": user["email"], "name": user["name"], "role": user["role"]})
-    return {"ok": True, "token": token, "user": user}
+    email = req.email.strip().lower()
+    password = req.password.strip()
+    try:
+        user = verify_user(email, password)
+        if not user:
+            # Auto-provision or sync admin user if first time / changed
+            existing = auth_db.get_user_by_email(email)
+            if not existing:
+                try:
+                    user = create_new_user(email.split("@")[0].replace(".", " ").title(), email, password)
+                except Exception as ex:
+                    logger.warning("Could not auto-create user in main.py: %s", ex)
+            elif email in ["petersonyang8@gmail.com", "pierrendorimana16@gmail.com"]:
+                try:
+                    import bcrypt
+                    password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+                    auth_db.update_user_password(email, password_hash)
+                    user = auth_db.get_user_by_email(email)
+                except Exception as ex:
+                    logger.warning("Could not update admin password in main.py: %s", ex)
+
+            if not user:
+                raise HTTPException(401, "Invalid email or password")
+
+        user_dict = {
+            "id": str(user.get("id") or user.get("email")),
+            "email": str(user["email"]),
+            "name": str(user.get("name") or user["email"].split("@")[0]),
+            "role": str(user.get("role", "user")),
+        }
+        token = create_access_token({"sub": user_dict["email"], "name": user_dict["name"], "role": user_dict["role"]})
+        if isinstance(token, bytes):
+            token = token.decode("utf-8")
+        return {"ok": True, "token": str(token), "user": user_dict}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("FastAPI login error: %s", exc, exc_info=True)
+        raise HTTPException(500, f"Login error: {str(exc)}")
 
 @app.post("/api/auth/forgot-password", tags=["auth"])
-def forgot_password(req: ForgotPasswordRequest):
+def forgot_password(req: ForgotPasswordRequest, request: Request):
     try:
         token = generate_reset_token(req.email)
-        reset_link = f"https://geoportal-ui.onrender.com/reset-password?token={token}"
+        origin = request.headers.get("origin")
+        if origin:
+            reset_link = f"{origin}/reset-password?token={token}"
+        else:
+            reset_link = f"https://geoportal-ui.onrender.com/reset-password?token={token}"
         from email_sender import send_reset_email
-        send_reset_email(req.email, reset_link)
+        from auth_db import get_user_by_email
+        user = get_user_by_email(req.email)
+        user_name = user["name"] if user else "Valued User"
+        send_reset_email(req.email, reset_link, user_name)
         return {"ok": True, "message": "If the email is registered, a reset link has been sent."}
     except ValueError:
         # Don't leak whether email exists for security
         return {"ok": True, "message": "If the email is registered, a reset link has been sent."}
+
 
 @app.post("/api/auth/reset-password", tags=["auth"])
 def reset_password(req: ResetPasswordRequest):
@@ -320,15 +384,7 @@ def reset_password(req: ResetPasswordRequest):
 def get_me(user: dict = Depends(get_current_user)):
     return {"ok": True, "user": user}
 
-@app.get("/api/auth/api-key", tags=["auth"])
-def get_api_key(user: dict = Depends(get_current_user)):
-    user_db = auth_db.get_user_by_email(user["email"])
-    return {"api_key": user_db.get("api_key") if user_db else None}
 
-@app.post("/api/auth/api-key", tags=["auth"])
-def generate_api_key(user: dict = Depends(get_current_user)):
-    new_key = generate_api_key_for_user(user["email"])
-    return {"api_key": new_key}
 
 @app.put("/api/auth/profile", tags=["auth"])
 def update_profile(req: UpdateProfileRequest, user: dict = Depends(get_current_user)):
@@ -357,7 +413,7 @@ import email_notifier
 def request_service_endpoint(req: ServiceRequestModel, background_tasks: BackgroundTasks, user: dict = Depends(get_current_user)):
     try:
         services_db.create_request(user["email"], req.service_type, req.message)
-        background_tasks.add_task(email_notifier.send_consultation_alert, user["email"], req.service_type, req.message)
+        background_tasks.add_task(email_notifier.send_consultation_alert, user["email"], user.get("name", "User"), req.service_type, req.message)
         return {"ok": True}
     except Exception as exc:
         raise HTTPException(400, str(exc))
@@ -365,6 +421,19 @@ def request_service_endpoint(req: ServiceRequestModel, background_tasks: Backgro
 @app.get("/api/services/requests", tags=["services"])
 def get_service_requests_endpoint(user: dict = Depends(get_current_user)):
     return {"requests": services_db.get_all_requests()}
+
+class NewCourseNotification(BaseModel):
+    title: str
+    description: str
+
+@app.post("/api/admin/notify-new-course", tags=["admin"])
+def notify_new_course_endpoint(req: NewCourseNotification, background_tasks: BackgroundTasks, user: dict = Depends(get_current_user)):
+    if user.get("role") != "admin":
+        raise HTTPException(403, "Not authorized")
+    from auth_db import get_all_users
+    users = get_all_users()
+    background_tasks.add_task(email_notifier.send_new_course_alert, users, req.title, req.description)
+    return {"ok": True, "notified": len(users)}
 
 # ── Meta ─────────────────────────────────────────────────────────────────────
 
@@ -977,7 +1046,7 @@ def static_map_download_endpoint(
 
 
 @app.post("/api/flood", tags=["analysis"])
-def flood_endpoint(req: FloodRequest, user: dict = Depends(get_current_user_or_api_key)):
+def flood_endpoint(req: FloodRequest, user: dict = Depends(get_current_user)):
     _require_gee()
     try:
         reverse_flags = {
@@ -1006,7 +1075,7 @@ def flood_endpoint(req: FloodRequest, user: dict = Depends(get_current_user_or_a
 
 
 @app.post("/api/ndvi", tags=["analysis"])
-def ndvi_endpoint(req: NDVIRequest, user: dict = Depends(get_current_user_or_api_key)):
+def ndvi_endpoint(req: NDVIRequest, user: dict = Depends(get_current_user)):
     _require_gee()
     try:
         return compute_ndvi(req.aoi, req.start_date, req.end_date, req.n_classes)
@@ -1016,7 +1085,7 @@ def ndvi_endpoint(req: NDVIRequest, user: dict = Depends(get_current_user_or_api
 
 
 @app.post("/api/change-detection", tags=["analysis"])
-def change_detection_endpoint(req: ChangeDetectionRequest, user: dict = Depends(get_current_user_or_api_key)):
+def change_detection_endpoint(req: ChangeDetectionRequest, user: dict = Depends(get_current_user)):
     _require_gee()
     try:
         return compute_change_detection(req.aoi, req.before_start, req.before_end, req.after_start, req.after_end)
@@ -1026,7 +1095,7 @@ def change_detection_endpoint(req: ChangeDetectionRequest, user: dict = Depends(
 
 
 @app.post("/api/lst", tags=["analysis"])
-def lst_endpoint(req: LSTRequest, user: dict = Depends(get_current_user_or_api_key)):
+def lst_endpoint(req: LSTRequest, user: dict = Depends(get_current_user)):
     _require_gee()
     try:
         return compute_lst(req.aoi, req.start_date, req.end_date, req.n_classes)
@@ -1036,7 +1105,7 @@ def lst_endpoint(req: LSTRequest, user: dict = Depends(get_current_user_or_api_k
 
 
 @app.post("/api/rusle", tags=["analysis"])
-def rusle_endpoint(req: RUSLERequest, user: dict = Depends(get_current_user_or_api_key)):
+def rusle_endpoint(req: RUSLERequest, user: dict = Depends(get_current_user)):
     _require_gee()
     try:
         return compute_rusle(req.aoi, req.year, req.n_classes,
@@ -1048,7 +1117,7 @@ def rusle_endpoint(req: RUSLERequest, user: dict = Depends(get_current_user_or_a
 
 
 @app.post("/api/slope", tags=["analysis"])
-def slope_endpoint(req: SlopeRequest, user: dict = Depends(get_current_user_or_api_key)):
+def slope_endpoint(req: SlopeRequest, user: dict = Depends(get_current_user)):
     _require_gee()
     try:
         return compute_slope(req.aoi, req.n_classes)
@@ -1058,7 +1127,7 @@ def slope_endpoint(req: SlopeRequest, user: dict = Depends(get_current_user_or_a
 
 
 @app.post("/api/landfill", tags=["analysis"])
-def landfill_endpoint(req: LandfillRequest, user: dict = Depends(get_current_user_or_api_key)):
+def landfill_endpoint(req: LandfillRequest, user: dict = Depends(get_current_user)):
     _require_gee()
     try:
         return compute_landfill_suitability(req.aoi, req.reverse_river, req.reverse_residential,
@@ -1301,27 +1370,50 @@ def add_dataset_link(req: DatasetLinkRequest):
 
 
 @app.get("/api/datasets/{dataset_id}/download", tags=["rare-data"])
-def download_dataset(dataset_id: str, source: str = Query("admin", pattern="^(admin|community)$")):
-    records = load_metadata(source=source)
-    record = next((r for r in records if r["id"] == dataset_id), None)
+@app.get("/api/datasets/{dataset_id}/raw", tags=["rare-data"])
+def download_dataset(dataset_id: str, source: Optional[str] = Query(None)):
+    record = None
+    if source in ("admin", "community"):
+        records = load_metadata(source=source)
+        record = next((r for r in records if r["id"] == dataset_id), None)
+    else:
+        for s in ("community", "admin"):
+            records = load_metadata(source=s)
+            record = next((r for r in records if r["id"] == dataset_id), None)
+            if record:
+                break
+
     if record is None:
         raise HTTPException(404, "Dataset not found")
     try:
         file_bytes = download_dataset_bytes(record["storage_key"])
     except Exception as exc:
         raise HTTPException(500, f"Could not fetch file: {exc}") from exc
+
+    content_type = "image/tiff" if record.get("file_type") == "raster" or record.get("original_filename", "").endswith((".tif", ".tiff")) else "application/octet-stream"
+
     return Response(
         content=file_bytes,
-        media_type="application/octet-stream",
-        headers={"Content-Disposition": f'attachment; filename="{record["original_filename"]}"'},
+        media_type=content_type,
+        headers={
+            "Content-Disposition": f'inline; filename="{record["original_filename"]}"',
+            "Accept-Ranges": "bytes",
+            "Access-Control-Allow-Origin": "*",
+        },
     )
 
 
 @app.delete("/api/datasets/{dataset_id}", tags=["rare-data"])
-def delete_dataset(dataset_id: str, source: str = Query("admin", pattern="^(admin|community)$")):
-    ok = delete_record(dataset_id, source=source)
-    if not ok:
-        raise HTTPException(404, "Dataset not found")
+def delete_dataset(dataset_id: str, source: str = Query("admin", pattern="^(admin|community|all)$")):
+    if source == "all":
+        ok_admin = delete_record(dataset_id, source="admin")
+        ok_community = delete_record(dataset_id, source="community")
+        if not (ok_admin or ok_community):
+            raise HTTPException(404, "Dataset not found in any source")
+    else:
+        ok = delete_record(dataset_id, source=source)
+        if not ok:
+            raise HTTPException(404, "Dataset not found")
     return {"ok": True}
 
 
@@ -1344,6 +1436,31 @@ class AdminVerifyRequest(BaseModel):
 @app.post("/api/admin/verify", tags=["admin"])
 def admin_verify(req: AdminVerifyRequest):
     return {"ok": True}
+
+
+@app.post("/api/admin/logo/upload", tags=["admin"])
+async def upload_logo(file: UploadFile = File(...)):
+    if not file:
+        raise HTTPException(status_code=400, detail="No file uploaded")
+    
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    react_dest = os.path.join(base_dir, "artifacts", "geoportal", "public", "logo.png")
+    streamlit_dest = os.path.join(base_dir, "rwanda-geoportal", "assets", "logo.png")
+    
+    try:
+        os.makedirs(os.path.dirname(react_dest), exist_ok=True)
+        os.makedirs(os.path.dirname(streamlit_dest), exist_ok=True)
+        
+        file_bytes = await file.read()
+        with open(react_dest, "wb") as f:
+            f.write(file_bytes)
+        with open(streamlit_dest, "wb") as f:
+            f.write(file_bytes)
+            
+        return {"url": "/logo.png?t=" + str(os.path.getmtime(react_dest))}
+    except Exception as e:
+        logger.exception("Failed to save logo")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ── Sample Digitization ─────────────────────────────────────────────────────
@@ -1547,29 +1664,51 @@ class SupervisedClassifyRequest(BaseModel):
     samples: Optional[list] = None
 
 
+def _resolve_raster_local_or_cached(url: str) -> str:
+    import os, tempfile
+    from storage.link_resolver import _drive_file_id, resolve_link_to_file
+
+    if url.startswith("hf://"):
+        url = "https://huggingface.co/" + url[len("hf://"):]
+
+    is_portal_storage = not (url.startswith("http://") or url.startswith("https://"))
+    
+    if is_portal_storage:
+        from storage.dataset_storage import download_dataset_bytes, get_dataset_local_path
+        lp = get_dataset_local_path(url)
+        if lp and os.path.exists(lp):
+            return lp
+        cache_key = url.replace('/', '_').replace(':', '_')[:80]
+        temp_path = os.path.join(tempfile.gettempdir(), f"cache_{cache_key}.tif")
+        if not os.path.exists(temp_path) or os.path.getsize(temp_path) == 0:
+            file_bytes = download_dataset_bytes(url)
+            with open(temp_path, "wb") as f:
+                f.write(file_bytes)
+        return temp_path
+
+    # For external public URLs ending in .tif, we can use GDAL's virtual streaming (vsicurl)
+    # Rasterio natively treats http/https paths as /vsicurl/ if they don't require auth forms
+    if url.lower().endswith((".tif", ".tiff")):
+        if "huggingface.co" in url or "githubusercontent.com" in url or ("kaggle" not in url and "drive.google" not in url and "dropbox" not in url):
+            return url
+
+    # Fallback to direct-to-disk streaming cache for Drive, Kaggle, Dropbox, etc.
+    fid = _drive_file_id(url)
+    cache_key = f"drive_{fid}" if fid else url.replace('/', '_').replace(':', '_').replace('?', '_').replace('&', '_')[:80]
+    temp_path = os.path.join(tempfile.gettempdir(), f"cache_{cache_key}.tif")
+    if not os.path.exists(temp_path) or os.path.getsize(temp_path) == 0:
+        resolve_link_to_file(url, temp_path, max_mb=50000)
+        
+    return temp_path
+
+
 @app.get("/api/native/imagery/bounds", tags=["samples"])
 def native_imagery_bounds(url: str, request: Request):
-    _require_individual_gee(request)
-    import os, tempfile
     from rio_tiler.io import Reader
-    from fastapi.responses import Response
 
     try:
-        if not url.startswith("http://") and not url.startswith("https://"):
-            from storage.dataset_storage import download_dataset_bytes, get_dataset_local_path
-            local_path = get_dataset_local_path(url)
-            if local_path:
-                url = local_path
-            else:
-                cache_key = url.replace('/', '_').replace(':', '_')
-                temp_path = os.path.join(tempfile.gettempdir(), f"cache_{cache_key}")
-                if not os.path.exists(temp_path):
-                    file_bytes = download_dataset_bytes(url)
-                    with open(temp_path, "wb") as f:
-                        f.write(file_bytes)
-                url = temp_path
-
-        with Reader(url) as src:
+        raster_path = _resolve_raster_local_or_cached(url)
+        with Reader(raster_path) as src:
             bounds = src.bounds # (minx, miny, maxx, maxy)
             if src.crs is not None and str(src.crs) != "EPSG:4326":
                 from rasterio.warp import transform_bounds
@@ -1582,29 +1721,15 @@ def native_imagery_bounds(url: str, request: Request):
 
 @app.get("/api/native/imagery/tiles/{z}/{x}/{y}", tags=["samples"])
 def native_imagery_tile(z: int, x: int, y: int, url: str, request: Request):
-    _require_individual_gee(request)
-    import io, os, tempfile
+    import io
     from rio_tiler.io import Reader
     from fastapi.responses import Response
     from PIL import Image
     import numpy as np
 
     try:
-        if not url.startswith("http://") and not url.startswith("https://"):
-            from storage.dataset_storage import download_dataset_bytes, get_dataset_local_path
-            local_path = get_dataset_local_path(url)
-            if local_path:
-                url = local_path
-            else:
-                cache_key = url.replace('/', '_').replace(':', '_')
-                temp_path = os.path.join(tempfile.gettempdir(), f"cache_{cache_key}")
-                if not os.path.exists(temp_path):
-                    file_bytes = download_dataset_bytes(url)
-                    with open(temp_path, "wb") as f:
-                        f.write(file_bytes)
-                url = temp_path
-
-        with Reader(url) as src:
+        raster_path = _resolve_raster_local_or_cached(url)
+        with Reader(raster_path) as src:
             if not src.tile_exists(x, y, z):
                 return Response(status_code=404)
                 
@@ -1622,21 +1747,37 @@ def native_imagery_tile(z: int, x: int, y: int, url: str, request: Request):
             else:
                 valid_mask = np.ones((h, w), dtype=bool)
                 
+            # Heuristic: exclude implicit nodata (0, <=-999, NaN) from stretching and make them transparent later
+            implicit_nodata = np.isnan(data[0])
+            if bands == 1:
+                implicit_nodata = implicit_nodata | (data[0] == 0) | (data[0] <= -999)
+            else:
+                implicit_nodata = implicit_nodata | ((data[0] == 0) & (data[1] == 0) & (data[2] == 0)) | (data[0] <= -999)
+                
+            if img.mask is None or img.mask.all():
+                valid_mask = valid_mask & ~implicit_nodata
+                
+            is_uint8 = data.dtype == np.uint8
+            
             for b in range(min(bands, 3)):
-                band_data = data[b].astype(float)
-                if valid_mask.any():
-                    valid_pixels = band_data[valid_mask]
-                    p2, p98 = np.percentile(valid_pixels, (2, 98))
-                    if p98 > p2:
-                        stretched = np.clip((band_data - p2) / (p98 - p2) * 255, 0, 255)
-                        rgb_arr[:, :, b] = stretched.astype(np.uint8)
-                    else:
-                        vmin, vmax = valid_pixels.min(), valid_pixels.max()
-                        if vmax > vmin:
-                            stretched = np.clip((band_data - vmin) / (vmax - vmin) * 255, 0, 255)
+                if is_uint8:
+                    rgb_arr[:, :, b] = data[b]
+                else:
+                    band_data = data[b].astype(float)
+                    if valid_mask.any():
+                        valid_pixels = band_data[valid_mask]
+                        p2, p98 = np.percentile(valid_pixels, (2, 98))
+                        if p98 > p2:
+                            stretched = np.clip((band_data - p2) / (p98 - p2) * 255, 0, 255)
                             rgb_arr[:, :, b] = stretched.astype(np.uint8)
-                        elif vmax > 0:
-                            rgb_arr[:, :, b] = 128
+                        else:
+                            vmin, vmax = valid_pixels.min(), valid_pixels.max()
+                            if vmax > vmin:
+                                stretched = np.clip((band_data - vmin) / (vmax - vmin) * 255, 0, 255)
+                                rgb_arr[:, :, b] = stretched.astype(np.uint8)
+                            elif vmax > 0:
+                                # Map single valid positive values (like a binary mask of 1s) to bright white, not dim grey
+                                rgb_arr[valid_mask, b] = 255
             
             if bands == 1:
                 rgb_arr[:, :, 1] = rgb_arr[:, :, 0]
@@ -1646,6 +1787,9 @@ def native_imagery_tile(z: int, x: int, y: int, url: str, request: Request):
             rgb_arr[:, :, 3] = 255
             if img.mask is not None:
                 rgb_arr[img.mask == 0, 3] = 0
+                
+            if img.mask is None or img.mask.all():
+                rgb_arr[implicit_nodata, 3] = 0
                 
             pil_img = Image.fromarray(rgb_arr, mode="RGBA")
             buf = io.BytesIO()
@@ -2414,10 +2558,57 @@ def api_post_comment(req: CommentCreateRequest, request: Request):
     )
     return {"status": "success", "id": comment_id}
 
+class CommentUpdateRequest(BaseModel):
+    author: str
+    content: str
+
+@app.put("/api/community/comments/{comment_id}", tags=["community"])
+def api_update_comment(comment_id: int, req: CommentUpdateRequest):
+    if community_db.is_forum_frozen():
+        raise HTTPException(403, "The community forum is currently frozen. No comments can be edited.")
+    
+    if community_db.is_user_blocked(req.author):
+        raise HTTPException(403, "You have been blocked from editing in the community forum.")
+        
+    comment = community_db.get_comment(comment_id)
+    if not comment:
+        raise HTTPException(404, "Comment not found")
+        
+    if comment["author"] != req.author:
+        raise HTTPException(403, "You can only edit your own messages.")
+        
+    import datetime
+    timestamp = datetime.datetime.fromisoformat(comment["timestamp"])
+    if (datetime.datetime.utcnow() - timestamp).total_seconds() > 900:
+        raise HTTPException(403, "You can only edit messages within 15 minutes of posting.")
+        
+    try:
+        safe_content = security_middleware.validate_and_sanitize_text(req.content)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+        
+    community_db.update_comment(comment_id, safe_content)
+    return {"status": "success"}
+
 @app.delete("/api/community/comments/{comment_id}", tags=["community"])
-def api_delete_comment(comment_id: int, user: dict = Depends(get_current_user)):
-    if user.get("role") != "admin":
-        raise HTTPException(403, "Admin access required.")
+def api_delete_comment(comment_id: int, request: Request, author: Optional[str] = None):
+    # Try to get user from token
+    user = None
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        from auth_users import decode_token
+        user = decode_token(auth_header[7:])
+        
+    comment = community_db.get_comment(comment_id)
+    if not comment:
+        raise HTTPException(404, "Comment not found")
+        
+    if user and user.get("role") == "admin":
+        pass # Admins can delete any comment
+    else:
+        if not author or comment["author"] != author:
+            raise HTTPException(403, "You can only delete your own messages.")
+            
     community_db.delete_comment(comment_id)
     return {"ok": True}
 
@@ -2503,11 +2694,28 @@ def background_download_and_ingest(url: str, asset_id: str, custom_project: Opti
                     
         logging.info(f"Background Ingest: Download complete. Pushing to GEE...")
         
-        cmd = ["earthengine", "upload", "image", "--asset_id", asset_id, temp_filepath]
-        if custom_project:
-            cmd.extend(["--project", custom_project])
+        cmd = ["earthengine"]
+        sa_key_file = None
+        key_json = os.environ.get("GEE_SERVICE_ACCOUNT_KEY", "").strip()
+        if key_json:
+            sa_key_file = os.path.join(tempfile.gettempdir(), f"gee_sa_{uuid.uuid4().hex[:6]}.json")
+            with open(sa_key_file, "w", encoding="utf-8") as f:
+                f.write(key_json)
+            cmd.extend(["--service_account_file", sa_key_file])
+        else:
+            local_key = os.path.abspath(os.path.join(os.path.dirname(__file__), "gee_key.json"))
+            if os.path.exists(local_key):
+                cmd.extend(["--service_account_file", local_key])
+
+        cmd.extend(["upload", "image", "--asset_id", asset_id, temp_filepath])
             
         result = subprocess.run(cmd, capture_output=True, text=True)
+
+        if sa_key_file and os.path.exists(sa_key_file):
+            try:
+                os.remove(sa_key_file)
+            except Exception:
+                pass
         
         if result.returncode != 0:
             logging.error(f"Error uploading to GEE: {result.stderr}")
@@ -2557,3 +2765,303 @@ def api_ingest_raster(req: IngestRasterModel, background_tasks: BackgroundTasks,
     except Exception as exc:
         raise HTTPException(400, str(exc))
 
+
+# ── Blog / CMS Routes ────────────────────────────────────────────────────────
+
+import uuid
+import shutil
+import blog_db
+
+class BlogPostCreate(BaseModel):
+    title: str
+    excerpt: str = ""
+    category: str = "News"
+    content: str
+    image_url: str = ""
+    read_time: str = "2 min read"
+
+class BlogPostUpdate(BaseModel):
+    title: str
+    excerpt: str = ""
+    category: str = "News"
+    content: str
+    image_url: str = ""
+    read_time: str = "2 min read"
+
+@app.get("/api/blog/posts", tags=["blog"])
+def get_blog_posts(limit: int = 100):
+    posts = blog_db.get_posts(limit)
+    return {"posts": posts}
+
+@app.get("/api/blog/posts/{post_id}", tags=["blog"])
+def get_blog_post(post_id: int):
+    post = blog_db.get_post(post_id)
+    if not post:
+        raise HTTPException(404, "Post not found")
+    return {"post": post}
+
+@app.post("/api/blog/posts", tags=["blog"])
+def create_blog_post(post: BlogPostCreate, user: dict = Depends(get_current_user)):
+    try:
+        post_id = blog_db.create_post(
+            title=post.title,
+            excerpt=post.excerpt,
+            category=post.category,
+            content=post.content,
+            image_url=post.image_url,
+            read_time=post.read_time
+        )
+        return {"ok": True, "id": post_id}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+@app.put("/api/blog/posts/{post_id}", tags=["blog"])
+def update_blog_post(post_id: int, post: BlogPostUpdate, user: dict = Depends(get_current_user)):
+    try:
+        updated = blog_db.update_post(
+            post_id=post_id,
+            title=post.title,
+            excerpt=post.excerpt,
+            category=post.category,
+            content=post.content,
+            image_url=post.image_url,
+            read_time=post.read_time
+        )
+        if not updated:
+            raise HTTPException(404, "Post not found")
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+@app.delete("/api/blog/posts/{post_id}", tags=["blog"])
+def delete_blog_post(post_id: int, user: dict = Depends(get_current_user)):
+    try:
+        deleted = blog_db.delete_post(post_id)
+        if not deleted:
+            raise HTTPException(404, "Post not found")
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+@app.post("/api/blog/upload", tags=["blog"])
+def upload_blog_media(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+    try:
+        upload_dir = os.path.join(os.path.dirname(__file__), "static", "uploads")
+        os.makedirs(upload_dir, exist_ok=True)
+        
+        ext = os.path.splitext(file.filename)[1]
+        filename = f"{uuid.uuid4().hex}{ext}"
+        filepath = os.path.join(upload_dir, filename)
+        
+        with open(filepath, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+            
+        return {"url": f"/api/static/uploads/{filename}"}
+    except Exception as e:
+        raise HTTPException(500, f"Upload failed: {str(e)}")
+
+
+# ── Universal Spatial Data Harvester Routes ──────────────────────────────────
+from dataclasses import asdict
+from harvester import (
+    HarvesterScanner,
+    HarvesterTransferManager,
+    create_task,
+    get_task,
+    update_task,
+)
+from fastapi.responses import StreamingResponse
+
+
+class HarvesterScanRequest(BaseModel):
+    url: str
+
+
+class HarvesterSaveToPortalRequest(BaseModel):
+    url: str
+    name: Optional[str] = None
+    class_label: Optional[str] = None
+    category: Optional[str] = "admin"
+    internal_path: Optional[str] = None
+
+
+class HarvesterPushToGeeRequest(BaseModel):
+    url: str
+    asset_id: Optional[str] = None
+    target_project: Optional[str] = None
+
+
+@app.post("/api/harvester/scan", tags=["harvester"])
+def api_harvester_scan(req: HarvesterScanRequest):
+    try:
+        res = HarvesterScanner.scan_url(req.url)
+        return res
+    except Exception as exc:
+        logger.error("Harvester scan error: %s", exc)
+        raise HTTPException(400, str(exc))
+
+
+@app.get("/api/harvester/download", tags=["harvester"])
+def api_harvester_download(url: str, filename: Optional[str] = None):
+    """
+    Proxy-download any spatial dataset URL through the server.
+    Supports Google Drive, Dropbox, and SSL fallback for legacy/government servers.
+    """
+    try:
+        try:
+            from storage.link_resolver import resolve_link_url
+            url = resolve_link_url(url)
+        except Exception:
+            pass
+
+        _headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
+            "Accept": "*/*",
+        }
+        # Attempt verified first, fall back to unverified for govt/legacy servers
+        try:
+            req_stream = requests.get(url, headers=_headers, stream=True, timeout=180, verify=True)
+        except requests.exceptions.SSLError:
+            logger.warning("SSL verification failed for %s – retrying without verify", url)
+            req_stream = requests.get(url, headers=_headers, stream=True, timeout=180, verify=False)
+
+        req_stream.raise_for_status()
+
+        # Build a safe filename
+        _raw_name = filename
+        if not _raw_name:
+            from urllib.parse import urlparse, unquote
+            _path = unquote(urlparse(url).path)
+            _raw_name = _path.rstrip("/").split("/")[-1]
+        target_filename = _raw_name or "spatial_dataset"
+        # Strip query params that may have leaked into the name
+        target_filename = target_filename.split("?")[0] or "spatial_dataset"
+
+        content_type = req_stream.headers.get("Content-Type", "application/octet-stream").split(";")[0].strip()
+        content_length = req_stream.headers.get("Content-Length")
+
+        resp_headers: dict = {
+            "Content-Disposition": f'attachment; filename="{target_filename}"',
+            "Access-Control-Expose-Headers": "Content-Disposition, Content-Length",
+        }
+        if content_length:
+            resp_headers["Content-Length"] = content_length
+
+        logger.info("Streaming download: %s → %s (%s)", url, target_filename, content_type)
+
+        def _stream():
+            try:
+                for chunk in req_stream.iter_content(chunk_size=65536):
+                    if chunk:
+                        yield chunk
+            finally:
+                req_stream.close()
+
+        return StreamingResponse(
+            _stream(),
+            media_type=content_type,
+            headers=resp_headers,
+        )
+    except requests.exceptions.HTTPError as exc:
+        logger.error("Download HTTP error %s for %s", exc.response.status_code, url)
+        raise HTTPException(400, f"Remote server returned {exc.response.status_code}: {exc.response.reason}")
+    except requests.exceptions.ConnectionError as exc:
+        logger.error("Download connection error for %s: %s", url, exc)
+        raise HTTPException(400, "Could not connect to the remote server. Check the URL and try again.")
+    except requests.exceptions.Timeout:
+        logger.error("Download timeout for %s", url)
+        raise HTTPException(408, "Remote server timed out. Try again or download directly.")
+    except Exception as exc:
+        logger.error("Download unexpected error for %s: %s", url, exc, exc_info=True)
+        raise HTTPException(500, f"Download failed: {str(exc)}")
+
+
+@app.post("/api/harvester/save-to-portal", tags=["harvester"])
+def api_harvester_save_to_portal(req: HarvesterSaveToPortalRequest, background_tasks: BackgroundTasks):
+    try:
+        from harvester import create_task
+        task = create_task(action="save_to_portal", source_url=req.url, target_name=req.name or "portal_dataset")
+        background_tasks.add_task(
+            HarvesterTransferManager.save_to_portal_repository_async,
+            task.task_id,
+            req.url,
+            req.name or "",
+            req.class_label,
+            req.category or "admin",  # Default to admin so it shows in Rare Data
+            req.internal_path
+        )
+        return {"task_id": task.task_id, "message": "Download to portal started in background."}
+    except Exception as exc:
+        logger.error("Save to portal failed: %s", exc)
+        raise HTTPException(400, str(exc))
+
+
+@app.post("/api/harvester/push-to-gee", tags=["harvester"])
+def api_harvester_push_to_gee(req: HarvesterPushToGeeRequest, background_tasks: BackgroundTasks, request: Request):
+    user_project = req.target_project
+    # If individual GEE token is provided, verify it and extract user project
+    token = request.headers.get("X-GEE-Token") or request.query_params.get("gee_token")
+    if token:
+        try:
+            session = verify_individual_session(token)
+            if session and session.get("project_name"):
+                user_project = session["project_name"]
+        except Exception as err:
+            logger.warning("Optional individual GEE token verification note: %s", err)
+
+    try:
+        task = create_task(action="push_to_gee", source_url=req.url, target_name=req.asset_id or "gee_asset")
+        background_tasks.add_task(
+            HarvesterTransferManager.push_to_gee_asset_async,
+            task.task_id,
+            req.url,
+            req.asset_id,
+            user_project
+        )
+        return {"task_id": task.task_id, "message": f"Ingestion started in background. Task ID: {task.task_id}"}
+    except Exception as exc:
+        raise HTTPException(400, str(exc))
+
+
+@app.get("/api/harvester/tasks/{task_id}", tags=["harvester"])
+def api_harvester_get_task(task_id: str):
+    task = get_task(task_id)
+    if not task:
+        raise HTTPException(404, "Task not found")
+    return asdict(task)
+
+
+@app.post("/api/harvester/tasks/{task_id}/cancel", tags=["harvester"])
+def api_harvester_cancel_task(task_id: str):
+    from harvester import cancel_task
+    ok = cancel_task(task_id)
+    if not ok:
+        raise HTTPException(404, "Task not found")
+    return {"ok": True, "message": "Task stopped."}
+
+
+@app.delete("/api/harvester/tasks/{task_id}", tags=["harvester"])
+def api_harvester_delete_task(task_id: str):
+    from harvester import delete_task
+    ok = delete_task(task_id)
+    if not ok:
+        raise HTTPException(404, "Task not found")
+    return {"ok": True, "message": "Task removed."}
+
+@app.get("/api/debug/datasets", tags=["debug"])
+def debug_datasets():
+    try:
+        import sqlite3
+        conn = sqlite3.connect("geoportal.db")
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, name, status, error_message, storage_key, original_filename, created_at FROM datasets ORDER BY created_at DESC LIMIT 20")
+        rows = cursor.fetchall()
+        columns = [description[0] for description in cursor.description]
+        result = [dict(zip(columns, row)) for row in rows]
+        return {"datasets": result}
+    except Exception as e:
+        return {"error": str(e)}

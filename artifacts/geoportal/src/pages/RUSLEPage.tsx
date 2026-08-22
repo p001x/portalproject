@@ -96,9 +96,9 @@ export function RUSLEPage() {
   };
 
   return (
-    <div className="flex h-full">
+    <div className="flex flex-col md:flex-row h-full overflow-y-auto md:overflow-hidden">
       {/* ── Controls sidebar ─────────────────────────────────────── */}
-      <aside className="w-64 shrink-0 border-r bg-card flex flex-col gap-5 p-5 overflow-y-auto">
+      <aside className="w-full md:w-64 shrink-0 border-b md:border-b-0 md:border-r bg-card flex flex-col gap-5 p-5 md:overflow-y-auto">
         <div className="flex items-center gap-2 text-primary font-semibold text-lg">
           <Mountain className="w-5 h-5" />
           RUSLE Analysis
@@ -180,7 +180,7 @@ export function RUSLEPage() {
       </aside>
 
       {/* ── Results ──────────────────────────────────────────────── */}
-      <main className="flex-1 overflow-y-auto p-6">
+      <main id="report-container" className="flex-1 md:overflow-y-auto p-4 md:p-6 bg-background">
         {!data && !isPending && (
           <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
             Select a district and year, then click <strong className="mx-1">Run RUSLE</strong>.

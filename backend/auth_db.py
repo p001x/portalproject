@@ -56,6 +56,11 @@ def get_user_by_reset_token(token: str) -> Optional[Dict[str, Any]]:
         row = conn.execute("SELECT * FROM users WHERE reset_token = ?", (token,)).fetchone()
         return dict(row) if row else None
 
+def get_all_users() -> list[Dict[str, Any]]:
+    with _get_db() as conn:
+        rows = conn.execute("SELECT email, name FROM users WHERE role = 'user'").fetchall()
+        return [dict(row) for row in rows]
+
 def create_user(name: str, email: str, password_hash: str, role: str = 'user') -> None:
     created_at = datetime.now(timezone.utc).isoformat()
     with _get_db() as conn:
@@ -81,18 +86,6 @@ def set_reset_token(email: str, token: str, expiry_iso: str) -> None:
         )
         conn.commit()
 
-def set_api_key(email: str, api_key: str) -> None:
-    with _get_db() as conn:
-        conn.execute(
-            "UPDATE users SET api_key = ? WHERE email = ?",
-            (api_key, email)
-        )
-        conn.commit()
-
-def get_user_by_api_key(api_key: str) -> Optional[Dict[str, Any]]:
-    with _get_db() as conn:
-        row = conn.execute("SELECT * FROM users WHERE api_key = ?", (api_key,)).fetchone()
-        return dict(row) if row else None
 
 def update_user_name(email: str, name: str) -> None:
     with _get_db() as conn:

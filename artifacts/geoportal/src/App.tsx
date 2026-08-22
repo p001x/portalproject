@@ -25,22 +25,26 @@ import { BiomassPage } from "@/pages/BiomassPage";
 import { RareDataPage } from "@/pages/RareDataPage";
 import { SampleDigitizationPage } from "@/pages/SampleDigitizationPage";
 import { ChangeDetectionPage } from "@/pages/ChangeDetectionPage";
+import { AnalysisHubPage } from "@/pages/AnalysisHubPage";
 import { DashboardPage } from "@/pages/DashboardPage";
-import { DeveloperPage } from "@/pages/DeveloperPage";
 import { CloudIngestPage } from "@/pages/CloudIngestPage";
 import { ServicesPage } from "@/pages/ServicesPage";
 import { CommunityPage } from "@/pages/CommunityPage";
 import { HomePage } from "@/pages/HomePage";
+import { PlatformPage } from "@/pages/PlatformPage";
 import { AuthPage } from "@/pages/AuthPage";
 import { ResetPasswordPage } from "@/pages/ResetPasswordPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { AboutPage } from "@/pages/AboutPage";
 import { AcademyPage } from "@/pages/AcademyPage";
+import { BlogPage } from "@/pages/BlogPage";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
+import { NotificationProvider, useNotifications } from "@/hooks/use-notifications";
 import { GEEProjectConfig } from "@/components/GEEProjectConfig";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { GeeUsageIndicator } from "@/components/GeeUsageIndicator";
+import { SiteBrand, SiteLogoOnly } from "@/components/SiteBrand";
 import {
   Leaf,
   Thermometer,
@@ -68,8 +72,13 @@ import {
   Briefcase,
   Settings,
   UploadCloud,
-  GraduationCap
+  GraduationCap,
+  BookOpen,
+  Bell,
+  Home
 } from "lucide-react";
+
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -78,7 +87,7 @@ const queryClient = new QueryClient({
   },
 });
 
-const analysisModules = [
+export const analysisModules = [
   { path: "/ndvi", label: "NDVI", icon: Leaf, description: "Vegetation Health" },
   { path: "/lst", label: "LST", icon: Thermometer, description: "Land Surface Temp" },
   { path: "/change-detection", label: "Change Detection", icon: Activity, description: "NDVI Timelapse" },
@@ -98,22 +107,22 @@ const analysisModules = [
   { path: "/biomass", label: "Biomass Tracker", icon: Flame, description: "Depletion Risk" },
 ];
 
-const rareDataModules = [
+export const rareDataModules = [
   { path: "/rare-data", label: "RARE DATA Hub", icon: Database, description: "Dataset Repository" },
 ];
 
-const digitizationModules = [
+export const digitizationModules = [
   { path: "/samples", label: "Sample Digitizer", icon: Edit, description: "Training Samples" },
 ];
 
-const infrastructureModules = [
+export const infrastructureModules = [
   { path: "/cloud-ingest", label: "Cloud Ingestion", icon: UploadCloud, description: "Direct GEE Upload" },
-  { path: "/developer", label: "API Gateway", icon: Terminal, description: "Backend-as-a-Service" },
   { path: "/services", label: "Premium Services", icon: Briefcase, description: "Consultation & Teaching" },
 ];
 
-const educationModules = [
+export const educationModules = [
   { path: "/academy", label: "Training & Academy", icon: GraduationCap, description: "Courses & Reading" },
+  { path: "/blog", label: "Blog & Case Studies", icon: BookOpen, description: "News & Success Stories" },
 ];
 
 type NavItem = typeof analysisModules[0];
@@ -147,28 +156,94 @@ function UserProfile() {
   if (!user) return null;
 
   return (
-  <div className="pt-2 border-t flex flex-col gap-1">
-    <div className="flex items-center justify-between">
-      <div className="flex items-center gap-2 overflow-hidden">
-        <img src={user.avatarUrl} alt="Avatar" className="w-8 h-8 rounded-full bg-slate-800 shrink-0" />
-        <div className="overflow-hidden">
-          <p className="text-xs font-semibold text-foreground truncate">{user.name}</p>
-          <p className="text-[10px] text-muted-foreground truncate">{user.email}</p>
-        </div>
-      </div>
-      <div className="flex items-center gap-1">
-        <Link href="/settings">
-          <Button variant="ghost" size="icon" className="shrink-0 h-8 w-8 text-muted-foreground hover:text-primary" title="Settings">
-            <Settings className="w-4 h-4" />
-          </Button>
-        </Link>
-        <Button variant="ghost" size="icon" className="shrink-0 h-8 w-8 text-muted-foreground hover:text-destructive" onClick={logout} title="Log out">
-          <LogOut className="w-4 h-4" />
-        </Button>
+  <div className="pt-4 border-t flex flex-col gap-4">
+    {/* Profile Info */}
+    <div className="flex items-center gap-3 overflow-hidden px-2">
+      <img src={user.avatarUrl} alt="Avatar" className="w-10 h-10 rounded-full bg-slate-800 shrink-0 border border-border" />
+      <div className="overflow-hidden">
+        <p className="text-sm font-bold text-foreground truncate">{user.name}</p>
+        <p className="text-xs text-muted-foreground truncate">{user.email}</p>
       </div>
     </div>
-    <GeeUsageIndicator />
+
+    {/* Menu Items with clear written text */}
+    <div className="flex flex-col gap-1">
+      {/* Notifications */}
+      <Popover>
+        <PopoverTrigger asChild>
+          <Button variant="ghost" className="w-full justify-start text-muted-foreground hover:text-foreground font-medium">
+            <Bell className="w-4 h-4 mr-3" />
+            Notifications
+            <NotificationBadge />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-80 p-0" align="start" side="right">
+          <NotificationList />
+        </PopoverContent>
+      </Popover>
+
+      {/* Settings */}
+      <Link href="/settings" className="w-full">
+        <Button variant="ghost" className="w-full justify-start text-muted-foreground hover:text-foreground font-medium">
+          <Settings className="w-4 h-4 mr-3" />
+          Settings
+        </Button>
+      </Link>
+
+      {/* Logout */}
+      <Button variant="ghost" className="w-full justify-start text-muted-foreground hover:text-destructive font-medium" onClick={logout}>
+        <LogOut className="w-4 h-4 mr-3" />
+        Log out
+      </Button>
+    </div>
+    
+    <div className="px-2">
+      <GeeUsageIndicator />
+    </div>
   </div>
+  );
+}
+
+export function NotificationBadge() {
+  const { unreadCount } = useNotifications();
+  if (unreadCount === 0) return null;
+  return (
+    <span className="ml-auto flex items-center justify-center bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
+      {unreadCount} new
+    </span>
+  );
+}
+
+export function NotificationList() {
+  const { notifications, markAllAsRead, unreadCount } = useNotifications();
+  
+  return (
+    <div className="flex flex-col">
+      <div className="flex items-center justify-between p-3 border-b">
+        <h4 className="font-semibold text-sm">Notifications</h4>
+        {unreadCount > 0 && (
+          <Button variant="ghost" size="sm" className="h-auto p-1 text-xs" onClick={markAllAsRead}>
+            Mark all read
+          </Button>
+        )}
+      </div>
+      <div className="max-h-[300px] overflow-y-auto">
+        {notifications.length === 0 ? (
+          <div className="p-4 text-center text-sm text-muted-foreground">No notifications</div>
+        ) : (
+          notifications.map(n => (
+            <div key={n.id} className={`p-3 border-b last:border-0 hover:bg-muted/50 transition-colors ${!n.read ? 'bg-primary/5' : ''}`}>
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-sm font-medium leading-tight">{n.title}</p>
+                {!n.read && <div className="w-1.5 h-1.5 rounded-full bg-primary shrink-0 mt-1" />}
+              </div>
+              <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{n.message}</p>
+              <p className="text-[10px] text-muted-foreground/70 mt-1">{new Date(n.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -185,25 +260,26 @@ function Sidebar({ loc, className = "" }: { loc: string; className?: string }) {
   const isUserAdmin = user?.role === 'admin';
 
   return (
-    <nav className={`w-56 shrink-0 border-r bg-card flex flex-col h-full ${className}`}>
-      <div className="p-4 border-b">
-        <Link href="/">
-          <div className="flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-slate-900 transition-colors cursor-pointer mb-4">
-            <ArrowLeft className="w-4 h-4" />
-            <span>Back to Hub</span>
-          </div>
-        </Link>
-        <div className="flex items-center gap-2.5">
-          <img src="/logo.png" alt="SPETRO Logo" className="h-8 w-auto object-contain shrink-0 drop-shadow-md rounded" />
-          <div>
-            <div className="font-bold text-sm leading-tight tracking-wide text-foreground">SPETRO</div>
-            <div className="text-[10px] leading-tight font-medium tracking-widest" style={{ color: "#00d4aa" }}>Geoportal Analysis</div>
-          </div>
-        </div>
+    <nav className={`flex flex-col h-full bg-card border-r border-border ${className}`}>
+      {/* Sidebar Header */}
+      <div className="p-4 border-b shrink-0 flex items-center justify-between group cursor-pointer hover:bg-muted/50 transition-colors">
+        <SiteBrand size="normal" hideSubtitleOnMobile />
       </div>
       
       <div className="flex-1 overflow-y-auto p-3 space-y-4">
         
+        {/* Main Home Tab */}
+        <div>
+          <div className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider text-muted-foreground/90 mb-1">
+            <Home className="w-3.5 h-3.5 text-blue-500" />
+            <span>Navigation</span>
+          </div>
+          <div className="space-y-0.5">
+            <NavLink path="/" label="Home" icon={Home} description="Landing Page" />
+            <NavLink path="/platform" label="Platform" icon={LayoutDashboard} description="Module Hub" />
+          </div>
+        </div>
+
         {isAnalysis && (
           <div>
             <div className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider text-muted-foreground/90 mb-1">
@@ -291,7 +367,7 @@ function Sidebar({ loc, className = "" }: { loc: string; className?: string }) {
       </div>
 
       <div className="p-3 border-t space-y-2">
-        <GEEProjectConfig />
+        {isUserAdmin && <GEEProjectConfig />}
         <p className="text-[10px] text-muted-foreground text-center">
           Powered by Google Earth Engine
         </p>
@@ -312,17 +388,52 @@ function Sidebar({ loc, className = "" }: { loc: string; className?: string }) {
   );
 }
 
+function UserProfileDropdown() {
+  const { user, logout } = useAuth();
+  if (!user) return null;
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="ghost" size="icon" className="rounded-full overflow-hidden w-8 h-8 ml-2">
+          <img src={user.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-56" align="end">
+        <div className="flex flex-col space-y-4">
+          <div>
+            <p className="text-sm font-bold truncate">{user.name}</p>
+            <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+          </div>
+          <div className="flex flex-col gap-1">
+            <Link href="/settings">
+              <Button variant="ghost" className="w-full justify-start h-8 text-xs">
+                <Settings className="w-3.5 h-3.5 mr-2" />
+                Settings
+              </Button>
+            </Link>
+            <Button variant="ghost" className="w-full justify-start h-8 text-xs text-destructive hover:text-destructive" onClick={logout}>
+              <LogOut className="w-3.5 h-3.5 mr-2" />
+              Log out
+            </Button>
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 function Layout({ children }: { children: React.ReactNode }) {
   const [loc, setLocation] = useLocation();
   const { isAuthenticated, isLoading } = useAuth();
 
   useEffect(() => {
-    if (!isLoading && !isAuthenticated && loc !== "/" && loc !== "/auth") {
+    if (!isLoading && !isAuthenticated && loc !== "/" && loc !== "/platform" && loc !== "/analysis-hub" && loc !== "/about" && loc !== "/auth" && loc !== "/blog" && !loc.startsWith("/reset-password")) {
       setLocation("/auth");
     }
   }, [isAuthenticated, isLoading, loc, setLocation]);
 
-  if (loc === "/" || loc === "/auth") {
+  if (loc === "/" || loc === "/platform" || loc === "/analysis-hub" || loc === "/about" || loc === "/auth" || loc === "/blog" || loc.startsWith("/reset-password")) {
     return <>{children}</>;
   }
 
@@ -334,29 +445,50 @@ function Layout({ children }: { children: React.ReactNode }) {
     );
   }
 
+  const isFocusedMode = [...analysisModules, ...rareDataModules, ...digitizationModules, ...infrastructureModules, ...educationModules].some(m => m.path === loc);
+  const isAnalysisFocused = analysisModules.some(m => m.path === loc);
+
   return (
     <div className="flex h-screen bg-background">
-      {/* Desktop Sidebar */}
-      <Sidebar loc={loc} className="hidden md:flex" />
+      {/* Desktop Sidebar (Hidden in focused mode) */}
+      {!isFocusedMode && <Sidebar loc={loc} className="hidden md:flex" />}
 
       {/* Main content */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Mobile Header */}
-        <header className="md:hidden flex items-center justify-between p-4 border-b bg-card">
-          <div className="flex items-center gap-2">
-            <img src="/logo.png" alt="SPETRO Logo" className="h-6 w-auto object-contain rounded" />
-            <div className="font-bold text-sm text-foreground">SPETRO</div>
+        {/* Header - Always visible on mobile, visible on desktop ONLY if focused mode */}
+        <header className={`flex items-center justify-between p-4 border-b bg-card ${isFocusedMode ? "flex" : "md:hidden"}`}>
+          <div className="flex items-center gap-3">
+            <SiteBrand size={isFocusedMode ? "normal" : "small"} />
+            {isFocusedMode && (
+              <div className="hidden md:flex items-center pl-4 border-l border-border ml-2">
+                <Link href={isAnalysisFocused ? "/analysis-hub" : "/platform"}>
+                  <Button variant="ghost" size="sm" className="gap-2 text-muted-foreground hover:text-foreground">
+                    <ArrowLeft className="w-4 h-4" />
+                    {isAnalysisFocused ? "Back to Analysis Modules" : "Back to Platform"}
+                  </Button>
+                </Link>
+              </div>
+            )}
           </div>
-          <Sheet>
-            <SheetTrigger asChild>
-              <Button variant="ghost" size="icon">
-                <Menu className="w-5 h-5" />
-              </Button>
-            </SheetTrigger>
-            <SheetContent side="left" className="p-0 w-56 flex flex-col border-r-0">
-              <Sidebar loc={loc} className="w-full border-r-0" />
-            </SheetContent>
-          </Sheet>
+          
+          <div className="flex items-center gap-2">
+            {isFocusedMode && (
+              <div className="hidden md:flex items-center gap-2">
+                <ThemeToggle />
+                <UserProfileDropdown />
+              </div>
+            )}
+            <Sheet>
+              <SheetTrigger asChild>
+                <Button variant="ghost" size="icon" className={isFocusedMode ? "md:hidden" : ""}>
+                  <Menu className="w-5 h-5" />
+                </Button>
+              </SheetTrigger>
+              <SheetContent side="left" className="p-0 w-64 flex flex-col border-r-0">
+                <Sidebar loc={loc} className="w-full border-r-0" />
+              </SheetContent>
+            </Sheet>
+          </div>
         </header>
         
         <main className="flex-1 overflow-hidden relative">
@@ -380,10 +512,12 @@ function Router() {
     <Layout>
       <Switch>
         <Route path="/" component={HomePage} />
+        <Route path="/platform" component={PlatformPage} />
         <Route path="/auth" component={AuthPage} />
         <Route path="/reset-password" component={ResetPasswordPage} />
         <Route path="/settings" component={SettingsPage} />
         <Route path="/about" component={AboutPage} />
+        <Route path="/analysis-hub" component={AnalysisHubPage} />
         <Route path="/ndvi" component={NDVIPage} />
         <Route path="/change-detection" component={ChangeDetectionPage} />
         <Route path="/lst" component={LSTPage} />
@@ -405,10 +539,10 @@ function Router() {
         <Route path="/samples" component={SampleDigitizationPage} />
         <Route path="/community" component={CommunityPage} />
         <Route path="/dashboard" component={DashboardPage} />
-        <Route path="/developer" component={DeveloperPage} />
         <Route path="/cloud-ingest" component={CloudIngestPage} />
         <Route path="/services" component={ServicesPage} />
         <Route path="/academy" component={AcademyPage} />
+        <Route path="/blog" component={BlogPage} />
         <Route component={NotFound} />
       </Switch>
     </Layout>
@@ -422,13 +556,15 @@ export default function App() {
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
-          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-            <AuthProvider>
-              <AnalyticsTracker />
-              <Router />
-            </AuthProvider>
-          </WouterRouter>
-          <Toaster />
+          <NotificationProvider>
+            <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+              <AuthProvider>
+                <AnalyticsTracker />
+                <Router />
+              </AuthProvider>
+            </WouterRouter>
+            <Toaster />
+          </NotificationProvider>
         </TooltipProvider>
       </QueryClientProvider>
     </ThemeProvider>

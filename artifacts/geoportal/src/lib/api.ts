@@ -638,6 +638,38 @@ export const api = {
   }) => post<FloodResult>("/flood", req),
   uhi: (req: any) => post<UHIResult>("/uhi", req),
   adminVerify: (password: string) => post<{ ok: boolean }>("/admin/verify", { password }),
+  uploadLogo: async (file: File): Promise<{ url: string }> => {
+    const formData = new FormData();
+    formData.append("file", file);
+    const headers: Record<string, string> = {};
+    const appToken = localStorage.getItem("spetro_token");
+    if (appToken) headers["Authorization"] = `Bearer ${appToken}`;
+    
+    const url = `${BASE}/admin/logo/upload`;
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: "POST",
+        headers,
+        body: formData,
+      });
+    } catch (err: any) {
+      throw new Error(`Network error (${url}): ${err.message}`);
+    }
+    
+    if (!res.ok) {
+      let errStr = res.statusText;
+      try {
+        const errJson = await res.json();
+        errStr = parseApiError(errJson, res.statusText);
+      } catch (e) {
+        const errText = await res.text().catch(() => "");
+        if (errText) errStr = errText.slice(0, 100);
+      }
+      throw new Error(`Error ${res.status}: ${errStr}`);
+    }
+    return res.json();
+  },
   habitat: {
     map: (req: any) => post<HabitatMapResult>("/habitat/map", req),
     stats: (req: any) => post<HabitatStatsResult>("/habitat/stats", req),
@@ -798,6 +830,78 @@ export const api = {
         year: number;
       }>("/gee/extract-samples", body),
   },
+  harvester: {
+    scan: (url: string) =>
+      post<{
+        url: string;
+        title: string;
+        source_type: string;
+        count: number;
+        datasets: Array<{
+          id: string;
+          name: string;
+          url: string;
+          category: "raster" | "vector" | "archive" | "tabular" | "stac" | "unknown";
+          format: string;
+          size_mb?: number | null;
+          is_direct: boolean;
+          internal_path?: string;
+          stac_asset_key?: string;
+          feature_count?: number;
+          description?: string;
+        }>;
+      }>("/harvester/scan", { url }),
+    getDownloadUrl: (remoteUrl: string, filename?: string) =>
+      `${BASE}/harvester/download?url=${encodeURIComponent(remoteUrl)}${filename ? `&filename=${encodeURIComponent(filename)}` : ""}`,
+    saveToPortal: (body: { url: string; name: string; class_label?: string; category?: string; internal_path?: string }) =>
+      post<{ ok: boolean; task_id: string; message: string }>(
+        "/harvester/save-to-portal",
+        body
+      ),
+    pushToGee: (body: { url: string; asset_id?: string; target_project?: string }) =>
+      post<{ task_id: string; message: string }>("/harvester/push-to-gee", body, { withGeeAuth: true }),
+    getTaskStatus: (taskId: string) =>
+      get<{
+        task_id: string;
+        action: string;
+        source_url: string;
+        target_name: string;
+        status: string;
+        progress: number;
+        message: string;
+        error?: string;
+        result_data?: any;
+      }>(`/harvester/tasks/${taskId}`),
+    cancelTask: (taskId: string) =>
+      post<{ ok: boolean; message: string }>(`/harvester/tasks/${taskId}/cancel`, {}),
+    deleteTask: (taskId: string) =>
+      del<{ ok: boolean; message: string }>(`/harvester/tasks/${taskId}`),
+  },
+
+  blog: {
+    list: (limit = 100) => get<{ posts: any[] }>(`/blog/posts?limit=${limit}`),
+    get: (id: number) => get<{ post: any }>(`/blog/posts/${id}`),
+    create: (body: any) => post<{ ok: boolean; id: number }>("/blog/posts", body),
+    update: (id: number, body: any) => put<{ ok: boolean }>(`/blog/posts/${id}`, body),
+    delete: (id: number) => {
+      const appToken = localStorage.getItem("spetro_token");
+      return fetch(`${BASE}/blog/posts/${id}`, {
+        method: "DELETE",
+        headers: appToken ? { "Authorization": `Bearer ${appToken}` } : {}
+      }).then(res => res.json());
+    },
+    upload: (file: File) => {
+      const formData = new FormData();
+      formData.append("file", file);
+      const appToken = localStorage.getItem("spetro_token");
+      return fetch(`${BASE}/blog/upload`, {
+        method: "POST",
+        headers: appToken ? { "Authorization": `Bearer ${appToken}` } : {},
+        body: formData
+      }).then(res => res.json());
+    }
+  },
+
 
   datasets: {
     list: (source: string) => get<{ records: DatasetRecord[] }>("/datasets?source=" + source),
@@ -810,17 +914,46 @@ export const api = {
       }
       return r.json() as Promise<DatasetRecord>;
     },
+    uploadWithProgress: (fd: FormData, onProgress: (pct: number) => void) => {
+      return new Promise<DatasetRecord>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", BASE + "/datasets/upload");
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            onProgress(Math.round((e.loaded * 100) / e.total));
+          }
+        };
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try { resolve(JSON.parse(xhr.responseText)); } 
+            catch { reject(new Error("Invalid response")); }
+          } else {
+            let msg = xhr.statusText;
+            try { msg = JSON.parse(xhr.responseText).detail || msg; } catch {}
+            reject(new Error(msg));
+          }
+        };
+        xhr.onerror = () => reject(new Error("Network error"));
+        xhr.send(fd);
+      });
+    },
     addLink: (body: any) => post<DatasetRecord>("/datasets/link", body),
     delete: (id: string, source: string) =>
-      fetch(BASE + "/datasets/" + id + "?source=" + source, { method: "DELETE" }).then((r) =>
-        r.json()
-      ) as Promise<{ ok: boolean }>,
+      fetch(BASE + "/datasets/" + id + "?source=" + source, { method: "DELETE" }).then(async (r) => {
+        if (!r.ok) {
+           let msg = r.statusText;
+           try { msg = (await r.json()).detail || msg; } catch {}
+           throw new Error(msg);
+        }
+        return r.json();
+      }),
   },
 
   community: {
-    getComments: (tag?: string) => get<{ comments: Array<{id: number, author: string, content: string, tag: string, image_url: string, timestamp: string}>, is_frozen: boolean, blocked_users: string[] }>(`/community/comments${tag ? '?tag=' + tag : ''}`),
+    getComments: (tag?: string) => get<{ comments: Array<{id: number, author: string, content: string, tag: string, image_url: string, timestamp: string, is_edited: boolean}>, is_frozen: boolean, blocked_users: string[] }>(`/community/comments${tag ? '?tag=' + tag : ''}`),
     postComment: (body: { author: string, content: string, tag?: string, image_url?: string }) => post<{ status: string, id: number }>("/community/comments", body),
-    deleteComment: (id: number) => fetch(BASE + "/community/comments/" + id, { method: "DELETE", headers: { "Authorization": `Bearer ${localStorage.getItem("spetro_token")}` } }).then(r => r.json()),
+    editComment: (id: number, body: { author: string, content: string }) => put<{ status: string }>(`/community/comments/${id}`, body),
+    deleteComment: (id: number, author?: string) => fetch(BASE + `/community/comments/${id}${author ? '?author=' + encodeURIComponent(author) : ''}`, { method: "DELETE", headers: { "Authorization": `Bearer ${localStorage.getItem("spetro_token") || ''}` } }).then(r => r.json()),
     setFreeze: (frozen: boolean) => post<{ok: boolean}>("/community/settings/freeze", { frozen }),
     blockUser: (author: string) => post<{ok: boolean}>("/community/users/block", { author }),
     unblockUser: (author: string) => post<{ok: boolean}>("/community/users/unblock", { author }),
@@ -836,10 +969,7 @@ export const api = {
       return r.json() as Promise<{ url: string }>;
     }
   },
-  developer: {
-    getApiKey: () => get<{ api_key: string | null }>("/auth/api-key"),
-    generateApiKey: () => post<{ api_key: string }>("/auth/api-key", {}),
-  },
+
   auth: {
     updateProfile: (name: string) => put<{ ok: boolean, token: string, user: any }>("/auth/profile", { name }),
     changePassword: (old_password: string, new_password: string) => post<{ ok: boolean, message: string }>("/auth/change-password", { old_password, new_password }),
@@ -848,5 +978,8 @@ export const api = {
   services: {
     requestService: (body: { service_type: string; message: string }) => post<{ ok: boolean }>("/services/request", body),
     getRequests: () => get<{ requests: any[] }>("/services/requests"),
+  },
+  admin: {
+    notifyNewCourse: (title: string, description: string) => post<{ ok: boolean }>("/admin/notify-new-course", { title, description }),
   }
 };

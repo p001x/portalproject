@@ -3,10 +3,12 @@ from utils.style import apply_style
 
 st.set_page_config(
     page_title="GEOPORTAL ANALYSIS",
-    page_icon=":material/public:",
+    page_icon="assets/logo.png",
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+st.logo("assets/logo.png")
 
 apply_style()
 

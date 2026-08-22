@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
@@ -6,19 +6,36 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
-import { MessageSquare, Image as ImageIcon, Send, Clock, Tag as TagIcon, X, Loader2, Trash2, ShieldAlert, Lock, Unlock, Ban } from "lucide-react";
+import { MessageSquare, Image as ImageIcon, Send, Clock, Tag as TagIcon, X, Loader2, Trash2, ShieldAlert, Lock, Unlock, Ban, Pencil, Check } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
 export function CommunityPage() {
+  const { user } = useAuth();
   const [author, setAuthor] = useState("");
   const [content, setContent] = useState("");
   const [tag, setTag] = useState("");
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
+  const [editingCommentId, setEditingCommentId] = useState<number | null>(null);
+  const [editContent, setEditContent] = useState("");
   const { toast } = useToast();
-  const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const queryClient = useQueryClient();
+
+  useEffect(() => {
+    // Restore author name from local storage or user profile
+    const saved = localStorage.getItem("community_author");
+    if (saved) {
+      setAuthor(saved);
+    } else if (user?.name) {
+      setAuthor(user.name);
+    }
+  }, [user]);
+
+  const handleAuthorChange = (val: string) => {
+    setAuthor(val);
+    localStorage.setItem("community_author", val);
+  };
 
   const { data, isLoading } = useQuery({
     queryKey: ["communityComments"],
@@ -52,10 +69,17 @@ export function CommunityPage() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id: number) => api.community.deleteComment(id),
+    mutationFn: (id: number) => api.community.deleteComment(id, author),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["communityComments"] });
       toast({ title: "Message deleted" });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to delete",
+        description: error.message || "You cannot delete this message.",
+        variant: "destructive"
+      });
     }
   });
 
@@ -80,6 +104,23 @@ export function CommunityPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["communityComments"] });
       toast({ title: "User unblocked" });
+    }
+  });
+
+  const editMutation = useMutation({
+    mutationFn: (data: { id: number, content: string }) => api.community.editComment(data.id, { author, content: data.content }),
+    onSuccess: () => {
+      setEditingCommentId(null);
+      setEditContent("");
+      queryClient.invalidateQueries({ queryKey: ["communityComments"] });
+      toast({ title: "Message updated successfully" });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to update",
+        description: error.message,
+        variant: "destructive"
+      });
     }
   });
 
@@ -172,7 +213,7 @@ export function CommunityPage() {
             <Input 
               placeholder="Your Name (e.g. Analyst_123)" 
               value={author} 
-              onChange={e => setAuthor(e.target.value)} 
+              onChange={e => handleAuthorChange(e.target.value)} 
               disabled={cannotPost}
               required
             />
@@ -242,42 +283,83 @@ export function CommunityPage() {
             No comments yet. Be the first to start the discussion!
           </div>
         ) : (
-          data?.comments?.map((comment: any) => (
-            <div key={comment.id} className="bg-white border rounded-xl p-5 shadow-sm">
-              <div className="flex justify-between items-start mb-3">
-                <div className="flex items-center gap-2">
-                  <div className="font-semibold text-slate-900">{comment.author}</div>
-                  {comment.tag && (
-                    <span className="bg-primary/10 text-primary text-xs font-medium px-2 py-0.5 rounded-full flex items-center gap-1">
-                      <TagIcon className="w-3 h-3" /> {comment.tag}
-                    </span>
-                  )}
-                </div>
-                <div className="text-xs text-muted-foreground flex items-center gap-1">
-                  <Clock className="w-3 h-3" />
-                  {formatDistanceToNow(new Date(comment.timestamp), { addSuffix: true })}
-                  {isAdmin && (
+          data?.comments?.map((comment: any) => {
+            // Backend isoformat doesn't include Z, so we add it to ensure it's parsed as UTC
+            const utcTime = comment.timestamp.endsWith('Z') ? comment.timestamp : comment.timestamp + 'Z';
+            const isAuthor = comment.author === author && author.trim() !== "";
+            const isEditable = isAuthor && (Date.now() - new Date(utcTime).getTime()) < 15 * 60 * 1000;
+            const isEditing = editingCommentId === comment.id;
+
+            return (
+              <div key={comment.id} className={`bg-white border rounded-xl p-5 shadow-sm transition-colors ${isEditing ? 'ring-2 ring-primary border-primary' : ''}`}>
+                <div className="flex justify-between items-start mb-3">
+                  <div className="flex items-center gap-2">
+                    <div className="font-semibold text-slate-900">{comment.author}</div>
+                    {comment.tag && (
+                      <span className="bg-primary/10 text-primary text-xs font-medium px-2 py-0.5 rounded-full flex items-center gap-1">
+                        <TagIcon className="w-3 h-3" /> {comment.tag}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Clock className="w-3 h-3" />
+                    {formatDistanceToNow(new Date(utcTime), { addSuffix: true })}
+                    {comment.is_edited && <span className="ml-1 italic text-[10px]">(edited)</span>}
+                    
                     <div className="flex items-center gap-1 ml-2 border-l pl-2">
-                      <button onClick={() => deleteMutation.mutate(comment.id)} className="p-1 hover:bg-destructive/10 text-destructive rounded" title="Delete Comment">
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                      <button onClick={() => blockMutation.mutate(comment.author)} className="p-1 hover:bg-destructive/10 text-destructive rounded" title="Block User">
-                        <Ban className="w-3 h-3" />
-                      </button>
+                      {isEditable && !isEditing && (
+                        <button 
+                          onClick={() => {
+                            setEditingCommentId(comment.id);
+                            setEditContent(comment.content);
+                          }} 
+                          className="p-1 hover:bg-primary/10 text-primary rounded transition-colors" 
+                          title="Edit Message (within 15m)"
+                        >
+                          <Pencil className="w-3 h-3" />
+                        </button>
+                      )}
+                      {(isAdmin || isAuthor) && (
+                        <button onClick={() => deleteMutation.mutate(comment.id)} className="p-1 hover:bg-destructive/10 text-destructive rounded transition-colors" title="Delete Comment">
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      )}
+                      {isAdmin && (
+                        <button onClick={() => blockMutation.mutate(comment.author)} className="p-1 hover:bg-destructive/10 text-destructive rounded transition-colors" title="Block User">
+                          <Ban className="w-3 h-3" />
+                        </button>
+                      )}
                     </div>
-                  )}
+                  </div>
                 </div>
+                
+                {isEditing ? (
+                  <div className="space-y-3 mt-2">
+                    <Textarea
+                      value={editContent}
+                      onChange={(e) => setEditContent(e.target.value)}
+                      className="min-h-[80px]"
+                      autoFocus
+                    />
+                    <div className="flex justify-end gap-2">
+                      <Button variant="ghost" size="sm" onClick={() => setEditingCommentId(null)}>Cancel</Button>
+                      <Button size="sm" onClick={() => editMutation.mutate({ id: comment.id, content: editContent })} disabled={editMutation.isPending || !editContent.trim() || editContent === comment.content}>
+                        {editMutation.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Check className="w-4 h-4 mr-2" />} Save Changes
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-slate-700 whitespace-pre-wrap">{comment.content}</div>
+                )}
+                
+                {comment.image_url && (
+                  <div className="mt-4">
+                    <img src={comment.image_url} alt="Attached" className="max-h-64 rounded-lg border shadow-sm" />
+                  </div>
+                )}
               </div>
-              
-              <div className="text-slate-700 whitespace-pre-wrap">{comment.content}</div>
-              
-              {comment.image_url && (
-                <div className="mt-4">
-                  <img src={comment.image_url} alt="Attached" className="max-h-64 rounded-lg border shadow-sm" />
-                </div>
-              )}
-            </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>

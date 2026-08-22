@@ -62,6 +62,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     initAuth();
   }, []);
 
+  const safeJson = async (res: Response, fallback: string) => {
+    try {
+      return await res.json();
+    } catch {
+      return { detail: `${fallback} (Server returned ${res.status}: ${res.statusText || "No response body"})` };
+    }
+  };
+
   const login = async (email: string, password?: string) => {
     setIsLoading(true);
     try {
@@ -70,9 +78,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password })
       });
-      const data = await res.json();
+      const data = await safeJson(res, "Login failed");
       if (!res.ok) {
-        throw new Error(getErrorMessage(data, "Login failed"));
+        throw new Error(getErrorMessage(data, "Invalid email or password"));
       }
       
       setUser(data.user);
@@ -91,7 +99,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name, email, password })
       });
-      const data = await res.json();
+      const data = await safeJson(res, "Registration failed");
       if (!res.ok) {
         throw new Error(getErrorMessage(data, "Registration failed"));
       }
@@ -116,7 +124,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email })
     });
-    const data = await res.json();
+    const data = await safeJson(res, "Failed to send reset link");
     if (!res.ok) {
       throw new Error(getErrorMessage(data, "Failed to send reset link"));
     }
@@ -128,7 +136,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token, new_password: newPassword })
     });
-    const data = await res.json();
+    const data = await safeJson(res, "Failed to reset password");
     if (!res.ok) {
       throw new Error(getErrorMessage(data, "Failed to reset password"));
     }

@@ -18,9 +18,16 @@ def init_community_db():
             content TEXT NOT NULL,
             tag TEXT,
             image_url TEXT,
-            timestamp TEXT NOT NULL
+            timestamp TEXT NOT NULL,
+            is_edited INTEGER DEFAULT 0
         )
     ''')
+    
+    # Lazily add is_edited column if it doesn't exist
+    try:
+        cursor.execute("ALTER TABLE comments ADD COLUMN is_edited INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass # Column already exists
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS forum_settings (
             key TEXT PRIMARY KEY,
@@ -62,12 +69,12 @@ def get_comments(tag_filter: Optional[str] = None, limit: int = 100) -> List[Dic
     
     if tag_filter:
         c.execute(
-            "SELECT id, author, content, tag, image_url, timestamp FROM comments WHERE tag = ? ORDER BY id DESC LIMIT ?", 
+            "SELECT id, author, content, tag, image_url, timestamp, is_edited FROM comments WHERE tag = ? ORDER BY id DESC LIMIT ?", 
             (tag_filter, limit)
         )
     else:
         c.execute(
-            "SELECT id, author, content, tag, image_url, timestamp FROM comments ORDER BY id DESC LIMIT ?", 
+            "SELECT id, author, content, tag, image_url, timestamp, is_edited FROM comments ORDER BY id DESC LIMIT ?", 
             (limit,)
         )
         
@@ -82,9 +89,37 @@ def get_comments(tag_filter: Optional[str] = None, limit: int = 100) -> List[Dic
             "content": row[2],
             "tag": row[3],
             "image_url": row[4],
-            "timestamp": row[5]
+            "timestamp": row[5],
+            "is_edited": bool(row[6])
         })
     return comments
+
+def get_comment(comment_id: int) -> Optional[Dict]:
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT id, author, content, tag, image_url, timestamp, is_edited FROM comments WHERE id = ?", (comment_id,))
+    row = c.fetchone()
+    conn.close()
+    if not row:
+        return None
+    return {
+        "id": row[0],
+        "author": row[1],
+        "content": row[2],
+        "tag": row[3],
+        "image_url": row[4],
+        "timestamp": row[5],
+        "is_edited": bool(row[6])
+    }
+
+def update_comment(comment_id: int, new_content: str) -> bool:
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("UPDATE comments SET content = ?, is_edited = 1 WHERE id = ?", (new_content, comment_id))
+    rows_affected = c.rowcount
+    conn.commit()
+    conn.close()
+    return rows_affected > 0
 
 def delete_comment(comment_id: int) -> None:
     conn = sqlite3.connect(DB_PATH)

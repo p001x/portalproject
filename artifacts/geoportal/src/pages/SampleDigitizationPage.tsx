@@ -58,7 +58,7 @@ import * as turf from "@turf/turf";
 import { api, DatasetRecord, BASE, getGeeToken } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { NativeRasterLayer } from "@/components/NativeRasterLayer";
-import { GEEAuthGate } from "@/components/GEEAuthGate";
+import { DatasetHarvester } from "@/components/DatasetHarvester";
 
 function MapClickHandler({ onMapClick }: { onMapClick: (lat: number, lng: number) => void }) {
   useMapEvents({
@@ -99,6 +99,8 @@ export function SampleDigitizationPage() {
   const [mapStyle, setMapStyle] = useState<"osm" | "satellite" | "none">("osm");
   const [classificationSource, setClassificationSource] = useState<"sentinel2" | "landsat8" | "custom" | "native_cog">("sentinel2");
   const [customAssetId, setCustomAssetId] = useState("");
+  const [nativePreviewUrl, setNativePreviewUrl] = useState<string | null>(null);
+  const [nativePreviewName, setNativePreviewName] = useState<string>("");
   const [activeTab, setActiveTab] = useState("map");
   const [activeBbox, setActiveBbox] = useState<number[] | null>(null);
   const [showClassifyResult, setShowClassifyResult] = useState(true);
@@ -676,7 +678,6 @@ export function SampleDigitizationPage() {
   const [previewGeoJSON, setPreviewGeoJSON] = useState<any>(null);
   const [previewDatasetName, setPreviewDatasetName] = useState<string>("");
   const [imageryTileUrl, setImageryTileUrl] = useState<string | null>(null);
-  const [nativePreviewUrl, setNativePreviewUrl] = useState<string | null>(null);
 
   const loadImageryMut = useMutation({
     mutationFn: async (args: { dataSource: string; customAssetId?: string }) => {
@@ -1031,8 +1032,7 @@ export function SampleDigitizationPage() {
   };
 
   return (
-    <GEEAuthGate>
-    <div className="flex flex-col h-full overflow-y-auto p-6">
+      <div className="flex flex-col h-full bg-background overflow-y-auto p-6 relative">
       <div className="flex items-center gap-2 text-primary font-semibold text-xl mb-2">
         <Edit className="w-5 h-5" />
         Sample Digitization &amp; Machine Learning
@@ -1508,6 +1508,27 @@ export function SampleDigitizationPage() {
                       }}
                     >
                       Clear Overlay
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {nativePreviewUrl && (
+                <div className="flex items-center justify-between bg-emerald-950/50 border border-emerald-500/40 p-2.5 rounded-lg text-xs animate-in fade-in shadow-sm">
+                  <span className="flex items-center gap-2 text-emerald-300 font-medium">
+                    <Layers className="w-4 h-4 text-emerald-400 animate-pulse" /> Active Raster Preview: {nativePreviewName || customAssetId || "GeoTIFF Layer"}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 text-xs text-muted-foreground hover:text-destructive"
+                      onClick={() => {
+                        setNativePreviewUrl(null);
+                        setClassificationSource("sentinel2");
+                      }}
+                    >
+                      <X className="w-3.5 h-3.5" /> Clear Raster Overlay
                     </Button>
                   </div>
                 </div>
@@ -2374,7 +2395,7 @@ export function SampleDigitizationPage() {
           </div>
         </TabsContent>
 
-        {/* 3. IMPORT RARE DATA & LINKS TAB */}
+        {/* 3. IMPORT RARE DATA & HARVESTER TAB */}
         <TabsContent value="import" className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Import from RARE DATA */}
@@ -2435,153 +2456,71 @@ export function SampleDigitizationPage() {
               </div>
             </div>
 
-            {/* Ingest from Link URL */}
-            <div className="border rounded-lg p-5 bg-card space-y-4">
-              <div className="flex items-center gap-2 font-semibold">
-                <LinkIcon className="w-5 h-5 text-purple-500" />
-                Ingest from External URL / STAC / COG
-              </div>
-              <div className="text-xs text-muted-foreground space-y-2">
-                <p>Paste a direct GeoJSON URL, STAC catalog link, or spatial dataset URL.</p>
-                <div className="p-2 bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 rounded-md">
-                  <strong>Fast Processing:</strong> Massive <code className="px-1 bg-emerald-500/20 rounded">http://</code> rasters are now safely downloaded and pushed to GEE entirely in the background, saving you time!
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <div className="flex justify-between items-end">
-                  <Label>Dataset Link URL</Label>
-                  <select
-                    className="text-xs border rounded px-2 py-1 bg-muted/30 max-w-[200px]"
-                    onChange={(e) => {
-                      if (e.target.value) {
-                        setLinkUrl(e.target.value);
-                        e.target.value = "";
+            {/* Universal Spatial Data Harvester Card */}
+            <div className="md:col-span-2">
+              <DatasetHarvester
+                defaultClassLabel={importClassLabel || classLabel || "Agriculture"}
+                onPreviewRaster={(rawUrl, name) => {
+                  const tileUrl = `${BASE}/native/imagery/tiles/{z}/{x}/{y}?url=${encodeURIComponent(rawUrl)}&gee_token=${getGeeToken() || ""}`;
+                  setNativePreviewUrl(tileUrl);
+                  setNativePreviewName(name || rawUrl.split("/").pop() || "GeoTIFF Layer");
+                  setClassificationSource("native_cog");
+                  setCustomAssetId(rawUrl);
+                  setActiveTab("map");
+                  toast({
+                    title: "Loading Raster Preview 🗺️",
+                    description: `Connecting '${name || "Dataset"}' and streaming native tiles...`,
+                  });
+                  fetch(`${BASE}/native/imagery/bounds?url=${encodeURIComponent(rawUrl)}&gee_token=${getGeeToken() || ""}`)
+                    .then((r) => {
+                      if (!r.ok) throw new Error("Could not retrieve raster bounds.");
+                      return r.json();
+                    })
+                    .then((bData) => {
+                      if (bData.bbox && bData.bbox.length === 4) {
+                        setActiveBbox(bData.bbox);
+                        toast({
+                          title: "Raster Layer Loaded! 🛰️",
+                          description: `Centered view on '${name || "GeoTIFF"}' bounds.`,
+                        });
                       }
-                    }}
-                  >
-                    <option value="">Quick Templates...</option>
-                    <optgroup label="Working Test Links">
-                      <option value="https://github.com/mapbox/rasterio/raw/master/tests/data/RGB.byte.tif">Mapbox RGB.byte.tif</option>
-                      <option value="https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/36/M/BE/2024/1/S2A_36MBE_20240115_0_L2A/B04.tif">Sentinel-2 COG</option>
-                      <option value="https://storage.googleapis.com/gcp-public-data-landsat/LC08/01/044/034/LC80440342016259LGN00/LC80440342016259LGN00_B4.TIF">Landsat 8 GCS</option>
-                      <option value="https://s3.amazonaws.com/elevation-tiles-prod/geotiff/12/2340/1600.tif">AWS Elevation DEM</option>
-                      <option value="https://earth-search.aws.element84.com/v1/collections/sentinel-2-l2a/items/S2A_36MBE_20240115_0_L2A">STAC Item JSON</option>
-                      <option value="https://github.com/OSGeo/gdal/raw/master/autotest/gdrivers/data/small_world.zip">GDAL Zipped Raster</option>
-                    </optgroup>
-                    <optgroup label="Placeholder Templates">
-                      <option value="https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/{utm_zone}/{lat_band}/{grid_square}/{year}/{month}/{scene_id}/B04.tif">Sentinel-2 L2A (AWS)</option>
-                      <option value="https://landsat-pds.s3.amazonaws.com/c1/L8/{path}/{row}/{scene_id}/{scene_id}_B4.TIF">Landsat 8/9 (AWS)</option>
-                      <option value="https://esa-worldcover.s3.amazonaws.com/v200/2021/map/ESA_WorldCover_10m_2021_v200_{tile_id}_Map.tif">ESA WorldCover 10m</option>
-                      <option value="https://s3.amazonaws.com/elevation-tiles-prod/geotiff/{z}/{x}/{y}.tif">AWS Global Elevation</option>
-                      <option value="https://portal.opentopography.org/API/globaldem?demtype=SRTMGL1&south={min_lat}&north={max_lat}&west={min_lon}&east={max_lon}&outputFormat=GTiff&API_Key={your_key}">OpenTopography API</option>
-                      <option value="https://envicloud.wsl.ch/chelsa/chelsa_V2/GLOBAL/climatologies/1981-2010/bio/CHELSA_bio1_1981-2010_V.2.1.tif">CHELSA Climate Data</option>
-                    </optgroup>
-                  </select>
-                </div>
-                <div className="flex gap-2">
-                  <input
-                    value={linkUrl}
-                    onChange={(e) => {
-                      setLinkUrl(e.target.value);
-                      if (scrapedLinks.length > 0) setScrapedLinks([]);
-                    }}
-                    placeholder="https://example.com/rwanda_data.geojson"
-                    className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring font-mono"
-                  />
-                  <Button
-                    onClick={() => scrapeDirectoryMut.mutate()}
-                    disabled={scrapeDirectoryMut.isPending || !linkUrl}
-                    variant="outline"
-                    className="h-9 gap-1.5 whitespace-nowrap bg-purple-500/10 text-purple-600 hover:bg-purple-500/20 border-purple-500/20 px-3"
-                  >
-                    {scrapeDirectoryMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-                    Scan Folder
-                  </Button>
-                </div>
-                {scrapedLinks.length > 0 && (
-                  <div className="mt-2 border border-purple-500/30 rounded-md overflow-hidden bg-background max-h-48 overflow-y-auto">
-                    <div className="bg-purple-950/20 px-3 py-1.5 text-xs font-semibold text-purple-400 border-b border-purple-500/30 sticky top-0 backdrop-blur-sm flex justify-between items-center">
-                      <span>Found Datasets</span>
-                      <Button variant="ghost" size="sm" className="h-5 px-1.5 text-[10px]" onClick={() => setScrapedLinks([])}>Clear</Button>
-                    </div>
-                    <div className="divide-y divide-border/50">
-                      {scrapedLinks.map((url, idx) => {
-                        const filename = url.split('/').pop() || url;
-                        return (
-                          <div 
-                            key={idx} 
-                            className="px-3 py-2 flex flex-col cursor-pointer hover:bg-purple-900/30 transition-colors"
-                            onClick={() => setLinkUrl(url)}
-                          >
-                            <span className="text-xs font-semibold text-purple-300">{filename}</span>
-                            <span className="text-[10px] font-mono text-muted-foreground truncate">{url}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="space-y-1">
-                <Label>Class Label for Link Features</Label>
-                <input
-                  value={importClassLabel}
-                  onChange={(e) => setImportClassLabel(e.target.value)}
-                  placeholder="e.g. Agriculture"
-                  className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                />
-              </div>
-
-              <div className="flex gap-2 pt-2">
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    if (!linkUrl) return;
-                    if (linkUrl.includes("{") && linkUrl.includes("}")) {
-                      toast({ variant: "destructive", title: "Placeholders Detected", description: "You must replace the {placeholders} in the template URL with actual values before using it." });
-                      return;
-                    }
-                    setNativePreviewUrl(linkUrl);
-                  }}
-                  className="gap-1.5 border-amber-500/40 text-amber-500 hover:bg-amber-950/40 text-xs px-1 flex-1"
-                >
-                  <Eye className="w-3.5 h-3.5" />
-                  Preview Natively
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    if (!linkUrl) return;
-                    if (linkUrl.includes("{") && linkUrl.includes("}")) {
-                      toast({ variant: "destructive", title: "Placeholders Detected", description: "You must replace the {placeholders} in the template URL with actual values before using it." });
-                      return;
-                    }
-                    backupToKaggleMut.mutate();
-                  }}
-                  disabled={backupToKaggleMut.isPending || !linkUrl}
-                  className="gap-1.5 border-blue-500/40 text-blue-500 hover:bg-blue-950/40 text-xs px-1 flex-1"
-                >
-                  {backupToKaggleMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Database className="w-3.5 h-3.5" />}
-                  Backup to Kaggle
-                </Button>
-
-                <Button
-                  onClick={() => {
-                    if (linkUrl.includes("{") && linkUrl.includes("}")) {
-                      toast({ variant: "destructive", title: "Placeholders Detected", description: "You must replace the {placeholders} in the template URL with actual values before using it." });
-                      return;
-                    }
-                    ingestUrlMut.mutate();
-                  }}
-                  disabled={ingestUrlMut.isPending || !linkUrl}
-                  className="gap-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs px-1"
-                >
-                  {ingestUrlMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-                  Push to GEE
-                </Button>
-              </div>
+                    })
+                    .catch((err) => {
+                      toast({
+                        variant: "destructive",
+                        title: "Raster Preview Notice",
+                        description: err.message || "Failed to load raster overlay bounds.",
+                      });
+                    });
+                }}
+                onPreviewGeoJSON={(geojson) => {
+                  setPreviewGeoJSON(geojson);
+                  setNativePreviewUrl(null);
+                  setActiveTab("map");
+                  try {
+                    const bbox = turf.bbox(geojson);
+                    if (bbox && bbox.length === 4) setActiveBbox(bbox);
+                  } catch {}
+                }}
+                onImportVectorSamples={(url, label) => {
+                  api.samples
+                    .ingestUrl({ url, class_label: label || "Harvested_Class" })
+                    .then((res) => {
+                      qc.invalidateQueries({ queryKey: ["samples"] });
+                      toast({
+                        title: "Samples Imported!",
+                        description: `Imported ${res.imported_count || "vector"} features under class '${label}'.`,
+                      });
+                    })
+                    .catch((err) => {
+                      toast({
+                        variant: "destructive",
+                        title: "Vector Ingest Failed",
+                        description: err.message,
+                      });
+                    });
+                }}
+              />
             </div>
           </div>
         </TabsContent>
@@ -2988,6 +2927,5 @@ export function SampleDigitizationPage() {
         </DialogContent>
       </Dialog>
     </div>
-    </GEEAuthGate>
   );
 }

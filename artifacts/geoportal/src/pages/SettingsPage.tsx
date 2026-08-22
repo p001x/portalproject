@@ -10,6 +10,8 @@ import { useTheme } from "next-themes";
 import { GEEProjectConfig } from "@/components/GEEProjectConfig";
 import { useEffect } from "react";
 import { Progress } from "@/components/ui/progress";
+import { BlogManager } from "@/components/BlogManager";
+import { useBranding, setBranding } from "@/hooks/use-branding";
 
 export function SettingsPage() {
   const { user } = useAuth();
@@ -30,6 +32,48 @@ export function SettingsPage() {
 
   // Usage state
   const [usage, setUsage] = useState<{ used: number; limit: number | string } | null>(null);
+  
+  // Branding state
+  const branding = useBranding();
+  const [siteName, setSiteName] = useState(branding.siteName);
+  const [siteSubtitle, setSiteSubtitle] = useState(branding.siteSubtitle);
+  const [logoUrl, setLogoUrl] = useState(branding.logoUrl);
+  const [brandingSuccess, setBrandingSuccess] = useState(false);
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+  const [brandingError, setBrandingError] = useState("");
+
+  useEffect(() => {
+    setSiteName(branding.siteName);
+    setSiteSubtitle(branding.siteSubtitle);
+    setLogoUrl(branding.logoUrl);
+  }, [branding]);
+
+  const handleUpdateBranding = (e: React.FormEvent) => {
+    e.preventDefault();
+    setBranding({ siteName, siteSubtitle, logoUrl });
+    setBrandingSuccess(true);
+    setTimeout(() => setBrandingSuccess(false), 3000);
+  };
+  
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploadingLogo(true);
+    setBrandingError("");
+    try {
+      const res = await api.uploadLogo(file);
+      setLogoUrl(res.url);
+      setBranding({ siteName, siteSubtitle, logoUrl: res.url });
+      setBrandingSuccess(true);
+      setTimeout(() => setBrandingSuccess(false), 3000);
+    } catch (err: any) {
+      setBrandingError(err.message || "Failed to upload logo");
+    } finally {
+      setIsUploadingLogo(false);
+      // clear the file input
+      e.target.value = '';
+    }
+  };
   
   useEffect(() => {
     api.auth.getGeeUsage()
@@ -93,11 +137,17 @@ export function SettingsPage() {
         </div>
 
         <Tabs defaultValue="account" className="w-full">
-          <TabsList className="grid w-full grid-cols-2 md:grid-cols-4 max-w-[600px] mb-8 bg-muted/50 p-1.5 backdrop-blur-md border border-border/50 rounded-xl">
+            <TabsList className={`grid w-full grid-cols-2 ${user?.role === 'admin' ? 'md:grid-cols-6 max-w-[900px]' : 'md:grid-cols-5 max-w-[750px]'} mb-8 bg-muted/50 p-1.5 backdrop-blur-md border border-border/50 rounded-xl`}>
             <TabsTrigger value="account" className="rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm data-[state=active]:text-primary transition-all font-medium">Account</TabsTrigger>
             <TabsTrigger value="security" className="rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm data-[state=active]:text-primary transition-all font-medium">Security</TabsTrigger>
             <TabsTrigger value="appearance" className="rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm data-[state=active]:text-primary transition-all font-medium">Appearance</TabsTrigger>
+            {user?.role === 'admin' && (
+              <TabsTrigger value="branding" className="rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm data-[state=active]:text-primary transition-all font-medium">Branding</TabsTrigger>
+            )}
             <TabsTrigger value="integrations" className="rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm data-[state=active]:text-primary transition-all font-medium">Integrations</TabsTrigger>
+            {user?.role === 'admin' && (
+              <TabsTrigger value="content" className="rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm data-[state=active]:text-primary transition-all font-medium">Content</TabsTrigger>
+            )}
           </TabsList>
 
           <TabsContent value="account" className="space-y-6 animate-in fade-in-50 slide-in-from-bottom-4 duration-500">
@@ -176,42 +226,15 @@ export function SettingsPage() {
                 
                 {usage ? (
                   <div className="bg-background/50 border border-border/50 rounded-xl p-5">
-                    <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center justify-between mb-4">
                       <div className="flex flex-col">
                         <span className="text-sm font-medium text-foreground">Maps Processed Today</span>
-                        {usage.limit !== "Unlimited" && (
-                          <span className="text-xs text-muted-foreground">Free Tier Allocation</span>
-                        )}
                       </div>
                       <div className="text-right">
                         <span className="text-2xl font-bold text-primary">{usage.used}</span>
-                        {usage.limit !== "Unlimited" && (
-                          <span className="text-muted-foreground ml-1">/ {usage.limit}</span>
-                        )}
-                        {usage.limit === "Unlimited" && (
-                          <span className="text-emerald-500 text-sm font-semibold ml-2">(Unlimited)</span>
-                        )}
+                        <span className="text-emerald-500 text-sm font-semibold ml-2">(Unlimited)</span>
                       </div>
                     </div>
-                    {usage.limit !== "Unlimited" && (
-                      <>
-                        <Progress 
-                          value={Math.min((usage.used / (typeof usage.limit === 'number' ? usage.limit : 15)) * 100, 100)} 
-                          className="h-2.5 bg-muted" 
-                          indicatorClassName={
-                            (usage.used / (typeof usage.limit === 'number' ? usage.limit : 15)) > 0.8 
-                              ? "bg-destructive" 
-                              : "bg-primary"
-                          }
-                        />
-                        {(usage.used / (typeof usage.limit === 'number' ? usage.limit : 15)) >= 1 && (
-                          <div className="mt-3 flex items-center gap-2 text-xs text-destructive bg-destructive/10 p-2 rounded-lg">
-                            <AlertCircle className="w-4 h-4" />
-                            <span>You have reached your daily limit. Please try again tomorrow.</span>
-                          </div>
-                        )}
-                      </>
-                    )}
                   </div>
                 ) : (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -350,6 +373,104 @@ export function SettingsPage() {
             </div>
           </TabsContent>
 
+          {user?.role === 'admin' && (
+            <TabsContent value="branding" className="space-y-6 animate-in fade-in-50 slide-in-from-bottom-4 duration-500">
+              <div className="bg-card/40 backdrop-blur-xl border border-border/50 rounded-2xl overflow-hidden shadow-xl">
+                <div className="border-b border-border/50 px-8 py-5 bg-gradient-to-r from-primary/10 via-transparent to-transparent">
+                  <h2 className="text-xl font-bold flex items-center gap-3">
+                    <div className="p-2.5 bg-primary/20 rounded-xl text-primary shadow-sm border border-primary/20">
+                      <Sparkles className="w-5 h-5" />
+                    </div>
+                    Site Branding
+                  </h2>
+                </div>
+                <div className="p-8">
+                  <form onSubmit={handleUpdateBranding} className="space-y-6">
+                    <div className="space-y-2.5">
+                      <Label htmlFor="siteName" className="text-sm font-semibold text-muted-foreground">Website Name</Label>
+                      <Input 
+                        id="siteName" 
+                        type="text" 
+                        value={siteName} 
+                        onChange={(e) => setSiteName(e.target.value)} 
+                        placeholder="e.g. SPETRO"
+                        className="bg-background/50 focus:ring-primary focus:border-primary transition-all duration-300"
+                      />
+                    </div>
+
+                    <div className="space-y-2.5">
+                      <Label htmlFor="siteSubtitle" className="text-sm font-semibold text-muted-foreground">Website Subtitle</Label>
+                      <Input 
+                        id="siteSubtitle" 
+                        type="text" 
+                        value={siteSubtitle} 
+                        onChange={(e) => setSiteSubtitle(e.target.value)} 
+                        placeholder="e.g. Geoportal Analysis"
+                        className="bg-background/50 focus:ring-primary focus:border-primary transition-all duration-300"
+                      />
+                    </div>
+                    
+                    <div className="space-y-2.5">
+                      <Label htmlFor="logoUrl" className="text-sm font-semibold text-muted-foreground">Logo URL</Label>
+                      <div className="flex flex-col gap-3">
+                        <Input 
+                          id="logoUrl" 
+                          type="text" 
+                          value={logoUrl} 
+                          onChange={(e) => setLogoUrl(e.target.value)} 
+                          placeholder="e.g. /logo.png or https://example.com/logo.png"
+                          className="bg-background/50 focus:ring-primary focus:border-primary transition-all duration-300"
+                        />
+                        <div className="flex items-center gap-4">
+                          <span className="text-xs text-muted-foreground font-medium uppercase tracking-widest">OR UPLOAD FILE</span>
+                          <div className="h-px bg-border/50 flex-1"></div>
+                        </div>
+                        <div className="relative">
+                          <Input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleLogoUpload}
+                            disabled={isUploadingLogo}
+                            className="bg-background/50 focus:ring-primary focus:border-primary transition-all duration-300 cursor-pointer file:cursor-pointer file:bg-primary/10 file:text-primary file:border-0 file:rounded-md file:px-4 file:py-1 file:mr-4 file:font-semibold hover:file:bg-primary/20"
+                          />
+                          {isUploadingLogo && (
+                            <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-2 text-sm text-primary">
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              <span>Uploading...</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Enter a URL to an image, or directly upload an image file. Uploading will automatically update both the React and Streamlit frontends.
+                      </p>
+                    </div>
+                    
+                    {brandingError && (
+                      <div className="flex items-center gap-2.5 text-sm text-destructive bg-destructive/10 p-4 rounded-xl border border-destructive/20 animate-in fade-in zoom-in-95 duration-300">
+                        <AlertCircle className="w-5 h-5 shrink-0" />
+                        <p>{brandingError}</p>
+                      </div>
+                    )}
+                    
+                    {brandingSuccess && (
+                      <div className="flex items-center gap-2.5 text-sm text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 p-4 rounded-xl border border-emerald-500/20 animate-in fade-in zoom-in-95 duration-300">
+                        <CheckCircle2 className="w-5 h-5 shrink-0" />
+                        <p>Branding updated successfully!</p>
+                      </div>
+                    )}
+
+                    <div className="pt-3">
+                      <Button type="submit" className="shadow-lg shadow-primary/20 hover:shadow-primary/40 transition-all rounded-xl px-6 h-11">
+                        Save Branding
+                      </Button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            </TabsContent>
+          )}
+
           <TabsContent value="integrations" className="space-y-6 animate-in fade-in-50 slide-in-from-bottom-4 duration-500">
             <div className="bg-card/40 backdrop-blur-xl border border-border/50 rounded-2xl overflow-hidden shadow-xl">
               <div className="border-b border-border/50 px-8 py-5 bg-gradient-to-r from-emerald-500/10 via-transparent to-transparent">
@@ -371,6 +492,14 @@ export function SettingsPage() {
               </div>
             </div>
           </TabsContent>
+
+          {user?.role === 'admin' && (
+            <TabsContent value="content" className="space-y-6 animate-in fade-in-50 slide-in-from-bottom-4 duration-500">
+              <div className="bg-card/40 backdrop-blur-xl border border-border/50 rounded-2xl overflow-hidden shadow-xl p-8">
+                <BlogManager />
+              </div>
+            </TabsContent>
+          )}
           
         </Tabs>
       </div>

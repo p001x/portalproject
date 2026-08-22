@@ -4,6 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Loader2, Lock, Mail, Map, ArrowRight, User } from "lucide-react";
+import { SiteBrand } from "@/components/SiteBrand";
+import { Link } from "wouter";
 
 export function AuthPage() {
   const [isLogin, setIsLogin] = useState(true);
@@ -55,15 +57,11 @@ export function AuthPage() {
       
       {/* Left Side: Branding / Showcase */}
       <div className="hidden lg:flex flex-col flex-1 bg-slate-900 relative overflow-hidden justify-between p-12">
-        <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1524661135-423995f22d0b?q=80&w=2074&auto=format&fit=crop')] bg-cover bg-center opacity-20 mix-blend-overlay"></div>
-        <div className="absolute inset-0 bg-gradient-to-br from-slate-900/90 via-slate-900/50 to-teal-900/80"></div>
+        <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1524661135-423995f22d0b?q=80&w=2074&auto=format&fit=crop')] bg-cover bg-center opacity-20 mix-blend-overlay pointer-events-none"></div>
+        <div className="absolute inset-0 bg-gradient-to-br from-slate-900/90 via-slate-900/50 to-teal-900/80 pointer-events-none"></div>
         
-        <div className="relative z-10 flex items-center gap-3">
-          <img src="/logo.png" alt="SPETRO Logo" className="h-10 w-auto" />
-          <div>
-            <div className="font-bold text-xl text-white tracking-wide">SPETRO</div>
-            <div className="text-xs font-medium tracking-widest text-teal-400">GEOPORTAL ANALYSIS</div>
-          </div>
+        <div className="relative z-10">
+          <SiteBrand />
         </div>
 
         <div className="relative z-10 max-w-lg mt-auto pb-12">
@@ -82,6 +80,18 @@ export function AuthPage() {
               <Lock className="w-5 h-5 text-teal-400" />
               Secure Data Vault
             </div>
+          </div>
+          <div className="mt-8 flex gap-4">
+            <Link href="/">
+              <span className="text-sm font-medium text-teal-400 hover:text-teal-300 transition-colors flex items-center gap-1 cursor-pointer">
+                &larr; Back to Home
+              </span>
+            </Link>
+            <Link href="/blog">
+              <span className="text-sm font-medium text-teal-400 hover:text-teal-300 transition-colors flex items-center gap-1 cursor-pointer">
+                Read our Blog &rarr;
+              </span>
+            </Link>
           </div>
         </div>
       </div>
@@ -178,6 +188,12 @@ export function AuthPage() {
               <div className="text-sm font-medium text-green-600 bg-green-50 p-3 rounded-md">
                 {success}
               </div>
+            )}
+
+            {!isForgotPassword && (
+              <p className="text-xs text-muted-foreground text-center">
+                By signing in or creating an account, you agree to receive our platform updates and newsletter. You can unsubscribe at any time via email.
+              </p>
             )}
 
             <Button type="submit" className="w-full" size="lg" disabled={isLoading}>

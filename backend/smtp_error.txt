@@ -1,0 +1,1 @@
+SMTP Error for petersonyang8@gmail.com: [Errno 11001] getaddrinfo failed

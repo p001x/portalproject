@@ -7,8 +7,10 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { PlayCircle, BookOpen, Clock, CheckCircle2, GraduationCap, Video, FileText, Plus, Trash2, Headphones, Sparkles, Search, Shield, User } from "lucide-react";
+import { PlayCircle, BookOpen, Clock, CheckCircle2, GraduationCap, Video, FileText, Plus, Trash2, Headphones, Sparkles, Search, Shield, User, Pencil } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
+import { useNotifications } from "@/hooks/use-notifications";
+import { api } from "@/lib/api";
 
 export function AcademyPage() {
   const [activeTab, setActiveTab] = useState("videos");
@@ -21,7 +23,14 @@ export function AcademyPage() {
   const [newBook, setNewBook] = useState({ title: "", author: "", description: "", pages: "", googleBooksUrl: "" });
   const [selectedBookToRead, setSelectedBookToRead] = useState<any>(null);
 
+  const [isEditCourseOpen, setIsEditCourseOpen] = useState(false);
+  const [editingCourse, setEditingCourse] = useState<any>(null);
+
+  const [isEditBookOpen, setIsEditBookOpen] = useState(false);
+  const [editingBook, setEditingBook] = useState<any>(null);
+
   const { user } = useAuth();
+  const { addNotification } = useNotifications();
   const isAdminView = user?.role === 'admin';
 
   const [videoCourses, setVideoCourses] = useState([
@@ -57,6 +66,17 @@ export function AcademyPage() {
       level: "Advanced",
       completed: false,
       youtubeId: "sBws8MSXN7A", // Placeholder, replace with actual YouTube ID
+    },
+    {
+      id: 4,
+      title: "Marketing & Advertising Tactics",
+      description: "Master modern marketing strategies, digital advertising, and audience targeting.",
+      detailedDescription: "In this module, you'll learn the core principles of marketing and advertising tailored for today's digital landscape. We cover campaign planning, SEO/SEM fundamentals, social media advertising, and how to measure ROI effectively. Whether you're launching a new tool or promoting a service, these tactics will help you reach and convert your target audience.",
+      duration: "1 hr 30 mins",
+      modules: 4,
+      level: "Intermediate",
+      completed: false,
+      youtubeId: "bO1eSvhG9yQ", 
     }
   ]);
 
@@ -83,11 +103,44 @@ export function AcademyPage() {
     setVideoCourses([...videoCourses, addedCourse]);
     setIsAddCourseOpen(false);
     setNewCourse({ title: "", description: "", detailedDescription: "", youtubeUrl: "" });
+    addNotification("New Course Added", `"${addedCourse.title}" is now available in the Academy.`);
+    
+    // Notify all users about the new course via email
+    if (isAdminView) {
+      api.admin.notifyNewCourse(addedCourse.title, addedCourse.detailedDescription || addedCourse.description)
+        .catch(err => console.error("Failed to notify users:", err));
+    }
   };
 
   const handleDeleteCourse = (id: number, e: React.MouseEvent) => {
     e.stopPropagation();
     setVideoCourses(videoCourses.filter(c => c.id !== id));
+  };
+
+  const handleEditCourseClick = (course: any, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingCourse({
+      ...course,
+      youtubeUrl: `https://www.youtube.com/watch?v=${course.youtubeId}`
+    });
+    setIsEditCourseOpen(true);
+  };
+
+  const handleUpdateCourse = () => {
+    if (!editingCourse.title || !editingCourse.youtubeUrl) return;
+    setVideoCourses(videoCourses.map(c => 
+      c.id === editingCourse.id 
+        ? {
+            ...c,
+            title: editingCourse.title,
+            description: editingCourse.description,
+            detailedDescription: editingCourse.detailedDescription,
+            youtubeId: extractYoutubeId(editingCourse.youtubeUrl),
+          }
+        : c
+    ));
+    setIsEditCourseOpen(false);
+    setEditingCourse(null);
   };
 
   const [books, setBooks] = useState([
@@ -105,6 +158,14 @@ export function AcademyPage() {
       author: "John Smith, Esq.",
       pages: 185,
       description: "Essential laws and regulations every project lead must understand.",
+      volumeId: ""
+    },
+    {
+      id: 3,
+      title: "Digital Marketing Mastery",
+      author: "Alex Johnson",
+      pages: 250,
+      description: "A complete guide to advertising, SEO, and building a brand.",
       volumeId: ""
     }
   ]);
@@ -136,10 +197,40 @@ export function AcademyPage() {
     }]);
     setIsAddBookOpen(false);
     setNewBook({ title: "", author: "", description: "", pages: "", googleBooksUrl: "" });
+    addNotification("New Book Added", `"${newBook.title}" is now available to read in the Academy.`);
   };
 
   const handleDeleteBook = (id: number) => {
     setBooks(books.filter(b => b.id !== id));
+  };
+
+  const handleEditBookClick = (book: any, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingBook({
+      ...book,
+      googleBooksUrl: book.volumeId && !book.volumeId.startsWith('http') 
+        ? `https://books.google.com/books?id=${book.volumeId}`
+        : book.volumeId || ""
+    });
+    setIsEditBookOpen(true);
+  };
+
+  const handleUpdateBook = () => {
+    if (!editingBook.title || !editingBook.googleBooksUrl) return;
+    setBooks(books.map(b => 
+      b.id === editingBook.id 
+        ? {
+            ...b,
+            title: editingBook.title,
+            author: editingBook.author,
+            pages: parseInt(editingBook.pages) || 0,
+            description: editingBook.description,
+            volumeId: extractDocumentIdOrUrl(editingBook.googleBooksUrl),
+          }
+        : b
+    ));
+    setIsEditBookOpen(false);
+    setEditingBook(null);
   };
 
   return (
@@ -216,8 +307,11 @@ export function AcademyPage() {
                   
                   <CardHeader className="flex-1 pb-4 relative">
                     {isAdminView && (
-                      <div className="absolute top-4 right-4 z-20">
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={(e) => handleDeleteCourse(course.id, e)}>
+                      <div className="absolute top-4 right-4 z-20 flex gap-1 bg-background/80 rounded-md backdrop-blur-sm p-1 border shadow-sm">
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-primary" onClick={(e) => handleEditCourseClick(course, e)}>
+                          <Pencil className="w-4 h-4" />
+                        </Button>
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={(e) => handleDeleteCourse(course.id, e)}>
                           <Trash2 className="w-4 h-4" />
                         </Button>
                       </div>
@@ -262,8 +356,11 @@ export function AcademyPage() {
               {books.map((book) => (
                 <Card key={book.id} className="flex overflow-hidden hover:shadow-md transition-all duration-300 border-border/50 relative">
                   {isAdminView && (
-                    <div className="absolute top-2 right-2 z-10">
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={() => handleDeleteBook(book.id)}>
+                    <div className="absolute top-2 right-2 z-10 flex gap-1 bg-background/80 rounded-md backdrop-blur-sm p-1 border shadow-sm">
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-primary" onClick={(e) => handleEditBookClick(book, e)}>
+                        <Pencil className="w-4 h-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={(e) => { e.stopPropagation(); handleDeleteBook(book.id); }}>
                         <Trash2 className="w-4 h-4" />
                       </Button>
                     </div>
@@ -514,6 +611,126 @@ export function AcademyPage() {
                 <p>This book does not have a Google Books preview available.<br/>Please add a book via the search to read it online.</p>
               </div>
             )}
+          </div>
+        </DialogContent>
+      </Dialog>
+      {/* Edit Course Dialog */}
+      <Dialog open={isEditCourseOpen} onOpenChange={setIsEditCourseOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Edit Course</DialogTitle>
+            <DialogDescription>
+              Update the course details below.
+            </DialogDescription>
+          </DialogHeader>
+          {editingCourse && (
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label>Course Title</Label>
+                <Input 
+                  placeholder="e.g. Advanced QGIS Mapping" 
+                  value={editingCourse.title}
+                  onChange={e => setEditingCourse({...editingCourse, title: e.target.value})}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>YouTube URL or ID</Label>
+                <Input 
+                  placeholder="e.g. https://www.youtube.com/watch?v=..." 
+                  value={editingCourse.youtubeUrl}
+                  onChange={e => setEditingCourse({...editingCourse, youtubeUrl: e.target.value})}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Short Description (for card)</Label>
+                <Input 
+                  placeholder="Brief summary..." 
+                  value={editingCourse.description}
+                  onChange={e => setEditingCourse({...editingCourse, description: e.target.value})}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Detailed Description (for video player)</Label>
+                <Textarea 
+                  placeholder="Explain what the video does in detail..." 
+                  className="h-24"
+                  value={editingCourse.detailedDescription}
+                  onChange={e => setEditingCourse({...editingCourse, detailedDescription: e.target.value})}
+                />
+              </div>
+            </div>
+          )}
+          <div className="flex justify-end gap-3">
+            <Button variant="outline" onClick={() => setIsEditCourseOpen(false)}>Cancel</Button>
+            <Button onClick={handleUpdateCourse} disabled={!editingCourse?.title || !editingCourse?.youtubeUrl}>
+              Save Changes
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Book Dialog */}
+      <Dialog open={isEditBookOpen} onOpenChange={setIsEditBookOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Edit Document</DialogTitle>
+            <DialogDescription>
+              Update the document details below.
+            </DialogDescription>
+          </DialogHeader>
+          {editingBook && (
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label>Book Title</Label>
+                <Input 
+                  placeholder="e.g. Environmental Science" 
+                  value={editingBook.title}
+                  onChange={e => setEditingBook({...editingBook, title: e.target.value})}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Document URL (Google Books or Direct PDF)</Label>
+                <Input 
+                  placeholder="e.g. https://books.google.com/... or https://.../file.pdf" 
+                  value={editingBook.googleBooksUrl}
+                  onChange={e => setEditingBook({...editingBook, googleBooksUrl: e.target.value})}
+                />
+              </div>
+              <div className="flex gap-4">
+                <div className="space-y-2 flex-1">
+                  <Label>Author</Label>
+                  <Input 
+                    placeholder="e.g. Jane Doe" 
+                    value={editingBook.author}
+                    onChange={e => setEditingBook({...editingBook, author: e.target.value})}
+                  />
+                </div>
+                <div className="space-y-2 w-32">
+                  <Label>Pages</Label>
+                  <Input 
+                    placeholder="e.g. 320" 
+                    type="number"
+                    value={editingBook.pages}
+                    onChange={e => setEditingBook({...editingBook, pages: e.target.value})}
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Description</Label>
+                <Textarea 
+                  placeholder="Brief summary..." 
+                  className="h-24"
+                  value={editingBook.description}
+                  onChange={e => setEditingBook({...editingBook, description: e.target.value})}
+                />
+              </div>
+            </div>
+          )}
+          <div className="flex justify-end gap-3">
+            <Button variant="outline" onClick={() => setIsEditBookOpen(false)}>Cancel</Button>
+            <Button onClick={handleUpdateBook} disabled={!editingBook?.title || !editingBook?.googleBooksUrl}>
+              Save Changes
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

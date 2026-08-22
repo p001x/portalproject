@@ -86,62 +86,216 @@ class LocalClient:
         if os.path.exists(path):
             os.remove(path)
 
+class S3Client:
+    def __init__(self, endpoint_url: str, access_key: str, secret_key: str, bucket_name: str, public_url: str = ""):
+        self.bucket_name = bucket_name
+        self.public_url = public_url.rstrip("/")
+        self.s3 = None
+        try:
+            import boto3
+        except ImportError:
+            import subprocess, sys, logging
+            try:
+                logging.info("Attempting to auto-install boto3...")
+                subprocess.run([sys.executable, "-m", "pip", "install", "boto3", "boto3-stubs"], check=True)
+            except Exception as e:
+                logging.error(f"Failed to auto-install boto3: {e}")
+        
+        try:
+            import boto3
+            from botocore.config import Config
+            self.s3 = boto3.client(
+                's3',
+                endpoint_url=endpoint_url,
+                aws_access_key_id=access_key,
+                aws_secret_access_key=secret_key,
+                config=Config(signature_version='s3v4')
+            )
+        except Exception as e:
+            import logging
+            logging.error(f"boto3 is not available. Cloudflare R2 uploads will fail. {e}")
+
+    def upload_from_bytes(self, key: str, data: bytes) -> None:
+        if self.s3 is None: raise RuntimeError("boto3 is not installed or configured correctly.")
+        self.s3.put_object(Bucket=self.bucket_name, Key=key, Body=data)
+
+    def upload_from_text(self, key: str, text: str) -> None:
+        if self.s3 is None: raise RuntimeError("boto3 is not installed or configured correctly.")
+        self.s3.put_object(Bucket=self.bucket_name, Key=key, Body=text.encode('utf-8'))
+
+    def download_as_bytes(self, key: str) -> bytes:
+        if self.s3 is None: raise RuntimeError("boto3 is not installed or configured correctly.")
+        response = self.s3.get_object(Bucket=self.bucket_name, Key=key)
+        return response['Body'].read()
+
+    def download_as_text(self, key: str) -> str:
+        if self.s3 is None: return "[]"
+        try:
+            return self.download_as_bytes(key).decode('utf-8')
+        except Exception:
+            return "[]"
+
+    def exists(self, key: str) -> bool:
+        if self.s3 is None: return False
+        try:
+            self.s3.head_object(Bucket=self.bucket_name, Key=key)
+            return True
+        except Exception:
+            return False
+
+    def delete(self, key: str) -> None:
+        if self.s3 is None: raise RuntimeError("boto3 is not installed or configured correctly.")
+        try:
+            self.s3.delete_object(Bucket=self.bucket_name, Key=key)
+        except Exception:
+            pass
+
 def _get_client():
     global _client
     if _client is None:
-        _client = LocalClient(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "files")))
+        import os
+        r2_endpoint = os.environ.get("R2_ENDPOINT_URL")
+        r2_access = os.environ.get("R2_ACCESS_KEY_ID")
+        r2_secret = os.environ.get("R2_SECRET_ACCESS_KEY")
+        r2_bucket = os.environ.get("R2_BUCKET_NAME")
+        r2_public = os.environ.get("R2_PUBLIC_URL", "")
+
+        if r2_endpoint and r2_access and r2_secret and r2_bucket:
+            _client = S3Client(r2_endpoint, r2_access, r2_secret, r2_bucket, r2_public)
+        else:
+            _client = LocalClient(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "files")))
     return _client
 
-def get_kaggle_api():
-    import os
-    try:
-        from kaggle.api.kaggle_api_extended import KaggleApi
-        token = os.environ.get('KAGGLE_API_TOKEN', '')
-        if token and not os.environ.get('KAGGLE_KEY'):
-            os.environ['KAGGLE_KEY'] = token
-        api = KaggleApi()
-        api.authenticate()
-        return api
-    except (SystemExit, Exception) as exc:
-        raise RuntimeError(f"Kaggle API authentication is not configured: {exc}")
 
-def push_to_kaggle(key: str, data: bytes, name: str) -> str:
-    import tempfile
-    import os
+
+def push_to_storage(key: str, data: Optional[bytes], name: str, progress_callback=None, file_path: Optional[str] = None) -> str:
+    client = _get_client()
     
-    if os.environ.get('KAGGLE_API_TOKEN', '') == '' and os.environ.get('KAGGLE_KEY', '') == '':
-        _get_client().upload_from_bytes(key, data)
+    if data is None and file_path is None:
+        raise ValueError("Must provide either data or file_path")
+    
+    # 1. If Cloudflare R2 is configured, skip HF entirely!
+    if client.__class__.__name__ == "S3Client":
+        if data is not None:
+            client.upload_from_bytes(key, data)
+        else:
+            with open(file_path, "rb") as f:
+                client.upload_from_bytes(key, f.read())
+        return f"r2://{client.bucket_name}/{key}"
+
+    import os
+    import tempfile
+    hf_token = os.environ.get("HF_TOKEN")
+    repo_id = os.environ.get("HF_REPO_ID", "pi0texy/blacportal-datasets")
+    
+    if not hf_token:
+        # Fallback to local
+        client.upload_from_bytes(key, data)
         return f"local://{key}"
         
-    api = get_kaggle_api()
-    username = api.get_config_value("username") or os.environ.get("KAGGLE_USERNAME") or "blacportal"
-    dataset_slug = f"{username}/blacportal-datasets"
-    
-    with tempfile.TemporaryDirectory() as tmpdir:
-        file_path = os.path.join(tmpdir, key.split("/")[-1])
-        with open(file_path, "wb") as f:
-            f.write(data)
-
-        # We assume the dataset already exists. 
-        # Alternatively we can upload it as a new version.
+    try:
+        from huggingface_hub import HfApi, create_repo
+        api = HfApi(token=hf_token)
         try:
-            api.dataset_create_version(tmpdir, version_notes=f"Added {name}", dir_mode="zip")
-        except Exception as e:
-            try:
-                # If dataset does not exist, initialize it
-                api.dataset_initialize(tmpdir)
-                with open(os.path.join(tmpdir, "dataset-metadata.json"), "w") as f:
-                    import json
-                    json.dump({
-                        "title": "Blacportal Datasets",
-                        "id": dataset_slug,
-                        "licenses": [{"name": "CC0-1.0"}]
-                    }, f)
-                api.dataset_create_new(tmpdir, dir_mode="zip")
-            except Exception as inner_e:
-                raise ValueError(f"Failed to push to Kaggle: {e} | {inner_e}")
+            create_repo(repo_id, repo_type="dataset", exist_ok=True, token=hf_token)
+        except Exception:
+            pass
+            
+        filename = key.split("/")[-1]
+        
+        tmp_path = file_path
+        cleanup_tmp = False
+        
+        if data is not None:
+            with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                tmp.write(data)
+                tmp_path = tmp.name
+                cleanup_tmp = True
                 
-    return f"kaggle://{dataset_slug}/{key.split('/')[-1]}"
+        file_size = os.path.getsize(tmp_path)
+            
+        class ProgressFileWrapper:
+            def __init__(self, filepath, cb):
+                self.file = open(filepath, "rb")
+                self.cb = cb
+                self.total = file_size
+                self.read_bytes = 0
+
+            def read(self, size=-1):
+                chunk = self.file.read(size)
+                if chunk:
+                    self.read_bytes += len(chunk)
+                    if self.cb:
+                        try:
+                            self.cb(self.read_bytes, self.total)
+                        except Exception:
+                            pass
+                return chunk
+
+            def __getattr__(self, attr):
+                return getattr(self.file, attr)
+                
+            def __len__(self):
+                return self.total
+
+            def close(self):
+                self.file.close()
+                
+        try:
+            wrapped_file = ProgressFileWrapper(tmp_path, progress_callback)
+            try:
+                api.upload_file(
+                    path_or_fileobj=wrapped_file,
+                    path_in_repo=filename,
+                    repo_id=repo_id,
+                    repo_type="dataset",
+                    commit_message=f"Added dataset: {name}"
+                )
+            finally:
+                wrapped_file.close()
+        finally:
+            if cleanup_tmp:
+                os.unlink(tmp_path)
+            
+        return f"hf://{repo_id}/{filename}"
+        
+    except ImportError:
+        # Fallback to local
+        if data is not None:
+            client.upload_from_bytes(key, data)
+        else:
+            with open(file_path, "rb") as f:
+                client.upload_from_bytes(key, f.read())
+        return f"local://{key}"
+    except Exception as e:
+        raise ValueError(f"Failed to push to Hugging Face: {e}")
+
+
+
+
+def _delete_from_huggingface(filename: str) -> None:
+    import os
+    import logging
+    hf_token = os.environ.get("HF_TOKEN")
+    repo_id = os.environ.get("HF_REPO_ID", "pi0texy/blacportal-datasets")
+    if not hf_token:
+        return
+        
+    try:
+        from huggingface_hub import HfApi
+        api = HfApi(token=hf_token)
+        api.delete_file(
+            path_in_repo=filename,
+            repo_id=repo_id,
+            repo_type="dataset",
+            commit_message=f"Delete dataset: {filename}"
+        )
+        logging.info(f"Successfully deleted {filename} from Hugging Face: {repo_id}")
+    except ImportError:
+        pass
+    except Exception as e:
+        logging.error(f"Failed to delete {filename} from Hugging Face: {e}")
+
 
 def download_from_kaggle(kaggle_uri: str) -> bytes:
     import tempfile
@@ -224,34 +378,50 @@ def add_record(record: DatasetRecord, source: str = "admin") -> None:
 
 
 def delete_record(dataset_id: str, source: str = "admin") -> bool:
+    import logging
     records = load_metadata(source=source)
     target = next((r for r in records if r["id"] == dataset_id), None)
     if target is None:
+        logging.warning(f"delete_record: Dataset {dataset_id} not found in {source}.")
         return False
-    if not target["storage_key"].startswith(LINK_KEY_PREFIX):
+        
+    storage_key = target.get("storage_key", "")
+    if storage_key and not storage_key.startswith(LINK_KEY_PREFIX):
         client = _get_client()
         try:
-            if client.exists(target["storage_key"]):
-                client.delete(target["storage_key"])
-        except Exception:
-            pass
+            if client.exists(storage_key):
+                client.delete(storage_key)
+        except Exception as e:
+            logging.error(f"delete_record: Error deleting file from storage: {e}")
+            
+        import threading
+        filename = storage_key.split("/")[-1]
+        threading.Thread(target=_delete_from_huggingface, args=(filename,), daemon=True).start()
+            
     remaining = [r for r in records if r["id"] != dataset_id]
     try:
         save_metadata(remaining, source=source)
-    except Exception:
+    except Exception as e:
+        logging.error(f"delete_record: Error saving metadata: {e}")
         return False
     return True
 
 
 # ── Bbox extraction ─────────────────────────────────────────────────────────
 
-def extract_tiff_bbox(file_bytes: bytes) -> list[float]:
+def extract_tiff_bbox(file_bytes: Optional[bytes] = None, file_path: Optional[str] = None) -> list[float]:
     import rasterio
     from rasterio.warp import transform_bounds
-    with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
-        tmp.write(file_bytes)
-        tmp.flush()
-        tmp_name = tmp.name
+    
+    tmp_name = file_path
+    cleanup = False
+    
+    if file_bytes is not None:
+        with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
+            tmp.write(file_bytes)
+            tmp.flush()
+            tmp_name = tmp.name
+            cleanup = True
         
     try:
         with rasterio.open(tmp_name) as src:
@@ -261,11 +431,12 @@ def extract_tiff_bbox(file_bytes: bytes) -> list[float]:
             minx, miny, maxx, maxy = transform_bounds(src.crs, "EPSG:4326", b.left, b.bottom, b.right, b.top)
             return [minx, miny, maxx, maxy]
     finally:
-        import os
-        try:
-            os.unlink(tmp_name)
-        except Exception:
-            pass
+        if cleanup:
+            import os
+            try:
+                os.unlink(tmp_name)
+            except Exception:
+                pass
 
 
 MAX_ZIP_MEMBERS = 200
@@ -351,12 +522,20 @@ def filename_from_url(url: str) -> str:
     return path.rsplit("/", 1)[-1] or "dataset"
 
 
-def process_and_store_upload(filename: str, file_bytes: bytes, name: str,
+def process_and_store_upload(filename: str, file_bytes: Optional[bytes], name: str,
                               description: str, source: str = "admin",
-                              contributor: Optional[str] = None) -> DatasetRecord:
-    size_mb = len(file_bytes) / (1024 * 1024)
+                              contributor: Optional[str] = None,
+                              source_url: Optional[str] = None,
+                              dataset_id: Optional[str] = None,
+                              progress_callback=None,
+                              file_path: Optional[str] = None) -> DatasetRecord:
+    import os
+    if file_bytes is None and file_path is None:
+        raise ValueError("Must provide either file_bytes or file_path")
+        
+    size_mb = len(file_bytes) / (1024 * 1024) if file_bytes is not None else os.path.getsize(file_path) / (1024 * 1024)
     file_type = detect_file_type(filename)
-    dataset_id = str(uuid.uuid4())
+    dataset_id = dataset_id or str(uuid.uuid4())
     data_prefix = DATA_PREFIXES[source]
     storage_key = f"{data_prefix}{dataset_id}_{filename}"
     bbox: Optional[list[float]] = None
@@ -368,7 +547,7 @@ def process_and_store_upload(filename: str, file_bytes: bytes, name: str,
             raise ValueError(f"File is {size_mb:.1f} MB, exceeds {MAX_UPLOAD_MB} MB cap.")
             
         # Prevent nested zip bombs
-        if filename.lower().endswith(".zip") or file_type == "shapefile":
+        if (filename.lower().endswith(".zip") or file_type == "shapefile") and file_bytes is not None:
             try:
                 with zipfile.ZipFile(io.BytesIO(file_bytes)) as zf:
                     for member in zf.infolist():
@@ -381,17 +560,19 @@ def process_and_store_upload(filename: str, file_bytes: bytes, name: str,
         if file_type == "shapefile":
             storage_key = f"{data_prefix}{dataset_id}.zip"
             
-        if file_type == "tiff":
+        if file_type == "tiff" and file_bytes is not None:
             try:
                 bbox = extract_tiff_bbox(file_bytes)
             except Exception:
                 pass
-        elif file_type == "shapefile":
+        elif file_type == "shapefile" and file_bytes is not None:
             try:
-                bbox, _ = extract_shapefile_bbox(file_bytes)
+                bbox, new_bytes = extract_shapefile_bbox(file_bytes)
+                bytes_to_store = new_bytes
+                size_mb = len(bytes_to_store) / (1024 * 1024)
             except Exception:
                 pass
-        elif file_type == "csv":
+        elif file_type == "csv" and file_bytes is not None:
             try:
                 bbox = extract_csv_bbox(file_bytes)
             except Exception:
@@ -400,18 +581,22 @@ def process_and_store_upload(filename: str, file_bytes: bytes, name: str,
         status = "error"; error_message = str(e)
     if status != "error":
         try:
-            storage_key = push_to_kaggle(storage_key, bytes_to_store, name or filename)
+            storage_key = push_to_storage(storage_key, bytes_to_store, name or filename, progress_callback, file_path=file_path)
         except Exception as e:
-            status = "error"; error_message = f"Failed to save to Kaggle: {e}"
+            status = "error"; error_message = f"Failed to save to Hugging Face: {e}"
     record = DatasetRecord(id=dataset_id, name=name, description=description, file_type=file_type,
                            storage_key=storage_key, original_filename=filename, bbox=bbox,
                            file_size_mb=round(size_mb, 3), status=status, error_message=error_message,
-                           source=source, contributor=contributor)
+                           source=source, contributor=contributor, source_url=source_url)
     try:
         add_record(record, source=source)
     except Exception as e:
         record.status = "error"; record.error_message = f"File saved but metadata failed: {e}"
     return record
+
+
+# Compatibility alias for harvester & API endpoints
+upload_dataset_file = process_and_store_upload
 
 
 def process_and_store_link(url: str, name: str, description: str,
@@ -442,6 +627,15 @@ def process_and_store_link(url: str, name: str, description: str,
         except Exception:
             filename = filename_from_url(resolved_url)
             
+        import re
+        if filename:
+            filename = re.sub(r'\s*-\s*Google\s*Drive\s*$', '', filename).strip()
+        if name:
+            name = re.sub(r'\s*-\s*Google\s*Drive\s*$', '', name).strip()
+            
+        if description and description.startswith("Harvested from"):
+            description = ""
+            
         file_type = detect_file_type(filename)
         if file_type == "other":
             file_type = detect_file_type(name)
@@ -449,7 +643,8 @@ def process_and_store_link(url: str, name: str, description: str,
                 filename = name
             elif "drive.google.com" in resolved_url or "drive.usercontent.google.com" in resolved_url:
                 file_type = "tiff"
-                filename = name + ".tif"
+                if not filename.endswith(".tif") and not filename.endswith(".tiff"):
+                    filename = filename + ".tif"
         
         if file_type == "tiff":
             import rasterio
@@ -496,12 +691,25 @@ def process_and_store_link(url: str, name: str, description: str,
             error_message = f"Could not fetch/parse metadata remotely: {err_str}"
 
     dataset_id = str(uuid.uuid4())
-    storage_key = f"{LINK_KEY_PREFIX}{raw_url}"
+    
+    # 1. Download the actual file bytes from the link
+    try:
+        from storage.link_resolver import resolve_link
+        file_bytes, _, _ = resolve_link(raw_url, max_mb=2000) # Download up to 2GB
+        size_mb = len(file_bytes) / (1024 * 1024)
+        
+        # 2. Push the bytes to Kaggle / R2!
+        storage_key = push_to_storage(f"{dataset_id}_{filename}", file_bytes, name or filename)
+        
+    except Exception as e:
+        status = "error"
+        error_message = f"Failed to download from link or push to Kaggle: {e}"
+        storage_key = f"{LINK_KEY_PREFIX}{raw_url}" # Fallback
     
     record = DatasetRecord(id=dataset_id, name=name, description=description, file_type=file_type,
                            storage_key=storage_key, original_filename=filename, bbox=bbox,
                            status=status, error_message=error_message, source=source,
-                           contributor=contributor, source_url=raw_url, file_size_mb=0)
+                           contributor=contributor, source_url=raw_url, file_size_mb=round(size_mb, 3))
     try:
         add_record(record, source=source)
     except Exception as e:
@@ -516,11 +724,18 @@ def download_dataset_bytes(storage_key: str) -> bytes:
         return file_bytes
     if storage_key.startswith("kaggle://"):
         return download_from_kaggle(storage_key)
-    if storage_key.startswith("local://"):
-        storage_key = storage_key[8:]
-    elif storage_key.startswith("local::"):
-        storage_key = storage_key[7:]
-    return _get_client().download_as_bytes(storage_key)
+    
+    key = storage_key
+    if key.startswith("r2://"):
+        # Format: r2://bucket_name/filename
+        parts = key.replace("r2://", "").split("/", 1)
+        if len(parts) > 1:
+            key = parts[1]
+    elif key.startswith("local://"):
+        key = key[8:]
+    elif key.startswith("local::"):
+        key = key[7:]
+    return _get_client().download_as_bytes(key)
 
 
 def get_dataset_local_path(storage_key: str) -> Optional[str]:

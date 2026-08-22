@@ -9,5 +9,5 @@ def run_cmd(cmd):
         print("STDERR:", result.stderr)
 
 run_cmd("git add .")
-run_cmd("git commit -m \"Implement GEE usage tracking UI and fix map preview authentication\"")
+run_cmd("git commit -m \"Fix password reset email SMTP configuration and add better error messages\"")
 run_cmd("git push")

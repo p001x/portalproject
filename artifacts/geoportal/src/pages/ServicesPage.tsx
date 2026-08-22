@@ -37,15 +37,15 @@ const SERVICES = [
   },
   {
     id: "custom_analysis",
-    title: "Custom GIS Analysis",
+    title: "Ultra GIS Engineering",
     icon: Map,
-    description: "Let the experts handle the heavy lifting. We deliver ready-to-use insights and reports.",
+    description: "Let our experts build bespoke, AI-powered spatial models and automated data pipelines tailored to your organization.",
     price: "Project Based",
     features: [
-      "End-to-end Environmental Impact Assessments",
-      "High-resolution Change Detection & mapping",
-      "Data ingestion, cleaning, and harmonization",
-      "White-labeled cartographic maps and PDFs",
+      "Custom Machine Learning model training on multi-petabyte satellite data",
+      "Real-time automated environmental monitoring pipelines & API access",
+      "Sub-meter resolution drone & satellite imagery fusion",
+      "Fully deployed, white-labeled bespoke web Geoportals",
     ]
   }
 ];

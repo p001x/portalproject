@@ -50,6 +50,8 @@ import base64
 import re
 import urllib.request
 from urllib.parse import urlparse
+import os
+import concurrent.futures
 
 import requests
 
@@ -60,8 +62,11 @@ _SHORTENER_DOMAINS = {
 }
 
 _DRIVE_ID_PATTERNS = [
+    re.compile(r"/file/d/([a-zA-Z0-9_-]{15,})"),
     re.compile(r"/d/([a-zA-Z0-9_-]{15,})"),
     re.compile(r"[?&]id=([a-zA-Z0-9_-]{15,})"),
+    re.compile(r"/open\?id=([a-zA-Z0-9_-]{15,})"),
+    re.compile(r"/uc\?id=([a-zA-Z0-9_-]{15,})"),
 ]
 
 _GEE_ASSET_PATTERN = re.compile(r"^(users/[\w.-]+/|projects/[\w.-]+/assets/)")
@@ -209,7 +214,8 @@ def _rewrite_known_hosts(url: str) -> str:
 
 
 def _drive_file_id(url: str) -> str | None:
-    if "drive.google.com" not in url:
+    lower = url.lower()
+    if "drive.google.com" not in lower and "drive.usercontent.google.com" not in lower and "docs.google.com" not in lower:
         return None
     for pattern in _DRIVE_ID_PATTERNS:
         m = pattern.search(url)
@@ -228,18 +234,39 @@ def _filename_from_response(resp: requests.Response, fallback_url: str) -> str:
     return name or "downloaded_file"
 
 
-def _read_capped(resp: requests.Response, max_mb: float) -> bytes:
+def _read_capped(resp: requests.Response, max_mb: float, progress_callback=None) -> bytes:
+    import time
     content_length = resp.headers.get("Content-Length")
-    if content_length and int(content_length) > max_mb * 1024 * 1024:
+    total_bytes = int(content_length) if content_length and content_length.isdigit() else None
+    if total_bytes and total_bytes > max_mb * 1024 * 1024:
         raise LinkResolutionError(
-            f"File is {int(content_length) / (1024*1024):.1f} MB, exceeds the {max_mb:.0f} MB cap."
+            f"File is {total_bytes / (1024*1024):.1f} MB, exceeds the {max_mb:.0f} MB cap."
         )
     chunks, total = [], 0
+    start_time = time.time()
+    last_update = start_time
+
     for chunk in resp.iter_content(chunk_size=1024 * 1024):
+        if not chunk:
+            continue
         total += len(chunk)
         if total > max_mb * 1024 * 1024:
             raise LinkResolutionError(f"File exceeds the {max_mb:.0f} MB cap.")
         chunks.append(chunk)
+
+        if progress_callback:
+            now = time.time()
+            if now - last_update >= 0.35:
+                last_update = now
+                elapsed = max(now - start_time, 0.001)
+                speed_mbps = (total / elapsed) / (1024 * 1024)
+                progress_callback(total, total_bytes, speed_mbps)
+
+    if progress_callback:
+        elapsed = max(time.time() - start_time, 0.001)
+        speed_mbps = (total / elapsed) / (1024 * 1024)
+        progress_callback(total, total_bytes or total, speed_mbps)
+
     return b"".join(chunks)
 
 
@@ -249,31 +276,35 @@ def _drive_confirm_get(session: requests.Session, url: str, params: dict) -> req
     return resp
 
 
-def _fetch_drive(url: str, max_mb: float) -> tuple[bytes, str, str]:
+def _fetch_drive(url: str, max_mb: float, progress_callback=None) -> tuple[bytes, str, str]:
     """Google Drive file shared as 'Anyone with the link'.
 
-    Handles the virus-scan interstitial Drive shows for larger/ambiguous files,
-    across both the older confirm-token page and the current
-    drive.usercontent.google.com hidden-form page, since Google has changed this
-    flow more than once and a single regex no longer reliably covers it.
+    Handles large-file virus-scan interstitials across both modern POST/GET form flows
+    on drive.usercontent.google.com and cookie/token confirmations.
     """
     file_id = _drive_file_id(url)
+    if not file_id:
+        raise LinkResolutionError(f"Could not extract Google Drive file ID from URL: {url}")
+
     base = "https://drive.google.com/uc"
     params = {"id": file_id, "export": "download"}
     session = requests.Session()
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    })
 
     try:
         resp = _drive_confirm_get(session, base, params)
     except requests.RequestException as e:
         raise LinkResolutionError(f"Could not reach that Drive link: {e}") from e
 
-    # Up to a couple of follow-up requests: cookie/query confirm token, the modern
-    # hidden-form redirect, then a last-resort literal "confirm=t" (Google accepts
-    # this for most virus-scan warnings regardless of the "real" token value).
-    for attempt in range(3):
+    # Up to 4 attempts to resolve download warning / confirmation forms
+    for attempt in range(4):
         content_type = resp.headers.get("Content-Type", "")
-        if "text/html" not in content_type:
-            break  # got the actual file
+        if "text/html" not in content_type.lower():
+            break  # Got the actual binary file stream!
 
         text = resp.text
         if "Quota exceeded" in text or "quota exceeded" in text.lower():
@@ -283,42 +314,70 @@ def _fetch_drive(url: str, max_mb: float) -> tuple[bytes, str, str]:
                 "copy available elsewhere."
             )
 
-        action_m = re.search(r'action="(https://drive\.usercontent\.google\.com/download[^"]*)"', text)
+        # 1. Look for modern hidden form (drive.usercontent.google.com/download)
+        action_m = re.search(r'action="([^"]*drive\.usercontent\.google\.com/download[^"]*)"', text, re.IGNORECASE)
         if action_m:
             action_url = action_m.group(1).replace("&amp;", "&")
-            hidden_inputs = dict(
-                re.findall(r'<input[^>]*type="hidden"[^>]*name="([^"]+)"[^>]*value="([^"]*)"', text)
-            )
-            try:
-                resp = _drive_confirm_get(session, action_url, hidden_inputs)
-            except requests.RequestException as e:
-                raise LinkResolutionError(f"Could not reach that Drive link: {e}") from e
-            continue
+            method_m = re.search(r'<form[^>]*action="[^"]*drive\.usercontent\.google\.com/download[^"]*"[^>]*method="([^"]+)"', text, re.IGNORECASE)
+            method = (method_m.group(1) if method_m else "post").lower()
 
+            hidden_inputs = {}
+            for input_match in re.finditer(r'<input\b[^>]*>', text, re.IGNORECASE):
+                tag = input_match.group(0)
+                name_m = re.search(r'name="([^"]+)"', tag, re.IGNORECASE)
+                val_m = re.search(r'value="([^"]*)"', tag, re.IGNORECASE)
+                if name_m and val_m:
+                    hidden_inputs[name_m.group(1)] = val_m.group(1)
+
+            try:
+                if method == "post":
+                    resp = session.post(action_url, data=hidden_inputs, timeout=DEFAULT_TIMEOUT, stream=True)
+                else:
+                    resp = session.get(action_url, params=hidden_inputs, timeout=DEFAULT_TIMEOUT, stream=True)
+                resp.raise_for_status()
+                if "text/html" not in resp.headers.get("Content-Type", "").lower():
+                    break
+            except requests.RequestException:
+                pass
+
+        # 2. Token-based confirmation fallback
         token = next((v for k, v in resp.cookies.items() if k.startswith("download_warning")), None)
         if not token:
             m = re.search(r"confirm=([0-9A-Za-z_-]+)", text)
             token = m.group(1) if m else None
         if not token:
-            token = "t"  # last-resort literal Google accepts for most scan warnings
+            token = "t"
 
-        if attempt == 2 and token == "t":
-            # Already tried a real token (or none existed) and the literal fallback — give up honestly.
-            raise LinkResolutionError(
-                "This Drive link isn't a direct file, or isn't shared as \"Anyone with the link\". "
-                "Open the file, set sharing to Anyone with the link, and paste that link again."
-            )
+        # 3. Direct usercontent GET query
+        try:
+            direct_url = f"https://drive.usercontent.google.com/download?id={file_id}&export=download&confirm={token}"
+            resp = session.get(direct_url, timeout=DEFAULT_TIMEOUT, stream=True)
+            if resp.status_code == 200 and "text/html" not in resp.headers.get("Content-Type", "").lower():
+                break
+        except requests.RequestException:
+            pass
 
+        # 4. Fallback to /uc?id=...&confirm=...
         try:
             resp = _drive_confirm_get(session, base, {**params, "confirm": token})
+            if "text/html" not in resp.headers.get("Content-Type", "").lower():
+                break
         except requests.RequestException as e:
-            raise LinkResolutionError(f"Could not reach that Drive link: {e}") from e
+            if attempt >= 2:
+                raise LinkResolutionError(f"Could not reach that Drive link: {e}") from e
 
-    file_bytes = _read_capped(resp, max_mb)
+    content_type = resp.headers.get("Content-Type", "")
+    if "text/html" in content_type.lower():
+        raise LinkResolutionError(
+            "This Drive link requires access permission or isn't shared as 'Anyone with the link'. "
+            "Please check the sharing settings on Google Drive and try again."
+        )
+
+    file_bytes = _read_capped(resp, max_mb, progress_callback=progress_callback)
     return file_bytes, _filename_from_response(resp, url), resp.url or url
 
 
-def _fetch_ftp(url: str, max_mb: float) -> tuple[bytes, str, str]:
+def _fetch_ftp(url: str, max_mb: float, progress_callback=None) -> tuple[bytes, str, str]:
     try:
         with urllib.request.urlopen(url, timeout=DEFAULT_TIMEOUT) as resp:
             data = resp.read(int(max_mb * 1024 * 1024) + 1)
@@ -330,7 +389,7 @@ def _fetch_ftp(url: str, max_mb: float) -> tuple[bytes, str, str]:
     return data, filename, url
 
 
-def _fetch_generic(url: str, max_mb: float) -> tuple[bytes, str, str]:
+def _fetch_generic(url: str, max_mb: float, progress_callback=None) -> tuple[bytes, str, str]:
     headers = {}
     if "kaggle.com" in url:
         import os
@@ -343,11 +402,11 @@ def _fetch_generic(url: str, max_mb: float) -> tuple[bytes, str, str]:
         resp.raise_for_status()
     except requests.RequestException as e:
         raise LinkResolutionError(f"Could not reach that link: {e}") from e
-    file_bytes = _read_capped(resp, max_mb)
+    file_bytes = _read_capped(resp, max_mb, progress_callback=progress_callback)
     return file_bytes, _filename_from_response(resp, url), resp.url or url
 
 
-def resolve_link(url: str, max_mb: float = 100) -> tuple[bytes, str, str]:
+def resolve_link(url: str, max_mb: float = 50000, progress_callback=None) -> tuple[bytes, str, str]:
     """Resolve any of the supported link formats (see module docstring) to raw bytes.
 
     Returns (file_bytes, filename, resolved_url). Raises LinkResolutionError with a
@@ -362,11 +421,11 @@ def resolve_link(url: str, max_mb: float = 100) -> tuple[bytes, str, str]:
     url = _rewrite_known_hosts(url)
 
     if _drive_file_id(url):
-        return _fetch_drive(url, max_mb)
+        return _fetch_drive(url, max_mb, progress_callback=progress_callback)
     if url.lower().startswith("ftp://"):
-        return _fetch_ftp(url, max_mb)
+        return _fetch_ftp(url, max_mb, progress_callback=progress_callback)
     if url.lower().startswith(("http://", "https://")):
-        return _fetch_generic(url, max_mb)
+        return _fetch_generic(url, max_mb, progress_callback=progress_callback)
 
     raise LinkResolutionError(
         f"Unrecognized link format: `{url}`. Paste a direct HTTP(S)/FTP file URL, a Google Drive "
@@ -387,23 +446,118 @@ def resolve_link_url(url: str) -> str:
 
     file_id = _drive_file_id(url)
     if file_id:
-        # Best effort bypass of Drive virus scan for direct GDAL/Pandas reading
-        import requests, re
+        # Best effort direct download URL
+        return f"https://drive.usercontent.google.com/download?id={file_id}&export=download&confirm=t"
+
+    return url
+
+def _stream_to_file(resp, output_path: str, max_mb: float, progress_callback=None) -> None:
+    size = 0
+    cap = max_mb * 1024 * 1024
+    with open(output_path, "wb") as f:
+        for chunk in resp.iter_content(chunk_size=8 * 1024 * 1024):  # 8 MB chunks
+            if chunk:
+                size += len(chunk)
+                if size > cap:
+                    raise LinkResolutionError(f"File exceeds the {max_mb:.0f} MB cap.")
+                f.write(chunk)
+                if progress_callback:
+                    progress_callback(size)
+
+def _parallel_download(url: str, output_path: str, file_size: int, headers: dict, max_mb: float, progress_callback=None) -> None:
+    num_threads = 4
+    chunk_size = file_size // num_threads
+    
+    # Pre-allocate file
+    with open(output_path, "wb") as f:
+        f.seek(file_size - 1)
+        f.write(b'\0')
+        
+    downloaded_bytes = 0
+    
+    def download_range(start: int, end: int):
+        range_headers = headers.copy()
+        range_headers["Range"] = f"bytes={start}-{end}"
+        resp = requests.get(url, headers=range_headers, stream=True, timeout=DEFAULT_TIMEOUT)
+        resp.raise_for_status()
+        
+        if resp.status_code != 206:
+            raise ValueError("Server ignored Range header, falling back to single stream")
+        
+        nonlocal downloaded_bytes
+        with open(output_path, "r+b") as f:
+            f.seek(start)
+            for chunk in resp.iter_content(chunk_size=4 * 1024 * 1024):
+                if chunk:
+                    f.write(chunk)
+                    downloaded_bytes += len(chunk)
+                    if progress_callback:
+                        progress_callback(downloaded_bytes, file_size)
+                        
+    futures = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=num_threads) as executor:
+        for i in range(num_threads):
+            start = i * chunk_size
+            end = start + chunk_size - 1 if i < num_threads - 1 else file_size - 1
+            futures.append(executor.submit(download_range, start, end))
+            
+        for future in concurrent.futures.as_completed(futures):
+            future.result() # raise exceptions if any
+
+def resolve_link_to_file(url: str, output_path: str, max_mb: float = 50000, progress_callback=None) -> tuple[str, str]:
+    url = (url or "").strip()
+    if not url:
+        raise LinkResolutionError("Paste a link first.")
+
+    url = _expand_shortlink(url)
+    _reject_unsupported(url)
+    url = _rewrite_known_hosts(url)
+
+    if _drive_file_id(url):
+        file_bytes, name, final_url = _fetch_drive(url, max_mb, progress_callback)
+        with open(output_path, "wb") as f:
+            f.write(file_bytes)
+        return name, final_url
+        
+    if url.lower().startswith("ftp://"):
+        file_bytes, name, final_url = _fetch_ftp(url, max_mb, progress_callback)
+        with open(output_path, "wb") as f:
+            f.write(file_bytes)
+        return name, final_url
+
+    if url.lower().startswith(("http://", "https://")):
+        headers = {}
+        if "kaggle.com" in url:
+            token = os.environ.get("KAGGLE_API_TOKEN")
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+                
         try:
-            download_url = f"https://drive.google.com/uc?id={file_id}&export=download"
-            s = requests.Session()
-            resp = s.get(download_url, timeout=5)
-            action_m = re.search(r'action="(https://drive\.usercontent\.google\.com/download[^"]*)"', resp.text)
-            if action_m:
-                action_url = action_m.group(1).replace('&amp;', '&')
-                hidden_inputs = dict(re.findall(r'<input[^>]*type="hidden"[^>]*name="([^"]+)"[^>]*value="([^"]*)"', resp.text))
-                req = requests.Request('GET', action_url, params=hidden_inputs).prepare()
-                return req.url
+            head_resp = requests.head(url, headers=headers, timeout=DEFAULT_TIMEOUT, allow_redirects=True)
+            final_url = head_resp.url or url
+            name = _filename_from_response(head_resp, url)
+            
+            if head_resp.headers.get("Accept-Ranges") == "bytes" and "Content-Length" in head_resp.headers:
+                file_size = int(head_resp.headers["Content-Length"])
+                if file_size > max_mb * 1024 * 1024:
+                    raise LinkResolutionError(f"File exceeds the {max_mb:.0f} MB cap.")
+                if file_size > 10 * 1024 * 1024: # Only parallel for > 10MB
+                    try:
+                        _parallel_download(final_url, output_path, file_size, headers, max_mb, progress_callback)
+                        return name, final_url
+                    except ValueError:
+                        # Fallback if server doesn't support Range requests properly
+                        pass
         except Exception:
             pass
             
-        if "confirm=t" not in download_url:
-            download_url = download_url + "&confirm=t"
-        return download_url
+        try:
+            resp = requests.get(url, timeout=DEFAULT_TIMEOUT, stream=True, headers=headers)
+            resp.raise_for_status()
+        except requests.RequestException as e:
+            raise LinkResolutionError(f"Could not reach that link: {e}") from e
+            
+        _stream_to_file(resp, output_path, max_mb, progress_callback)
+        return _filename_from_response(resp, url), resp.url or url
 
-    return url
+    raise LinkResolutionError(f"Unrecognized link format: `{url}`")

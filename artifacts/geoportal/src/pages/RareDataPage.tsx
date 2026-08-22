@@ -1,12 +1,14 @@
 import { useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
+import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Trash2, Download, Upload, Link as LinkIcon, Database, Lock } from "lucide-react";
+import { Loader2, Trash2, Download, Upload, Link as LinkIcon, Database, Lock, Code2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api, DatasetRecord } from "@/lib/api";
 import { BASE } from "@/lib/api";
+import { DatasetColabDialog } from "@/components/DatasetColabDialog";
 
 const FILE_TYPE_COLORS: Record<string, string> = {
   tiff: "#ef4444",
@@ -50,6 +52,8 @@ function DatasetList({
   source: string;
   onDelete?: (id: string, source: string) => void;
 }) {
+  const [colabDataset, setColabDataset] = useState<DatasetRecord | null>(null);
+
   return (
     <div className="rounded-lg border overflow-hidden mt-3">
       <table className="w-full text-sm">
@@ -88,22 +92,38 @@ function DatasetList({
                   <div className="text-xs text-red-500">{r.error_message}</div>
                 )}
               </td>
-              <td className="px-4 py-2 flex gap-2 justify-end">
+              <td className="px-4 py-2 flex gap-1.5 justify-end">
+                {/* 1. Use in Google Colab / Earth Engine */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2 text-[11px] gap-1 border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/10"
+                  onClick={() => setColabDataset(r)}
+                  title="Generate Google Colab and Earth Engine Python code"
+                >
+                  <Code2 className="w-3 h-3" />
+                  Colab / GEE
+                </Button>
+
+                {/* 2. Direct Download */}
                 <a
                   href={`${BASE}/datasets/${r.id}/download?source=${source}`}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
-                  <Button variant="ghost" size="icon" className="h-7 w-7">
+                  <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" title="Download dataset">
                     <Download className="w-3.5 h-3.5" />
                   </Button>
                 </a>
+
+                {/* 3. Delete */}
                 {onDelete && (
                   <Button
                     variant="ghost"
                     size="icon"
                     className="h-7 w-7 text-destructive hover:text-destructive"
                     onClick={() => onDelete(r.id, r.source ?? source)}
+                    title="Delete dataset"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </Button>
@@ -120,6 +140,13 @@ function DatasetList({
           )}
         </tbody>
       </table>
+
+      {/* Colab / GEE Modal */}
+      <DatasetColabDialog
+        isOpen={!!colabDataset}
+        onClose={() => setColabDataset(null)}
+        dataset={colabDataset}
+      />
     </div>
   );
 }
@@ -162,6 +189,7 @@ function CommunityTab() {
   const [uploadName, setUploadName] = useState("");
   const [uploadDesc, setUploadDesc] = useState("");
   const [uploadContrib, setUploadContrib] = useState("");
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
 
   const [linkUrl, setLinkUrl] = useState("");
   const [linkName, setLinkName] = useState("");
@@ -175,16 +203,24 @@ function CommunityTab() {
       fd.append("name", uploadName);
       fd.append("description", uploadDesc);
       fd.append("contributor", uploadContrib);
-      fd.append("source", "community");
-      return api.datasets.upload(fd);
+      fd.append("source", "admin"); // changed to admin to match user request
+      setUploadProgress(0);
+      return api.datasets.uploadWithProgress(fd, (pct) => {
+        setUploadProgress(pct);
+      });
     },
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["datasets", "admin"] }); // Invalidate admin too
       qc.invalidateQueries({ queryKey: ["datasets", "community"] });
       setFile(null);
       setUploadName("");
       setUploadDesc("");
       setUploadContrib("");
+      setUploadProgress(null);
     },
+    onError: () => {
+      setUploadProgress(null);
+    }
   });
 
   const linkMut = useMutation({
@@ -279,6 +315,20 @@ function CommunityTab() {
           {uploadMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
           Upload
         </Button>
+        {uploadProgress !== null && (
+          <div className="w-full mt-2">
+            <div className="flex justify-between text-xs mb-1">
+              <span>Uploading to portal...</span>
+              <span>{uploadProgress}%</span>
+            </div>
+            <div className="w-full bg-secondary h-2 rounded-full overflow-hidden">
+              <div 
+                className="bg-primary h-full transition-all duration-300 ease-out"
+                style={{ width: `${uploadProgress}%` }}
+              />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* GitHub link form */}
@@ -347,6 +397,7 @@ function AdminTab() {
   const [file, setFile] = useState<File | null>(null);
   const [uploadName, setUploadName] = useState("");
   const [uploadDesc, setUploadDesc] = useState("");
+  const { toast } = useToast();
 
   const { data, isLoading, refetch } = useQuery({
     queryKey: ["datasets", "all"],
@@ -381,6 +432,13 @@ function AdminTab() {
       qc.invalidateQueries({ queryKey: ["datasets", "all"] });
       qc.invalidateQueries({ queryKey: ["datasets", "admin"] });
       qc.invalidateQueries({ queryKey: ["datasets", "community"] });
+    },
+    onError: (err: any) => {
+      toast({
+        variant: "destructive",
+        title: "Delete Failed",
+        description: err.message || "Failed to delete dataset",
+      });
     },
   });
 
@@ -440,7 +498,7 @@ function AdminTab() {
         <DatasetList
           records={records}
           source="admin"
-          onDelete={(id, source) => deleteMut.mutate({ id, source })}
+          onDelete={(id, _s) => deleteMut.mutate({ id, source: "all" })}
         />
       )}
     </div>

@@ -1,146 +1,131 @@
 import { Link } from "wouter";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useAuth } from "@/hooks/use-auth";
-import { 
-  BarChart3, 
-  Database, 
-  PenTool, 
-  LayoutDashboard, 
-  MessageSquare,
-  ArrowRight,
-  Satellite,
-  Terminal,
-  Briefcase
-} from "lucide-react";
-
-const HUB_MODULES = [
-  {
-    title: "Analysis Module",
-    description: "Explore geospatial datasets, run analytics, and view detailed maps for NDVI, LST, Slope, and more.",
-    icon: BarChart3,
-    color: "text-emerald-600",
-    bgColor: "bg-emerald-500/10",
-    borderColor: "border-emerald-500/20",
-    path: "/ndvi",
-  },
-  {
-    title: "RARE DATA Hub",
-    description: "Access and upload specialized environmental datasets and repositories.",
-    icon: Database,
-    color: "text-blue-600",
-    bgColor: "bg-blue-500/10",
-    borderColor: "border-blue-500/20",
-    path: "/rare-data",
-  },
-  {
-    title: "Sample Digitizer",
-    description: "Draw, digitize, and extract GeoJSON training samples directly from the map.",
-    icon: PenTool,
-    color: "text-amber-600",
-    bgColor: "bg-amber-500/10",
-    borderColor: "border-amber-500/20",
-    path: "/samples",
-  },
-  {
-    title: "Analytics",
-    description: "View overarching traffic, usage statistics, and platform analytics.",
-    icon: LayoutDashboard,
-    color: "text-purple-600",
-    bgColor: "bg-purple-500/10",
-    borderColor: "border-purple-500/20",
-    path: "/dashboard",
-  },
-  {
-    title: "Community Forum",
-    description: "Discuss findings, share map snapshots, and collaborate with other users.",
-    icon: MessageSquare,
-    color: "text-pink-600",
-    bgColor: "bg-pink-500/10",
-    borderColor: "border-pink-500/20",
-    path: "/community",
-  },
-  {
-    title: "API Gateway",
-    description: "Access the backend analysis engines directly via API keys for external applications.",
-    icon: Terminal,
-    color: "text-slate-600",
-    bgColor: "bg-slate-500/10",
-    borderColor: "border-slate-500/20",
-    path: "/developer",
-  },
-  {
-    title: "Premium Services",
-    description: "Book 1-on-1 consultations, corporate training, and custom GIS analysis projects.",
-    icon: Briefcase,
-    color: "text-amber-500",
-    bgColor: "bg-amber-500/10",
-    borderColor: "border-amber-500/20",
-    path: "/services",
-  }
-];
+import { ArrowRight, Globe2, Layers, Map, Bell, Settings, LogOut } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useNotifications } from "@/hooks/use-notifications";
+import { NotificationList } from "@/App";
+import { SiteBrand, SiteLogoOnly } from "@/components/SiteBrand";
 
 export function HomePage() {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
+  const { unreadCount } = useNotifications();
   
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="min-h-screen bg-background flex flex-col relative overflow-hidden">
+      {/* Background aesthetic */}
+      <div className="absolute inset-0 z-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-emerald-500/10 via-background to-background pointer-events-none" />
+
       {/* Header */}
-      <header className="bg-card border-b border-border px-6 py-4 flex items-center justify-between shadow-sm">
-        <div className="flex items-center gap-3">
-          <img src="/logo.png" alt="SPETRO Logo" className="h-12 w-auto object-contain shrink-0 drop-shadow-md rounded-md" />
-          <div>
-            <h1 className="font-bold text-lg leading-tight tracking-wide text-foreground">SPETRO</h1>
-            <p className="text-xs font-medium tracking-widest text-emerald-600 uppercase">Geoportal Analysis</p>
-          </div>
+      <header className="relative z-10 px-6 py-4 flex items-center justify-between">
+        <SiteBrand size="normal" hideSubtitleOnMobile />
+        <div className="flex items-center gap-4">
+          <ThemeToggle />
+          {user ? (
+            <div className="flex items-center gap-2">
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="ghost" size="icon" className="relative text-muted-foreground hover:text-foreground">
+                    <Bell className="w-5 h-5" />
+                    {unreadCount > 0 && (
+                      <span className="absolute top-0 right-0 flex h-2.5 w-2.5 items-center justify-center rounded-full bg-red-500 ring-2 ring-background"></span>
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-80 p-0" align="end">
+                  <NotificationList />
+                </PopoverContent>
+              </Popover>
+
+              <Link href="/settings">
+                <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground" title="Settings">
+                  <Settings className="w-5 h-5" />
+                </Button>
+              </Link>
+
+              <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" onClick={logout} title="Log out">
+                <LogOut className="w-5 h-5" />
+              </Button>
+              
+              <Link href="/platform">
+                <Button className="gap-2 ml-2 shadow-md shadow-emerald-500/10">
+                  Open Platform <ArrowRight className="w-4 h-4" />
+                </Button>
+              </Link>
+            </div>
+          ) : (
+            <Link href="/auth">
+              <Button>Sign In</Button>
+            </Link>
+          )}
         </div>
-        <ThemeToggle />
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 max-w-6xl w-full mx-auto p-8 flex flex-col justify-center">
-        <div className="text-center mb-12">
-          <h2 className="text-3xl font-extrabold text-foreground mb-4 tracking-tight">Select a Module to Begin</h2>
-          <p className="text-muted-foreground max-w-2xl mx-auto text-lg">
-            Welcome to the SPETRO Geoportal Analysis platform. Choose one of the core modules below to dive into analysis, data management, or community collaboration.
-          </p>
+      <main className="relative z-10 flex-1 max-w-7xl w-full mx-auto px-6 flex flex-col items-center justify-center text-center">
+        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-600 text-sm font-medium mb-8 border border-emerald-500/20">
+          <span className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+          </span>
+          Next-Generation Geospatial Analytics
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {HUB_MODULES.filter(m => m.path !== '/dashboard' || user?.role === 'admin').map((module) => (
-            <Link key={module.path} href={module.path}>
-              <div className="group relative bg-card rounded-2xl p-6 border border-border shadow-sm hover:shadow-xl transition-all duration-300 cursor-pointer overflow-hidden flex flex-col h-full">
-                
-                {/* Accent Background Glow on Hover */}
-                <div className={`absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 bg-gradient-to-br from-transparent to-${module.color.replace('text-', '')}/5`} />
-                
-                <div className="flex items-start justify-between mb-4 relative z-10">
-                  <div className={`w-14 h-14 rounded-xl flex items-center justify-center ${module.bgColor} ${module.color} border ${module.borderColor}`}>
-                    <module.icon className="w-7 h-7" />
-                  </div>
-                  <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center group-hover:bg-primary group-hover:text-primary-foreground transition-colors duration-300">
-                    <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-primary-foreground" />
-                  </div>
-                </div>
-                
-                <div className="relative z-10 mt-auto">
-                  <h3 className="text-xl font-bold text-foreground mb-2">{module.title}</h3>
-                  <p className="text-sm text-muted-foreground leading-relaxed">
-                    {module.description}
-                  </p>
-                </div>
-              </div>
-            </Link>
-          ))}
+        <h2 className="text-5xl md:text-7xl font-black text-foreground mb-6 tracking-tight leading-tight max-w-4xl">
+          Welcome to the <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-500 to-teal-400">SPETRO</span> Geoportal
+        </h2>
+        
+        <p className="text-muted-foreground text-xl md:text-2xl max-w-3xl mb-12 leading-relaxed">
+          Advanced satellite data analysis, seamless sample digitization, and collaborative environmental monitoring in one unified platform.
+        </p>
+
+        <div className="flex flex-col sm:flex-row gap-4 mb-20">
+          <Link href="/platform">
+            <Button size="lg" className="h-14 px-8 text-lg font-bold gap-2 w-full sm:w-auto shadow-xl shadow-emerald-500/20">
+              Access the Platform <ArrowRight className="w-5 h-5" />
+            </Button>
+          </Link>
+          <Link href="/about">
+            <Button variant="outline" size="lg" className="h-14 px-8 text-lg font-bold w-full sm:w-auto border-2">
+              Learn More
+            </Button>
+          </Link>
+        </div>
+        
+        {/* Simple Features Showcase */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 w-full max-w-5xl">
+          <div className="flex flex-col items-center p-6 bg-card rounded-2xl border border-border shadow-sm">
+            <div className="w-12 h-12 rounded-full bg-blue-500/10 flex items-center justify-center text-blue-500 mb-4">
+              <Globe2 className="w-6 h-6" />
+            </div>
+            <h3 className="text-lg font-bold mb-2">Earth Observation</h3>
+            <p className="text-sm text-muted-foreground text-center">Process high-resolution satellite imagery directly from Google Earth Engine.</p>
+          </div>
+          <div className="flex flex-col items-center p-6 bg-card rounded-2xl border border-border shadow-sm">
+            <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-500 mb-4">
+              <Layers className="w-6 h-6" />
+            </div>
+            <h3 className="text-lg font-bold mb-2">Advanced Analytics</h3>
+            <p className="text-sm text-muted-foreground text-center">Calculate NDVI, LST, Slope, and multi-temporal indices on the fly.</p>
+          </div>
+          <div className="flex flex-col items-center p-6 bg-card rounded-2xl border border-border shadow-sm">
+            <div className="w-12 h-12 rounded-full bg-purple-500/10 flex items-center justify-center text-purple-500 mb-4">
+              <Map className="w-6 h-6" />
+            </div>
+            <h3 className="text-lg font-bold mb-2">Immersive Stories</h3>
+            <p className="text-sm text-muted-foreground text-center">Publish interactive case studies and scroll-driven geospatial story maps.</p>
+          </div>
         </div>
       </main>
 
       {/* Global Footer */}
-      <footer className="bg-card border-t border-border mt-auto w-full">
-        <div className="max-w-6xl mx-auto px-8 py-8 flex flex-col md:flex-row justify-between items-center gap-4">
+      <footer className="relative z-10 bg-background border-t border-border mt-auto w-full">
+        <div className="max-w-7xl mx-auto px-6 py-8 flex flex-col md:flex-row justify-between items-center gap-4">
           <div className="flex items-center gap-2">
-            <img src="/logo.png" alt="SPETRO Logo" className="h-6 w-auto grayscale opacity-70" />
-            <span className="text-sm font-medium text-muted-foreground">
-              &copy; {new Date().getFullYear()} SPETRO Geoportal. All rights reserved.
+            <SiteLogoOnly size="small" />
+            <span className="text-sm font-medium text-muted-foreground ml-2">
+              &copy; {new Date().getFullYear()} All rights reserved.
             </span>
           </div>
           <div className="flex gap-6 text-sm text-muted-foreground font-medium">

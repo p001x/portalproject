@@ -48,7 +48,7 @@ export function GeeUsageIndicator() {
 
   if (!usage) return null;
 
-  if (usage.limit === "Unlimited") {
+  if (usage.limit === "Unlimited" || true) {
     return (
       <div className="mt-2 px-1">
         <div className="flex items-center justify-between text-[10px] text-muted-foreground mb-1">
