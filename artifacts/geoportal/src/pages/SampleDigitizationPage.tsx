@@ -460,7 +460,10 @@ export function SampleDigitizationPage() {
   const allDatasets: DatasetRecord[] = [
     ...(adminDatasets?.records ?? []),
     ...(communityDatasets?.records ?? []),
-  ].filter(r => r.file_type === "tiff" || (r.original_filename && r.original_filename.toLowerCase().match(/\.tiff?$/)));
+  ];
+
+  const selectedDatasetObj = allDatasets.find((d) => d.id === selectedDatasetId);
+  const isRasterSelected = selectedDatasetObj?.file_type === "tiff" || (selectedDatasetObj?.original_filename && !!selectedDatasetObj.original_filename.toLowerCase().match(/\.tiff?$/));
 
   const commitGeometryDirectly = (geometryObj: any) => {
     const geoJsonStr = JSON.stringify(geometryObj, null, 2);
@@ -746,13 +749,13 @@ export function SampleDigitizationPage() {
 
       if (isTiff) {
         const rawUrl = key.startsWith("url::") ? key.slice(5) : key;
-        const tileUrl = `https://geoportal-api-ygzi.onrender.com/api/native/imagery/tiles/{z}/{x}/{y}?url=${encodeURIComponent(rawUrl)}`;
+        const tileUrl = `${BASE}/native/imagery/tiles/{z}/{x}/{y}?url=${encodeURIComponent(rawUrl)}`;
         setNativePreviewUrl(tileUrl);
         setClassificationSource("native_cog");
         setCustomAssetId(rawUrl);
 
         if (!bbox) {
-          fetch(`https://geoportal-api-ygzi.onrender.com/api/native/imagery/bounds?url=${encodeURIComponent(rawUrl)}`)
+          fetch(`${BASE}/native/imagery/bounds?url=${encodeURIComponent(rawUrl)}`)
             .then((r) => r.json())
             .then((bData) => {
               if (bData.bbox) setActiveBbox(bData.bbox);
@@ -2447,13 +2450,20 @@ export function SampleDigitizationPage() {
                 
                 <Button
                   onClick={() => importDatasetMut.mutate()}
-                  disabled={importDatasetMut.isPending || !selectedDatasetId}
+                  disabled={importDatasetMut.isPending || !selectedDatasetId || !!isRasterSelected}
                   className="gap-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs px-1"
                 >
                   {importDatasetMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
                   Push Features
                 </Button>
               </div>
+              
+              {isRasterSelected && (
+                <div className="text-xs text-amber-500 font-medium flex gap-1.5 pt-1">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                  Cannot push spatial features from a Raster dataset. Please select a Vector dataset (e.g., GeoJSON), or use the Harvester below to ingest Rasters.
+                </div>
+              )}
             </div>
 
             {/* Universal Spatial Data Harvester Card */}

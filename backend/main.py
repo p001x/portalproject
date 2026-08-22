@@ -1664,6 +1664,10 @@ class SupervisedClassifyRequest(BaseModel):
     samples: Optional[list] = None
 
 
+import threading
+_cache_locks = {}
+_cache_locks_lock = threading.Lock()
+
 def _resolve_raster_local_or_cached(url: str) -> str:
     import os, tempfile
     from storage.link_resolver import _drive_file_id, resolve_link_to_file
@@ -1680,10 +1684,31 @@ def _resolve_raster_local_or_cached(url: str) -> str:
             return lp
         cache_key = url.replace('/', '_').replace(':', '_')[:80]
         temp_path = os.path.join(tempfile.gettempdir(), f"cache_{cache_key}.tif")
-        if not os.path.exists(temp_path) or os.path.getsize(temp_path) == 0:
-            file_bytes = download_dataset_bytes(url)
-            with open(temp_path, "wb") as f:
-                f.write(file_bytes)
+        
+        with _cache_locks_lock:
+            if cache_key not in _cache_locks:
+                _cache_locks[cache_key] = threading.Lock()
+            file_lock = _cache_locks[cache_key]
+            
+        with file_lock:
+            needs_download = True
+            if os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
+                try:
+                    import rasterio
+                    with rasterio.open(temp_path) as src:
+                        pass
+                    needs_download = False
+                except Exception:
+                    needs_download = True
+                    try:
+                        os.remove(temp_path)
+                    except Exception:
+                        pass
+                        
+            if needs_download:
+                file_bytes = download_dataset_bytes(url)
+                with open(temp_path, "wb") as f:
+                    f.write(file_bytes)
         return temp_path
 
     # For external public URLs ending in .tif, we can use GDAL's virtual streaming (vsicurl)
@@ -1696,8 +1721,29 @@ def _resolve_raster_local_or_cached(url: str) -> str:
     fid = _drive_file_id(url)
     cache_key = f"drive_{fid}" if fid else url.replace('/', '_').replace(':', '_').replace('?', '_').replace('&', '_')[:80]
     temp_path = os.path.join(tempfile.gettempdir(), f"cache_{cache_key}.tif")
-    if not os.path.exists(temp_path) or os.path.getsize(temp_path) == 0:
-        resolve_link_to_file(url, temp_path, max_mb=50000)
+    
+    with _cache_locks_lock:
+        if cache_key not in _cache_locks:
+            _cache_locks[cache_key] = threading.Lock()
+        file_lock = _cache_locks[cache_key]
+        
+    with file_lock:
+        needs_download = True
+        if os.path.exists(temp_path) and os.path.getsize(temp_path) > 0:
+            try:
+                import rasterio
+                with rasterio.open(temp_path) as src:
+                    pass
+                needs_download = False
+            except Exception:
+                needs_download = True
+                try:
+                    os.remove(temp_path)
+                except Exception:
+                    pass
+                    
+        if needs_download:
+            resolve_link_to_file(url, temp_path, max_mb=50000)
         
     return temp_path
 

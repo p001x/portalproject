@@ -142,6 +142,17 @@ class S3Client:
             return True
         except Exception:
             return False
+            
+    def get_presigned_url(self, key: str, expires_in: int = 3600) -> str:
+        if self.s3 is None: return ""
+        try:
+            return self.s3.generate_presigned_url(
+                ClientMethod='get_object',
+                Params={'Bucket': self.bucket_name, 'Key': key},
+                ExpiresIn=expires_in
+            )
+        except Exception:
+            return ""
 
     def delete(self, key: str) -> None:
         if self.s3 is None: raise RuntimeError("boto3 is not installed or configured correctly.")

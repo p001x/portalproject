@@ -37,10 +37,12 @@ export function DatasetColabDialog({ isOpen, onClose, dataset }: DatasetColabDia
   const safeFilename = dataset.original_filename || dataset.name || "dataset";
   
   let hfFilename = `${dataset.id}_${safeFilename}`;
+  let repoId = "pi0texy/blacportal-datasets"; // Default matching backend
   const datasetAny = dataset as any;
   if (datasetAny.storage_key && datasetAny.storage_key.startsWith("hf://")) {
     const parts = datasetAny.storage_key.replace("hf://", "").split("/");
     if (parts.length >= 3) {
+      repoId = `${parts[0]}/${parts[1]}`;
       hfFilename = parts.slice(2).join("/"); // Get everything after repo ID
     } else {
       hfFilename = parts[1] || hfFilename;
@@ -94,7 +96,7 @@ from huggingface_hub import hf_hub_download
 
 print("Downloading dataset from Hugging Face...")
 target_file = hf_hub_download(
-    repo_id="petersstore/blacportal-datasets",
+    repo_id="${repoId}",
     repo_type="dataset",
     filename="${hfFilename}"
 )
@@ -239,6 +241,10 @@ ${isDrive ? `gdown --fuzzy "${sourceUrl}" -O ${safeFilename}` : `curl -L "${rawU
     setTimeout(() => setCopiedKey(null), 2000);
   };
 
+  const activeSnippet = (datasetAny.storage_key && datasetAny.storage_key.startsWith("hf://")) 
+    ? huggingFaceSnippet 
+    : colabAllInOneSnippet;
+
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-2xl bg-card border-border/80 text-foreground">
@@ -310,14 +316,14 @@ ${isDrive ? `gdown --fuzzy "${sourceUrl}" -O ${safeFilename}` : `curl -L "${rawU
             <Button
               size="sm"
               className="h-7 px-3 text-xs gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold shadow-sm"
-              onClick={() => handleCopy(huggingFaceSnippet, "Python Script")}
+              onClick={() => handleCopy(activeSnippet, "Python Script")}
             >
               {copiedKey === "Python Script" ? <Check className="w-3.5 h-3.5 text-white" /> : <Copy className="w-3.5 h-3.5" />}
               {copiedKey === "Python Script" ? "Copied!" : "Copy Code"}
             </Button>
           </div>
           <div className="relative rounded-b-lg overflow-hidden border border-border/80 bg-zinc-950 font-mono text-[11px] leading-relaxed p-3 text-zinc-200 max-h-72 overflow-y-auto">
-            <pre className="overflow-x-auto whitespace-pre">{huggingFaceSnippet}</pre>
+            <pre className="overflow-x-auto whitespace-pre">{activeSnippet}</pre>
           </div>
           <p className="text-[11px] text-muted-foreground pt-1">
             💡 <strong>Smart Loader:</strong> This script automatically detects the best way to download your data into Colab and plots it instantly.
