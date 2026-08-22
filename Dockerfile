@@ -3,11 +3,7 @@ FROM python:3.11-slim
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies if any are needed for geospatial libraries (e.g. gdal)
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    libgdal-dev \
-    && rm -rf /var/lib/apt/lists/*
+# (System geospatial libraries removed to force fast pre-built wheel installation)
 
 # Create a user to avoid running as root (Hugging Face Spaces requirement)
 RUN useradd -m -u 1000 user
