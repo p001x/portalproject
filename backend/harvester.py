@@ -871,7 +871,7 @@ class HarvesterTransferManager:
                 if os.path.exists(temp_path):
                     os.remove(temp_path)
             
-            update_task(task_id, status="completed", progress=100, message=f"Dataset '{final_name}' successfully imported.")
+            update_task(task_id, status="completed", progress=100, message=f"Dataset '{final_name}' successfully imported.", result_data={"dataset_id": dataset_id})
             
         except Exception as e:
             from harvester import update_task

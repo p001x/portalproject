@@ -165,9 +165,10 @@ export function DatasetHarvester({
             setSavingProgressIds((prev) => ({ ...prev, [item.id]: 100 }));
             qc.invalidateQueries({ queryKey: ["datasets"] });
             
-            // Just use a dummy ID to enable Colab code for now since we didn't return dataset_id inside task status.
-            // Ideally backend would return result_data.dataset_id, but setting to "saved" is enough for the UI logic.
-            setSavedItemIds((prev) => ({ ...prev, [item.id]: "saved_dataset" }));
+            // Use the actual dataset_id returned from the backend if available, so that
+            // Colab/GEE snippet paths exactly match the HF repo path.
+            const savedId = statusRes.result_data?.dataset_id || "saved_dataset";
+            setSavedItemIds((prev) => ({ ...prev, [item.id]: savedId }));
             
             toast({ title: "Saved to Portal! 🌐", description: statusRes.message });
             setTimeout(() => {
