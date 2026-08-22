@@ -725,6 +725,21 @@ def download_dataset_bytes(storage_key: str) -> bytes:
     if storage_key.startswith("kaggle://"):
         return download_from_kaggle(storage_key)
     
+    if storage_key.startswith("hf://"):
+        import os
+        from huggingface_hub import hf_hub_download
+        hf_token = os.environ.get("HF_TOKEN")
+        parts = storage_key.replace("hf://", "").split("/", 2)
+        if len(parts) == 3:
+            r_id = f"{parts[0]}/{parts[1]}"
+            filename = parts[2]
+        else:
+            r_id = os.environ.get("HF_REPO_ID", "pi0texy/blacportal-datasets")
+            filename = storage_key.replace("hf://", "")
+        path = hf_hub_download(repo_id=r_id, repo_type="dataset", filename=filename, token=hf_token)
+        with open(path, "rb") as f:
+            return f.read()
+    
     key = storage_key
     if key.startswith("r2://"):
         # Format: r2://bucket_name/filename
@@ -741,6 +756,23 @@ def download_dataset_bytes(storage_key: str) -> bytes:
 def get_dataset_local_path(storage_key: str) -> Optional[str]:
     if storage_key.startswith(LINK_KEY_PREFIX) or storage_key.startswith("kaggle://"):
         return None
+        
+    if storage_key.startswith("hf://"):
+        import os
+        from huggingface_hub import hf_hub_download
+        hf_token = os.environ.get("HF_TOKEN")
+        parts = storage_key.replace("hf://", "").split("/", 2)
+        if len(parts) == 3:
+            r_id = f"{parts[0]}/{parts[1]}"
+            filename = parts[2]
+        else:
+            r_id = os.environ.get("HF_REPO_ID", "pi0texy/blacportal-datasets")
+            filename = storage_key.replace("hf://", "")
+        try:
+            return hf_hub_download(repo_id=r_id, repo_type="dataset", filename=filename, token=hf_token)
+        except Exception:
+            return None
+            
     if storage_key.startswith("local://"):
         storage_key = storage_key[8:]
     elif storage_key.startswith("local::"):

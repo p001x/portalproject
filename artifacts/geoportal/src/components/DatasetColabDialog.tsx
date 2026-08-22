@@ -36,10 +36,21 @@ export function DatasetColabDialog({ isOpen, onClose, dataset }: DatasetColabDia
   const rawUrl = `${origin}${BASE}/datasets/${dataset.id}/raw`;
   const safeFilename = dataset.original_filename || dataset.name || "dataset";
   
+  let hfFilename = `${dataset.id}_${safeFilename}`;
+  const datasetAny = dataset as any;
+  if (datasetAny.storage_key && datasetAny.storage_key.startsWith("hf://")) {
+    const parts = datasetAny.storage_key.replace("hf://", "").split("/");
+    if (parts.length >= 3) {
+      hfFilename = parts.slice(2).join("/"); // Get everything after repo ID
+    } else {
+      hfFilename = parts[1] || hfFilename;
+    }
+  }
+  
   // Extract potential source URL from description or properties
-  let sourceUrl = (dataset as any).source_url || (dataset as any).url || "";
-  if (!sourceUrl && (dataset as any).description) {
-    const match = (dataset as any).description.match(/https?:\/\/[^\s]+/);
+  let sourceUrl = datasetAny.source_url || datasetAny.url || "";
+  if (!sourceUrl && datasetAny.description) {
+    const match = datasetAny.description.match(/https?:\/\/[^\s]+/);
     if (match) sourceUrl = match[0];
   }
   if (!sourceUrl) {
@@ -85,7 +96,7 @@ print("Downloading dataset from Hugging Face...")
 target_file = hf_hub_download(
     repo_id="petersstore/blacportal-datasets",
     repo_type="dataset",
-    filename="${dataset.id}_${safeFilename}"
+    filename="${hfFilename}"
 )
 
 # Step 4: Open, Inspect & Plot
