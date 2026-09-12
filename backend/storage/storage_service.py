@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import logging
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,7 @@ METADATA_FILES = {
 SAMPLES_FILE = SAMPLES_DIR / "samples.json"
 SYNC_LOG_FILE = CONFIG_DIR / "sync-log.md"
 
+_file_lock = threading.Lock()
 
 class StorageService:
     """
@@ -87,49 +89,47 @@ class StorageService:
     @staticmethod
     def load_metadata(source: str = "admin") -> list[dict[str, Any]]:
         """Load the metadata JSON for a given source."""
-        path = METADATA_FILES.get(source)
-        if not path or not path.exists():
-            return []
+        from .db import get_datasets
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            return data if isinstance(data, list) else []
-        except Exception:
+            return get_datasets(source)
+        except Exception as e:
+            logger.error("Failed to load metadata from db: %s", e)
             return []
 
     @staticmethod
     def save_metadata(records: list[dict[str, Any]], source: str = "admin") -> None:
         """Persist metadata JSON."""
-        path = METADATA_FILES.get(source)
-        if not path:
-            raise ValueError(f"Unknown source: {source}")
-        path.write_text(json.dumps(records, indent=2, default=str), encoding="utf-8")
+        from .db import save_datasets
+        save_datasets(source, records)
 
     # ── Samples I/O ─────────────────────────────────────────────────────
 
     @staticmethod
     def load_samples() -> list[dict[str, Any]]:
-        if not SAMPLES_FILE.exists():
-            return []
+        from .db import get_samples
         try:
-            data = json.loads(SAMPLES_FILE.read_text(encoding="utf-8"))
-            return data if isinstance(data, list) else []
-        except Exception:
+            return get_samples()
+        except Exception as e:
+            logger.error("Failed to load samples from db: %s", e)
             return []
 
     @staticmethod
     def save_samples(records: list[dict[str, Any]]) -> None:
-        SAMPLES_FILE.write_text(json.dumps(records, indent=2, default=str), encoding="utf-8")
+        from .db import save_samples
+        save_samples(records)
 
     # ── Sync log ────────────────────────────────────────────────────────
 
     @staticmethod
     def append_sync_log(entry: str) -> None:
         """Append a line to config/sync-log.md."""
-        with open(SYNC_LOG_FILE, "a", encoding="utf-8") as f:
-            f.write(entry + "\n")
+        with _file_lock:
+            with open(SYNC_LOG_FILE, "a", encoding="utf-8") as f:
+                f.write(entry + "\n")
 
     @staticmethod
     def read_sync_log() -> str:
         if not SYNC_LOG_FILE.exists():
             return ""
-        return SYNC_LOG_FILE.read_text(encoding="utf-8")
+        with _file_lock:
+            return SYNC_LOG_FILE.read_text(encoding="utf-8")

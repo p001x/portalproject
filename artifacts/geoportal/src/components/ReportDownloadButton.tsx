@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Download, Loader2, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api, AOIConfig } from "@/lib/api";
 
 interface Props {
@@ -32,22 +33,42 @@ export function ReportDownloadButton({
 }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [agencyTemplate, setAgencyTemplate] = useState("STANDARD");
 
   const downloadPdf = async () => {
     setLoading(true);
     setError(null);
     try {
-      // Import dynamically to avoid SSR issues if ever ported to Next.js
-      const { generatePDFReport } = await import('@/lib/pdf-generator');
+      const blob = await api.report({
+        module_name: moduleName,
+        aoi,
+        district,
+        date_range: dateRange,
+        stats,
+        class_areas: classAreas,
+        extra_notes: extraNotes,
+        maps,
+        agency_template: agencyTemplate,
+        include_action_matrix: true,
+      });
+
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("link");
+      link.href = url;
+      link.setAttribute("download", filename || `${moduleName.replace(/\s+/g, '_')}_Report.pdf`);
       
-      // We assume the main content is wrapped in a container with id 'report-container'
-      // If not found, it falls back to 'root'
-      const containerId = document.getElementById('report-container') ? 'report-container' : 'root';
+      // Simulate click
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename || `${moduleName.replace(/\s+/g, '_')}_Report.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
       
-      await generatePDFReport(containerId, moduleName);
+      window.URL.revokeObjectURL(url);
     } catch (e: any) {
       console.error(e);
-      setError(e.message ?? "Client-side report generation failed");
+      setError(e.message ?? "Server-side report generation failed");
     } finally {
       setLoading(false);
     }
@@ -64,6 +85,21 @@ export function ReportDownloadButton({
             Includes: statistics table · class area breakdown · classification maps · methodology notes
           </p>
         </div>
+      </div>
+
+      <div className="flex items-center gap-4 py-1">
+        <label className="text-sm font-medium">Agency Template:</label>
+        <Select value={agencyTemplate} onValueChange={setAgencyTemplate}>
+          <SelectTrigger className="w-[180px]">
+            <SelectValue placeholder="Select Agency" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="STANDARD">Standard</SelectItem>
+            <SelectItem value="REMA">REMA</SelectItem>
+            <SelectItem value="MINEMA">MINEMA</SelectItem>
+            <SelectItem value="RAB">RAB</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       <Button

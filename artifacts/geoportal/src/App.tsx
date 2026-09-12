@@ -23,12 +23,14 @@ import { WaterHarvestingPage } from "@/pages/WaterHarvestingPage";
 import { WellScopePage } from "@/pages/WellScopePage";
 import { BiomassPage } from "@/pages/BiomassPage";
 import { RareDataPage } from "@/pages/RareDataPage";
+import { DataHarvesterPage } from "@/pages/DataHarvesterPage";
 import { SampleDigitizationPage } from "@/pages/SampleDigitizationPage";
 import { ChangeDetectionPage } from "@/pages/ChangeDetectionPage";
 import { AnalysisHubPage } from "@/pages/AnalysisHubPage";
 import { DashboardPage } from "@/pages/DashboardPage";
 import { CloudIngestPage } from "@/pages/CloudIngestPage";
 import { ServicesPage } from "@/pages/ServicesPage";
+import { PricingPage } from "@/pages/PricingPage";
 import { CommunityPage } from "@/pages/CommunityPage";
 import { HomePage } from "@/pages/HomePage";
 import { PlatformPage } from "@/pages/PlatformPage";
@@ -75,40 +77,68 @@ import {
   GraduationCap,
   BookOpen,
   Bell,
-  Home
+  Home,
+  Map
 } from "lucide-react";
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 
 const queryClient = new QueryClient({
   defaultOptions: {
-    queries: { retry: 1 },
+    queries: { 
+      retry: (failureCount, error: any) => {
+        if (String(error).includes("initializing") && failureCount < 10) return true;
+        return failureCount < 1;
+      },
+      retryDelay: (attemptIndex, error: any) => {
+        if (String(error).includes("initializing")) return 3000;
+        return Math.min(1000 * 2 ** attemptIndex, 30000);
+      }
+    },
     mutations: { retry: 0 },
   },
 });
 
-export const analysisModules = [
+export const agriWaterModules = [
   { path: "/ndvi", label: "NDVI", icon: Leaf, description: "Vegetation Health" },
-  { path: "/lst", label: "LST", icon: Thermometer, description: "Land Surface Temp" },
-  { path: "/change-detection", label: "Change Detection", icon: Activity, description: "NDVI Timelapse" },
-  { path: "/rusle", label: "RUSLE", icon: Mountain, description: "Soil Erosion" },
-  { path: "/slope", label: "Slope", icon: Mountain, description: "Topography" },
-  { path: "/landfill", label: "Landfill", icon: Trash2, description: "Site Suitability" },
-  { path: "/air", label: "Air Pollution", icon: Wind, description: "NO2 Monitoring" },
-  { path: "/landslide", label: "Landslide", icon: AlertTriangle, description: "Susceptibility" },
-  { path: "/flood", label: "Flood", icon: Waves, description: "Flood Risk" },
   { path: "/drought", label: "Drought", icon: Droplet, description: "Agri Drought" },
-  { path: "/uhi", label: "UHI", icon: Flame, description: "Urban Heat Island" },
-  { path: "/accessibility", label: "Accessibility", icon: Navigation, description: "Facility Access" },
-  { path: "/habitat", label: "Crane Habitat", icon: Leaf, description: "Suitability (AHP)" },
   { path: "/irrigation", label: "Irrigation", icon: Droplet, description: "Scheduling Advisor" },
   { path: "/water-harvesting", label: "Water Harvesting", icon: Droplet, description: "Rainwater Calculator" },
   { path: "/wellscope", label: "WellScope", icon: Droplet, description: "Borehole Siting" },
+];
+
+export const riskDisasterModules = [
+  { path: "/flood", label: "Flood", icon: Waves, description: "Flood Risk" },
+  { path: "/landslide", label: "Landslide", icon: AlertTriangle, description: "Susceptibility" },
+  { path: "/rusle", label: "RUSLE", icon: Mountain, description: "Soil Erosion" },
+  { path: "/air", label: "Air Pollution", icon: Wind, description: "NO2 Monitoring" },
+];
+
+export const urbanEnvModules = [
+  { path: "/uhi", label: "UHI", icon: Flame, description: "Urban Heat Island" },
+  { path: "/landfill", label: "Landfill", icon: Trash2, description: "Site Suitability" },
   { path: "/biomass", label: "Biomass Tracker", icon: Flame, description: "Depletion Risk" },
+  { path: "/habitat", label: "Crane Habitat", icon: Leaf, description: "Suitability (AHP)" },
+];
+
+export const coreSpatialModules = [
+  { path: "/change-detection", label: "Change Detection", icon: Activity, description: "NDVI Timelapse" },
+  { path: "/lst", label: "LST", icon: Thermometer, description: "Land Surface Temp" },
+  { path: "/slope", label: "Slope", icon: Mountain, description: "Topography" },
+  { path: "/accessibility", label: "Accessibility", icon: Navigation, description: "Facility Access" },
+];
+
+export const analysisModules = [
+  ...agriWaterModules,
+  ...riskDisasterModules,
+  ...urbanEnvModules,
+  ...coreSpatialModules
 ];
 
 export const rareDataModules = [
   { path: "/rare-data", label: "RARE DATA Hub", icon: Database, description: "Dataset Repository" },
+  { path: "/harvester", label: "Data Harvester", icon: Globe2, description: "Universal Spatial Ingestion" },
 ];
 
 export const digitizationModules = [
@@ -134,10 +164,10 @@ function NavLink({ path, label, icon: Icon, description }: NavItem) {
   return (
     <Link
       href={path}
-      className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm transition-all mb-0.5 ${
+      className={`flex items-center gap-2.5 px-2.5 py-2 rounded-xl text-sm transition-all duration-300 mb-0.5 ${
         active
-          ? "border-l-2 border-primary bg-primary/10 text-primary"
-          : "border-l-2 border-transparent text-muted-foreground hover:bg-muted hover:text-foreground"
+          ? "border-l-4 border-primary bg-primary/10 text-primary shadow-sm"
+          : "border-l-4 border-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground hover:-translate-y-[1px]"
       }`}
     >
       <Icon className="w-3.5 h-3.5 shrink-0" />
@@ -215,14 +245,23 @@ export function NotificationBadge() {
 }
 
 export function NotificationList() {
-  const { notifications, markAllAsRead, unreadCount } = useNotifications();
+  const { notifications, markAsRead, markAllAsRead, unreadCount } = useNotifications();
   
   return (
     <div className="flex flex-col">
       <div className="flex items-center justify-between p-3 border-b">
         <h4 className="font-semibold text-sm">Notifications</h4>
         {unreadCount > 0 && (
-          <Button variant="ghost" size="sm" className="h-auto p-1 text-xs" onClick={markAllAsRead}>
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            className="h-auto p-1 text-xs" 
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              markAllAsRead();
+            }}
+          >
             Mark all read
           </Button>
         )}
@@ -232,7 +271,17 @@ export function NotificationList() {
           <div className="p-4 text-center text-sm text-muted-foreground">No notifications</div>
         ) : (
           notifications.map(n => (
-            <div key={n.id} className={`p-3 border-b last:border-0 hover:bg-muted/50 transition-colors ${!n.read ? 'bg-primary/5' : ''}`}>
+            <div 
+              key={n.id} 
+              className={`p-3 border-b last:border-0 hover:bg-muted/50 transition-colors ${!n.read ? 'bg-primary/5 cursor-pointer' : ''}`}
+              onClick={(e) => {
+                if (!n.read) {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  markAsRead(n.id);
+                }
+              }}
+            >
               <div className="flex items-start justify-between gap-2">
                 <p className="text-sm font-medium leading-tight">{n.title}</p>
                 {!n.read && <div className="w-1.5 h-1.5 rounded-full bg-primary shrink-0 mt-1" />}
@@ -250,17 +299,10 @@ export function NotificationList() {
 function Sidebar({ loc, className = "" }: { loc: string; className?: string }) {
   const { user } = useAuth();
   
-  const isAnalysis = analysisModules.some(m => m.path === loc);
-  const isRareData = rareDataModules.some(m => m.path === loc);
-  const isDigitization = digitizationModules.some(m => m.path === loc);
-  const isInfrastructure = infrastructureModules.some(m => m.path === loc);
-  const isEducation = educationModules.some(m => m.path === loc);
-  const isAdminSection = loc === "/dashboard" || loc === "/community";
-  
   const isUserAdmin = user?.role === 'admin';
 
   return (
-    <nav className={`flex flex-col h-full bg-card border-r border-border ${className}`}>
+    <nav className={`flex flex-col h-full bg-card/60 backdrop-blur-2xl border-r border-border ${className}`}>
       {/* Sidebar Header */}
       <div className="p-4 border-b shrink-0 flex items-center justify-between group cursor-pointer hover:bg-muted/50 transition-colors">
         <SiteBrand size="normal" hideSubtitleOnMobile />
@@ -280,90 +322,65 @@ function Sidebar({ loc, className = "" }: { loc: string; className?: string }) {
           </div>
         </div>
 
-        {isAnalysis && (
-          <div>
-            <div className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider text-muted-foreground/90 mb-1">
-              <BarChart3 className="w-3.5 h-3.5 text-emerald-500" />
-              <span>Analysis Modules</span>
-            </div>
-            <div className="space-y-0.5">
-              {analysisModules.map((m) => (
-                <NavLink key={m.path} {...m} />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {isRareData && (
-          <div>
-            <div className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider text-muted-foreground/90 mb-1">
-              <Database className="w-3.5 h-3.5 text-blue-500" />
-              <span>Rare Data</span>
-            </div>
-            <div className="space-y-0.5">
-              {rareDataModules.map((m) => (
-                <NavLink key={m.path} {...m} />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {isDigitization && (
-          <div>
-            <div className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider text-muted-foreground/90 mb-1">
-              <PenTool className="w-3.5 h-3.5 text-amber-500" />
-              <span>Sample Digitization</span>
-            </div>
-            <div className="space-y-0.5">
-              {digitizationModules.map((m) => (
-                <NavLink key={m.path} {...m} />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {isInfrastructure && (
-          <div>
-            <div className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider text-muted-foreground/90 mb-1">
-              <Terminal className="w-3.5 h-3.5 text-slate-500" />
-              <span>Infrastructure</span>
-            </div>
-            <div className="space-y-0.5">
-              {infrastructureModules.map((m) => (
-                <NavLink key={m.path} {...m} />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {isEducation && (
-          <div>
-            <div className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider text-muted-foreground/90 mb-1">
-              <GraduationCap className="w-3.5 h-3.5 text-teal-500" />
-              <span>Education</span>
-            </div>
-            <div className="space-y-0.5">
-              {educationModules.map((m) => (
-                <NavLink key={m.path} {...m} />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {isAdminSection && (
-          <div>
-            <div className="flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider text-muted-foreground/90 mb-1">
-              <LayoutDashboard className="w-3.5 h-3.5 text-purple-500" />
-              <span>Community & Admin</span>
-            </div>
-            <div className="space-y-0.5">
+        <Accordion type="multiple" defaultValue={["agri", "risk", "urban", "core", "data", "admin"]} className="w-full">
+          <AccordionItem value="agri" className="border-b-0">
+            <AccordionTrigger className="flex items-center gap-1.5 px-2.5 py-2 text-[11px] font-bold uppercase tracking-wider text-muted-foreground/90 hover:no-underline hover:text-foreground">
+              <div className="flex items-center gap-1.5"><Leaf className="w-3.5 h-3.5 text-emerald-500" /> Agriculture & Water</div>
+            </AccordionTrigger>
+            <AccordionContent className="pb-2 pt-0 space-y-0.5">
+              {agriWaterModules.map((m) => <NavLink key={m.path} {...m} />)}
+            </AccordionContent>
+          </AccordionItem>
+          
+          <AccordionItem value="risk" className="border-b-0">
+            <AccordionTrigger className="flex items-center gap-1.5 px-2.5 py-2 text-[11px] font-bold uppercase tracking-wider text-muted-foreground/90 hover:no-underline hover:text-foreground">
+              <div className="flex items-center gap-1.5"><AlertTriangle className="w-3.5 h-3.5 text-amber-500" /> Risk & Disasters</div>
+            </AccordionTrigger>
+            <AccordionContent className="pb-2 pt-0 space-y-0.5">
+              {riskDisasterModules.map((m) => <NavLink key={m.path} {...m} />)}
+            </AccordionContent>
+          </AccordionItem>
+          
+          <AccordionItem value="urban" className="border-b-0">
+            <AccordionTrigger className="flex items-center gap-1.5 px-2.5 py-2 text-[11px] font-bold uppercase tracking-wider text-muted-foreground/90 hover:no-underline hover:text-foreground">
+              <div className="flex items-center gap-1.5"><Flame className="w-3.5 h-3.5 text-orange-500" /> Urban & Env</div>
+            </AccordionTrigger>
+            <AccordionContent className="pb-2 pt-0 space-y-0.5">
+              {urbanEnvModules.map((m) => <NavLink key={m.path} {...m} />)}
+            </AccordionContent>
+          </AccordionItem>
+          
+          <AccordionItem value="core" className="border-b-0">
+            <AccordionTrigger className="flex items-center gap-1.5 px-2.5 py-2 text-[11px] font-bold uppercase tracking-wider text-muted-foreground/90 hover:no-underline hover:text-foreground">
+              <div className="flex items-center gap-1.5"><Map className="w-3.5 h-3.5 text-blue-500" /> Core Spatial</div>
+            </AccordionTrigger>
+            <AccordionContent className="pb-2 pt-0 space-y-0.5">
+              {coreSpatialModules.map((m) => <NavLink key={m.path} {...m} />)}
+            </AccordionContent>
+          </AccordionItem>
+          
+          <AccordionItem value="data" className="border-b-0">
+            <AccordionTrigger className="flex items-center gap-1.5 px-2.5 py-2 text-[11px] font-bold uppercase tracking-wider text-muted-foreground/90 hover:no-underline hover:text-foreground">
+              <div className="flex items-center gap-1.5"><Database className="w-3.5 h-3.5 text-indigo-500" /> Data & Infra</div>
+            </AccordionTrigger>
+            <AccordionContent className="pb-2 pt-0 space-y-0.5">
+              {rareDataModules.map((m) => <NavLink key={m.path} {...m} />)}
+              {digitizationModules.map((m) => <NavLink key={m.path} {...m} />)}
+              {infrastructureModules.map((m) => <NavLink key={m.path} {...m} />)}
+            </AccordionContent>
+          </AccordionItem>
+          
+          <AccordionItem value="admin" className="border-b-0">
+            <AccordionTrigger className="flex items-center gap-1.5 px-2.5 py-2 text-[11px] font-bold uppercase tracking-wider text-muted-foreground/90 hover:no-underline hover:text-foreground">
+              <div className="flex items-center gap-1.5"><GraduationCap className="w-3.5 h-3.5 text-purple-500" /> Community</div>
+            </AccordionTrigger>
+            <AccordionContent className="pb-2 pt-0 space-y-0.5">
+              {educationModules.map((m) => <NavLink key={m.path} {...m} />)}
               <NavLink path="/community" label="Community Forum" icon={MessageSquare} description="Discuss & Share" />
-              {isUserAdmin && (
-                <NavLink path="/dashboard" label="Analytics" icon={LayoutDashboard} description="Traffic & Usage" />
-              )}
-            </div>
-          </div>
-        )}
+              {isUserAdmin && <NavLink path="/dashboard" label="Analytics" icon={LayoutDashboard} description="Traffic & Usage" />}
+            </AccordionContent>
+          </AccordionItem>
+        </Accordion>
       </div>
 
       <div className="p-3 border-t space-y-2">
@@ -536,11 +553,18 @@ function Router() {
         <Route path="/wellscope" component={WellScopePage} />
         <Route path="/biomass" component={BiomassPage} />
         <Route path="/rare-data" component={RareDataPage} />
-        <Route path="/samples" component={SampleDigitizationPage} />
+        <Route path="/harvester" component={DataHarvesterPage} />
+        <Route path="/samples">
+          <div className="h-full flex flex-col">
+            <div className="flex-1 overflow-hidden">
+              <SampleDigitizationPage />
+            </div>
+          </div>
+        </Route>
         <Route path="/community" component={CommunityPage} />
         <Route path="/dashboard" component={DashboardPage} />
         <Route path="/cloud-ingest" component={CloudIngestPage} />
-        <Route path="/services" component={ServicesPage} />
+        <Route path="/services" component={PricingPage} />
         <Route path="/academy" component={AcademyPage} />
         <Route path="/blog" component={BlogPage} />
         <Route component={NotFound} />

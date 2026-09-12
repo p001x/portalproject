@@ -40,28 +40,34 @@ def compute_ndvi(
 
     from gee.aoi_utils import get_aoi_geometry
     aoi = get_aoi_geometry(aoi_config)
+    # Calculate dynamic scale based on geometry size (sq km)
+    area_sqkm = aoi.area().divide(1e6).getInfo()
+    if area_sqkm > 10000:
+        dynamic_scale = 500   # Entire Country (High memory footprint)
+    elif area_sqkm > 2000:
+        dynamic_scale = 250   # Province
+    elif area_sqkm > 500:
+        dynamic_scale = 100   # Large District
+    else:
+        dynamic_scale = 30    # Sector or small polygon
 
-    s2_median = (
-        ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
-        .filterDate(start_date, end_date)
-        .filterBounds(aoi)
-        .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 20))
-        .select(["B8", "B4"])
-        .median()
-    )
-    median = s2_median.normalizedDifference(["B8", "B4"]).rename("NDVI").clip(aoi)
+
+    from gee.aoi_utils import get_historical_ndvi
+    year = int(start_date[:4])
+    median = get_historical_ndvi(aoi, year, start_date, end_date, 20)
 
     vis_params = {
         "min": -0.2,
         "max": 0.8,
-        "palette": ["#d73027", "#fc8d59", "#fee08b", "#91cf60", "#1a9850"],
+        "palette": ["#4575b4", "#d73027", "#fc8d59", "#fee08b", "#91cf60", "#1a9850"],
     }
     map_id = median.getMapId(vis_params)
 
     # Execute GEE requests concurrently
     classes = {
-        "Water / Bare (<0)": median.lt(0),
-        "Very Low (0–0.2)": median.gte(0).And(median.lt(0.2)),
+        "Water (<0)": median.lt(0),
+        "Bare Land (0–0.1)": median.gte(0).And(median.lt(0.1)),
+        "Very Low (0.1–0.2)": median.gte(0.1).And(median.lt(0.2)),
         "Low (0.2–0.4)": median.gte(0.2).And(median.lt(0.4)),
         "Moderate (0.4–0.6)": median.gte(0.4).And(median.lt(0.6)),
         "High (>0.6)": median.gte(0.6),
@@ -80,15 +86,14 @@ def compute_ndvi(
                 .combine(ee.Reducer.max(), sharedInputs=True)
                 .combine(ee.Reducer.stdDev(), sharedInputs=True),
                 geometry=aoi,
-                scale=100,
-                maxPixels=10000, bestEffort=True,
-                tileScale=4,
+                scale=dynamic_scale,
+                maxPixels=1e10,
             ).getInfo()
         )
 
         f_area = executor.submit(
             lambda: area_img.reduceRegion(
-                reducer=ee.Reducer.sum(), geometry=aoi, scale=100, maxPixels=10000, bestEffort=True, tileScale=4
+                reducer=ee.Reducer.sum(), geometry=aoi, scale=dynamic_scale, maxPixels=1e10
             ).getInfo()
         )
 
@@ -96,8 +101,9 @@ def compute_ndvi(
             lambda: quantile_classify(
                 layers=[{"name": "NDVI", "image": median, "title": "NDVI Vegetation Index"}],
                 aoi=aoi,
-                scale=100,
+                scale=dynamic_scale,
                 n_classes=n_classes,
+                reverse_palette=True,
             )
         )
 

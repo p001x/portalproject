@@ -1,6 +1,17 @@
 """Irrigation Scheduling Advisor — FastAPI backend."""
 import json
 import ee
+
+def get_dynamic_scale(geom):
+    try:
+        area_sqkm = geom.area().divide(1e6).getInfo()
+        if area_sqkm > 10000: return 500
+        elif area_sqkm > 2000: return 250
+        elif area_sqkm > 500: return 100
+        else: return 30
+    except:
+        return 250
+
 from cachetools import TTLCache
 from threading import Lock
 
@@ -28,6 +39,7 @@ _SM_VIS = {"min": 0, "max": 25, "palette": ["#fff5f0", "#fcbba1", "#fb6a4a", "#c
 def _build_irrigation_images(aoi_config: dict, start_date: str, end_date: str, crop_type: str):
     from gee.aoi_utils import get_aoi_geometry
     aoi = get_aoi_geometry(aoi_config)
+
     
     kc = CROP_KC.get(crop_type, 1.0)
 
@@ -107,7 +119,7 @@ def compute_irrigation_stats(
     mean_reducer = ee.Reducer.mean()
     
     def get_mean(img):
-        res = img.reduceRegion(reducer=mean_reducer, geometry=aoi, scale=1000, maxPixels=1e9).getInfo()
+        res = img.reduceRegion(reducer=mean_reducer, geometry=aoi, scale=get_dynamic_scale(aoi), maxPixels=1e10).getInfo()
         if not res: return 0.0
         vals = list(res.values())
         return vals[0] if vals and vals[0] is not None else 0.0
@@ -156,7 +168,7 @@ def compute_irrigation_export(
 
     def safe_url(img, name):
         try:
-            return img.getDownloadURL({"name": name, "scale": 1000, "region": aoi.bounds(), "format": "GEO_TIFF"})
+            return img.getDownloadURL({"scale": 1000, "region": aoi.bounds(), "format": "GEO_TIFF"})
         except Exception:
             return None
 
@@ -165,22 +177,43 @@ def compute_irrigation_export(
             return img.getThumbURL({**vis, "region": aoi.bounds(), "dimensions": 512, "format": "png"})
         except Exception:
             return None
+            
+    def get_continuous_labels(vis, unit=""):
+        min_v = vis["min"]
+        max_v = vis["max"]
+        n_classes = len(vis["palette"])
+        step = (max_v - min_v) / n_classes
+        labels = []
+        for i in range(n_classes):
+            start = min_v + i * step
+            end = min_v + (i + 1) * step
+            if i == 0:
+                labels.append(f"< {end:.1f}{unit}")
+            elif i == n_classes - 1:
+                labels.append(f"> {start:.1f}{unit}")
+            else:
+                labels.append(f"{start:.1f} - {end:.1f}{unit}")
+        return labels
 
     result = {
         "download_url": safe_url(deficit, "Irrigation_Deficit"),
         "thumb_url": safe_thumb(deficit, _DEFICIT_VIS),
+        "labels": get_continuous_labels(_DEFICIT_VIS, " mm"),
         "factors": {
             "etc": {
                 "download_url": safe_url(etc, "ETc"),
-                "thumb_url": safe_thumb(etc, _ET_VIS)
+                "thumb_url": safe_thumb(etc, _ET_VIS),
+                "labels": get_continuous_labels(_ET_VIS, " mm")
             },
             "precip": {
                 "download_url": safe_url(precip, "Precipitation"),
-                "thumb_url": safe_thumb(precip, _PRECIP_VIS)
+                "thumb_url": safe_thumb(precip, _PRECIP_VIS),
+                "labels": get_continuous_labels(_PRECIP_VIS, " mm")
             },
             "sm": {
                 "download_url": safe_url(sm, "Soil_Moisture"),
-                "thumb_url": safe_thumb(sm, _SM_VIS)
+                "thumb_url": safe_thumb(sm, _SM_VIS),
+                "labels": get_continuous_labels(_SM_VIS, " mm")
             }
         }
     }

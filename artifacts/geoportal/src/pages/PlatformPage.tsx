@@ -12,7 +12,8 @@ import {
   Briefcase,
   Mail,
   Send,
-  BookOpen
+  BookOpen,
+  Globe2
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -36,6 +37,15 @@ const HUB_MODULES = [
     bgColor: "bg-blue-500/10",
     borderColor: "border-blue-500/20",
     path: "/rare-data",
+  },
+  {
+    title: "Data Harvester",
+    description: "Universal spatial ingestion and data harvesting module.",
+    icon: Globe2,
+    color: "text-cyan-600",
+    bgColor: "bg-cyan-500/10",
+    borderColor: "border-cyan-500/20",
+    path: "/harvester",
   },
   {
     title: "Sample Digitizer",

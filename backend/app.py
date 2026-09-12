@@ -160,6 +160,21 @@ def upload_aoi_shapefile():
         extract_dir = os.path.join(tmp_dir, "extracted")
         os.makedirs(extract_dir)
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            # ZIP Bomb protection
+            total_size = 0
+            file_count = 0
+            for zip_info in zip_ref.infolist():
+                if zip_info.filename.lower().endswith('.zip'):
+                    return jsonify({"detail": "Nested zip files are not allowed."}), 400
+                
+                file_count += 1
+                if file_count > 100:
+                    return jsonify({"detail": "Too many files in the zip archive."}), 400
+                    
+                total_size += zip_info.file_size
+                if total_size > 200 * 1024 * 1024:  # 200 MB limit
+                    return jsonify({"detail": "Zip bomb detected: Uncompressed size exceeds 200MB."}), 400
+                    
             zip_ref.extractall(extract_dir)
         shp_file = None
         for root, dirs, files in os.walk(extract_dir):
@@ -603,7 +618,8 @@ def uhi_endpoint():
     if req.district not in RWANDA_DISTRICTS:
         return jsonify({"detail": f"Unknown district '{req.district}'."}), 400
     try:
-        res = compute_uhi(req.district, req.start_date, req.end_date, req.grid_size)
+        n_classes = getattr(req, "n_classes", 5)
+        res = compute_uhi(req.district, req.start_date, req.end_date, req.grid_size, n_classes)
         return jsonify(res)
     except Exception as exc:
         logger.exception("UHI failed")
@@ -1513,41 +1529,7 @@ def _cached_cartographic_png(
     return buf.read()
 
 
-@app.route("/api/irrigation/map", methods=["POST"])
-def irrigation_map_endpoint():
-    err = _require_gee()
-    if err: return err
-    try:
-        req = IrrigationRequest(**request.json)
-        res = compute_irrigation_map(req.aoi, req.start_date, req.end_date, req.crop_type)
-        return jsonify(res)
-    except Exception as exc:
-        logger.exception("Irrigation map failed")
-        return jsonify({"detail": str(exc)}), 500
 
-@app.route("/api/irrigation/stats", methods=["POST"])
-def irrigation_stats_endpoint():
-    err = _require_gee()
-    if err: return err
-    try:
-        req = IrrigationRequest(**request.json)
-        res = compute_irrigation_stats(req.aoi, req.start_date, req.end_date, req.crop_type)
-        return jsonify(res)
-    except Exception as exc:
-        logger.exception("Irrigation stats failed")
-        return jsonify({"detail": str(exc)}), 500
-
-@app.route("/api/irrigation/export", methods=["POST"])
-def irrigation_export_endpoint():
-    err = _require_gee()
-    if err: return err
-    try:
-        req = IrrigationRequest(**request.json)
-        res = compute_irrigation_export(req.aoi, req.start_date, req.end_date, req.crop_type)
-        return jsonify(res)
-    except Exception as exc:
-        logger.exception("Irrigation export failed")
-        return jsonify({"detail": str(exc)}), 500
 
 @app.route("/api/static-map", methods=["POST"])
 def static_map():
@@ -1617,8 +1599,8 @@ def classify_supervised():
         from gee.supervised_classify import train_and_classify
         import ee
         
-        # Optional AOI from the request
-        aoi_data = request.json.get("aoi") if request.json else None
+        req_data = request.json or {}
+        aoi_data = req_data.get("aoi")
         aoi = None
         if aoi_data:
             if aoi_data["type"] == "bbox":
@@ -1629,7 +1611,16 @@ def classify_supervised():
                 # Assuming geojson
                 aoi = ee.FeatureCollection(aoi_data).geometry()
                 
-        result = train_and_classify(samples, aoi)
+        result = train_and_classify(
+            samples=samples, 
+            aoi=aoi,
+            data_source=req_data.get("data_source", "sentinel2"),
+            custom_asset_id=req_data.get("custom_asset_id"),
+            ml_model=req_data.get("ml_model", "random_forest"),
+            train_split=req_data.get("train_split", 70),
+            use_indices=req_data.get("use_indices", True),
+            hyperparam_trees=req_data.get("hyperparam_trees", 50)
+        )
         return jsonify(result)
     except Exception as e:
         logger.error(f"Supervised classification failed: {e}", exc_info=True)

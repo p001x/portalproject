@@ -9,9 +9,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional, Dict, Any
 
+from fastapi import Request, HTTPException
 import jwt
 import bcrypt
-from fastapi import HTTPException, Request
+
 
 import auth_db
 
@@ -161,19 +162,15 @@ def get_current_user(request: Request) -> dict:
     """FastAPI dependency: extract and verify JWT from Authorization header."""
     auth_header = request.headers.get("Authorization", "")
     if not auth_header.startswith("Bearer "):
-        raise HTTPException(
-            status_code=401,
-            detail="Authentication required. Please log in.",
-            headers={"WWW-Authenticate": "Bearer"},
+        raise Exception(
+            "Authentication required. Please log in."
         )
 
     token = auth_header[7:]
     payload = decode_token(token)
     if payload is None:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid or expired token. Please log in again.",
-            headers={"WWW-Authenticate": "Bearer"},
+        raise Exception(
+            "Invalid or expired token. Please log in again."
         )
 
     email = payload.get("sub")

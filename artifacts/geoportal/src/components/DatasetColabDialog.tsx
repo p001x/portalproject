@@ -296,10 +296,13 @@ ${isDrive ? `gdown --fuzzy "${sourceUrl}" -O ${safeFilename}` : `curl -L "${rawU
             {/* Direct API URL */}
             <div className="flex items-center justify-between bg-background/80 px-2.5 py-1.5 rounded border border-border/60 text-xs font-mono">
               <span className="text-muted-foreground">Raw Stream URL:</span>
+              <div className="flex items-center gap-1.5 ml-2 font-bold text-indigo-400 truncate max-w-[200px]" title={rawUrl}>
+                <span className="truncate">{rawUrl}</span>
+              </div>
               <Button
                 size="sm"
                 variant="ghost"
-                className="h-5 px-2 text-[11px] font-mono text-indigo-400 hover:text-indigo-300"
+                className="h-5 px-2 ml-auto text-[11px] font-mono text-indigo-400 hover:text-indigo-300 flex-shrink-0"
                 onClick={() => handleCopy(rawUrl, "Stream URL")}
               >
                 {copiedKey === "Stream URL" ? <Check className="w-3 h-3 mr-1 text-emerald-400" /> : <Copy className="w-3 h-3 mr-1" />}

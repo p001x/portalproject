@@ -203,7 +203,7 @@ function CommunityTab() {
       fd.append("name", uploadName);
       fd.append("description", uploadDesc);
       fd.append("contributor", uploadContrib);
-      fd.append("source", "admin"); // changed to admin to match user request
+      fd.append("source", "community"); 
       setUploadProgress(0);
       return api.datasets.uploadWithProgress(fd, (pct) => {
         setUploadProgress(pct);

@@ -7,6 +7,13 @@ import io
 import json
 import logging
 import os
+
+# Add QGIS bin directory to DLL search path for sqlite3 and other QGIS dependencies
+if os.name == 'nt' and os.path.exists(r"C:\Program Files\QGIS 3.40.11\bin"):
+    os.add_dll_directory(r"C:\Program Files\QGIS 3.40.11\bin")
+
+import logging
+import os
 import threading
 import urllib.request
 import zipfile
@@ -348,6 +355,11 @@ def login(req: LoginRequest):
         return {"ok": True, "token": str(token), "user": user_dict}
     except HTTPException:
         raise
+    except Exception as e:
+        import traceback
+        trace = traceback.format_exc()
+        logger.error("Login 500 error: %s\n%s", e, trace)
+        raise HTTPException(500, f"Internal Server Error: {str(e)}\n{trace}")
     except Exception as exc:
         logger.error("FastAPI login error: %s", exc, exc_info=True)
         raise HTTPException(500, f"Login error: {str(exc)}")
@@ -434,6 +446,81 @@ def notify_new_course_endpoint(req: NewCourseNotification, background_tasks: Bac
     users = get_all_users()
     background_tasks.add_task(email_notifier.send_new_course_alert, users, req.title, req.description)
     return {"ok": True, "notified": len(users)}
+
+# ── Academy ──────────────────────────────────────────────────────────────────
+
+from storage.books_storage import load_books, process_and_store_book_upload, delete_book, get_book_bytes, update_book
+
+@app.get("/api/academy/books", tags=["academy"])
+def api_get_books():
+    return {"books": load_books()}
+
+@app.post("/api/academy/books/upload", tags=["academy"])
+def api_upload_book(
+    file: UploadFile = File(...),
+    title: str = Form(...),
+    author: Optional[str] = Form("Unknown"),
+    description: Optional[str] = Form(""),
+    pages: Optional[int] = Form(0),
+    user: dict = Depends(get_current_user)
+):
+    if user.get("role") != "admin":
+        raise HTTPException(403, "Not authorized to upload books")
+        
+    try:
+        file_bytes = file.file.read()
+        record = process_and_store_book_upload(
+            filename=file.filename,
+            file_bytes=file_bytes,
+            title=title,
+            author=author,
+            description=description,
+            pages=pages
+        )
+        return {"ok": True, "book": record}
+    except Exception as e:
+        raise HTTPException(500, str(e))
+
+@app.delete("/api/academy/books/{book_id}", tags=["academy"])
+def api_delete_book(book_id: str, user: dict = Depends(get_current_user)):
+    if user.get("role") != "admin":
+        raise HTTPException(403, "Not authorized")
+    if delete_book(book_id):
+        return {"ok": True}
+    raise HTTPException(404, "Book not found")
+
+class BookUpdateRequest(BaseModel):
+    title: str
+    author: Optional[str] = "Unknown"
+    description: Optional[str] = ""
+    pages: Optional[int] = 0
+
+@app.put("/api/academy/books/{book_id}", tags=["academy"])
+def api_update_book(book_id: str, req: BookUpdateRequest, user: dict = Depends(get_current_user)):
+    if user.get("role") != "admin":
+        raise HTTPException(403, "Not authorized")
+    
+    updated = update_book(book_id, req.title, req.author, req.description, req.pages)
+    if updated:
+        return {"ok": True, "book": updated}
+    raise HTTPException(404, "Book not found")
+
+@app.get("/api/academy/books/{book_id}/download", tags=["academy"])
+def api_download_book(book_id: str):
+    records = load_books()
+    target = next((r for r in records if r["id"] == book_id), None)
+    if not target:
+        raise HTTPException(404, "Book not found")
+        
+    try:
+        file_bytes = get_book_bytes(target["storage_key"])
+        return Response(
+            file_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"inline;filename={target['original_filename']}"}
+        )
+    except Exception as e:
+        raise HTTPException(500, str(e))
 
 # ── Meta ─────────────────────────────────────────────────────────────────────
 
@@ -600,8 +687,9 @@ class LandfillRequest(BaseModel):
 
 class HabitatRequest(BaseModel):
     aoi: dict
-    reverse_flags: dict = {}
+    reverse_flags: dict = Field(default_factory=dict)
     n_classes: int = 5
+    classify_method: str = "natural_breaks"
     custom_weights: Optional[dict] = None
 
 class HabitatAhpRequest(BaseModel):
@@ -635,8 +723,10 @@ class LandslideRequest(BaseModel):
 class AccessibilityRequest(BaseModel):
     aoi: dict = Field(default_factory=dict, description="AOI Configuration object")
     district: Optional[str] = Field(None, examples=["Gasabo"])
-    amenities: list[str] = Field(..., description="List of OSM amenity tags e.g. ['school']")
+    amenities: list[str] = Field(..., description="List of Origin OSM amenity tags e.g. ['primary_school']")
+    dest_amenities: list[str] = Field(default_factory=list, description="List of Destination OSM amenity tags e.g. ['hospital']")
     n_classes: int = Field(4, ge=2, le=10)
+    service_threshold_mins: int = Field(30, ge=5, le=120)
 
 
 class UHIRequest(BaseModel):
@@ -645,6 +735,7 @@ class UHIRequest(BaseModel):
     start_date: str = Field(..., examples=["2024-01-01"])
     end_date: str = Field(..., examples=["2024-06-30"])
     grid_size: int = Field(6, ge=3, le=12)
+    n_classes: int = Field(5, ge=4, le=10)
 
 
 class DroughtRequest(BaseModel):
@@ -687,7 +778,9 @@ class ReportRequest(BaseModel):
     stats: dict
     class_areas: dict
     extra_notes: str = ""
-    maps: list[tuple[str, str]] | None = None
+    maps: list[tuple] | list[list] | None = None
+    agency_template: str = "STANDARD"
+    include_action_matrix: bool = True
 
 
 class StaticMapRequest(BaseModel):
@@ -722,6 +815,8 @@ def generate_report(req: ReportRequest):
             class_areas=req.class_areas,
             extra_notes=req.extra_notes,
             maps=req.maps,
+            agency_template=req.agency_template,
+            include_action_matrix=req.include_action_matrix,
         )
         return Response(
             pdf_bytes,
@@ -842,6 +937,8 @@ class WaterHarvestingRequest(BaseModel):
     runoff_coefficient: float = 0.8
     manual_area_m2: Optional[float] = None
     use_building_footprint: bool = False
+    household_size: int = 5
+    daily_water_use_liters: int = 50
 
 @app.post("/api/water-harvesting/map", tags=["analysis"])
 def water_harvesting_map_endpoint(req: WaterHarvestingRequest):
@@ -856,7 +953,7 @@ def water_harvesting_map_endpoint(req: WaterHarvestingRequest):
 def water_harvesting_stats_endpoint(req: WaterHarvestingRequest):
     _require_gee()
     try:
-        return compute_water_harvesting_stats(req.aoi, req.year, req.runoff_coefficient, req.manual_area_m2, req.use_building_footprint)
+        return compute_water_harvesting_stats(req.aoi, req.year, req.runoff_coefficient, req.manual_area_m2, req.use_building_footprint, req.household_size, req.daily_water_use_liters)
     except Exception as exc:
         logger.exception("Water harvesting stats failed")
         raise HTTPException(status_code=500, detail=str(exc))
@@ -972,7 +1069,7 @@ def wellscope_factor_export_endpoint(req: WellScopeFactorExportRequest):
         from gee.wellscope import export_factor_map
         return export_factor_map(req.aoi, req.factor_key, req.palette)
     except Exception as exc:
-        logger.exception("WellScope factor export failed")
+        logger.exception("WellScope factor failed")
         raise HTTPException(status_code=500, detail=str(exc))
 
 class ProxyImageRequest(BaseModel):
@@ -1161,7 +1258,7 @@ def habitat_stats_endpoint(req: HabitatRequest):
 def habitat_classify_endpoint(req: HabitatRequest):
     _require_gee()
     try:
-        return compute_habitat_classify(req.aoi, req.reverse_flags, req.n_classes, req.custom_weights)
+        return compute_habitat_classify(req.aoi, req.reverse_flags, req.n_classes, req.custom_weights, req.classify_method)
     except Exception as exc:
         logger.exception("Habitat classify failed for %s", req.aoi.get("name", "unknown"))
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1170,7 +1267,7 @@ def habitat_classify_endpoint(req: HabitatRequest):
 def habitat_export_endpoint(req: HabitatRequest):
     _require_gee()
     try:
-        return compute_habitat_export(req.aoi, req.reverse_flags, req.custom_weights)
+        return compute_habitat_export(req.aoi, req.reverse_flags, req.n_classes, req.custom_weights, req.classify_method)
     except Exception as exc:
         logger.exception("Habitat export failed for %s", req.aoi.get("name", "unknown"))
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1258,7 +1355,7 @@ def landslide_export_endpoint(req: LandslideRequest):
 def accessibility_map_endpoint(req: AccessibilityRequest):
     _require_gee()
     try:
-        return compute_accessibility_map(req.aoi, req.amenities)
+        return compute_accessibility_map(req.aoi, req.amenities, req.dest_amenities, req.n_classes, req.service_threshold_mins)
     except Exception as exc:
         logger.exception("Accessibility map failed for %s", req.district)
         raise HTTPException(500, str(exc)) from exc
@@ -1267,7 +1364,7 @@ def accessibility_map_endpoint(req: AccessibilityRequest):
 def accessibility_stats_endpoint(req: AccessibilityRequest):
     _require_gee()
     try:
-        return compute_accessibility_stats(req.aoi, req.amenities)
+        return compute_accessibility_stats(req.aoi, req.amenities, req.dest_amenities, req.n_classes, req.service_threshold_mins)
     except Exception as exc:
         logger.exception("Accessibility stats failed for %s", req.district)
         raise HTTPException(500, str(exc)) from exc
@@ -1276,7 +1373,7 @@ def accessibility_stats_endpoint(req: AccessibilityRequest):
 def accessibility_classify_endpoint(req: AccessibilityRequest):
     _require_gee()
     try:
-        return compute_accessibility_classify(req.aoi, req.amenities, req.n_classes)
+        return compute_accessibility_classify(req.aoi, req.amenities, req.dest_amenities, req.n_classes, req.service_threshold_mins)
     except Exception as exc:
         logger.exception("Accessibility classify failed for %s", req.district)
         raise HTTPException(500, str(exc)) from exc
@@ -1285,7 +1382,7 @@ def accessibility_classify_endpoint(req: AccessibilityRequest):
 def accessibility_export_endpoint(req: AccessibilityRequest):
     _require_gee()
     try:
-        return compute_accessibility_export(req.aoi, req.amenities)
+        return compute_accessibility_export(req.aoi, req.amenities, req.dest_amenities, req.n_classes, req.service_threshold_mins)
     except Exception as exc:
         logger.exception("Accessibility export failed for %s", req.district)
         raise HTTPException(500, str(exc)) from exc
@@ -1295,7 +1392,7 @@ def accessibility_export_endpoint(req: AccessibilityRequest):
 def uhi_endpoint(req: UHIRequest):
     _require_gee()
     try:
-        return compute_uhi(req.aoi, req.start_date, req.end_date, req.grid_size)
+        return compute_uhi(req.aoi, req.start_date, req.end_date, req.grid_size, req.n_classes)
     except Exception as exc:
         logger.exception("UHI failed for %s", req.district)
         raise HTTPException(500, str(exc)) from exc
@@ -1473,7 +1570,6 @@ class SampleCreateRequest(BaseModel):
     source_url: str = ""
     creator: str = "anonymous"
     color: str = "#0F6E4F"
-
 
 @app.get("/api/samples", tags=["samples"])
 def list_samples(request: Request):
@@ -1662,6 +1758,10 @@ class SupervisedClassifyRequest(BaseModel):
     data_source: str = "sentinel2"
     custom_asset_id: Optional[str] = None
     samples: Optional[list] = None
+    ml_model: str = "random_forest"
+    train_split: int = 70
+    use_indices: bool = True
+    hyperparam_trees: int = 50
 
 
 import threading
@@ -1943,7 +2043,11 @@ def supervised_classify_endpoint(request: Request, req: SupervisedClassifyReques
             sample_dicts, 
             aoi=req.aoi, 
             data_source=req.data_source, 
-            custom_asset_id=req.custom_asset_id
+            custom_asset_id=req.custom_asset_id,
+            ml_model=req.ml_model,
+            train_split=req.train_split,
+            use_indices=req.use_indices,
+            hyperparam_trees=req.hyperparam_trees
         )
         return result
     except ValueError as exc:
@@ -1958,6 +2062,10 @@ def preview_dataset(dataset_id: str, source: str = Query("admin", pattern="^(adm
     from storage.dataset_storage import get_dataset_preview
     records = load_metadata(source=source)
     record = next((r for r in records if r["id"] == dataset_id), None)
+    if record is None:
+        alt_source = "community" if source == "admin" else "admin"
+        records = load_metadata(source=alt_source)
+        record = next((r for r in records if r["id"] == dataset_id), None)
     if record is None:
         raise HTTPException(404, "Dataset not found")
 

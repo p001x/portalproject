@@ -142,8 +142,9 @@ def build_report(
     stats: dict,
     class_areas: dict,
     extra_notes: str = "",
+    maps: list = None,
 ) -> bytes:
-    """Generic PDF report for any analysis module (no embedded maps)."""
+    """Generic PDF report for any analysis module."""
     buffer = io.BytesIO()
     doc    = SimpleDocTemplate(
         buffer, pagesize=A4,
@@ -164,6 +165,28 @@ def build_report(
     if extra_notes:
         story.append(Paragraph("Notes & Interpretation", st_styles["section"]))
         story.append(Paragraph(extra_notes, st_styles["body"]))
+        story.append(Spacer(1, 0.3 * cm))
+
+    if maps:
+        from reports.cartography import enhance_map_cartography
+        story.append(Spacer(1, 0.5 * cm))
+        story.append(HRFlowable(width="100%", thickness=1, color=colors.lightgrey))
+        story.append(Spacer(1, 0.2 * cm))
+        story.append(Paragraph("Maps", st_styles["section"]))
+        for item in maps:
+            title = item[0]
+            url = item[1]
+            map_class_areas = item[2] if len(item) > 2 else class_areas
+            buf = _fetch_image(url)
+            if buf:
+                try:
+                    carto_buf = enhance_map_cartography(buf.read(), district, title, map_class_areas)
+                    story.extend(_rl_image(carto_buf, PAGE_W, title, st_styles))
+                except Exception as e:
+                    buf.seek(0)
+                    story.extend(_rl_image(buf, PAGE_W/2, title, st_styles))
+            else:
+                story.append(Paragraph(f"[Map unavailable: {title}]", st_styles["caption"]))
         story.append(Spacer(1, 0.3 * cm))
 
     story.append(Spacer(1, 0.5 * cm))

@@ -12,6 +12,17 @@ def compute_biomass_depletion(aoi_config: dict, buffer_km: float = 3.0, year_sta
     """
     
     aoi = get_aoi_geometry(aoi_config)
+    # Calculate dynamic scale based on geometry size (sq km)
+    area_sqkm = aoi.area().divide(1e6).getInfo()
+    if area_sqkm > 10000:
+        dynamic_scale = 500   # Entire Country (High memory footprint)
+    elif area_sqkm > 2000:
+        dynamic_scale = 250   # Province
+    elif area_sqkm > 500:
+        dynamic_scale = 100   # Large District
+    else:
+        dynamic_scale = 30    # Sector or small polygon
+
     
     # 1. Settlement Proximity Risk (WorldPop)
     pop = ee.ImageCollection("WorldPop/GP/100m/pop_age_sex_cons_unadj") \
@@ -37,21 +48,18 @@ def compute_biomass_depletion(aoi_config: dict, buffer_km: float = 3.0, year_sta
     # Recent clear-cut loss (e.g. 2019 = 19 in lossyear)
     recent_loss = hansen.select('lossyear').gte(year_start - 2000)
     
-    # 3. NDVI Degradation (Thinning/Gathering) - Sentinel-2 Dry Season (Jun-Aug)
-    s2 = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED") \
-        .filterBounds(aoi) \
-        .filter(ee.Filter.calendarRange(6, 8, 'month')) \
-        .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 60))
+    # 3. NDVI Degradation (Thinning/Gathering) - Dry Season (Jun-Aug)
         
-    def get_annual_ndvi(y):
-        start = ee.Date.fromYMD(y, 1, 1)
-        end = ee.Date.fromYMD(y, 12, 31)
-        img = s2.filterDate(start, end).median()
-        ndvi = img.normalizedDifference(['B8', 'B4']).rename('NDVI')
-        return ndvi.addBands(ee.Image.constant(y).rename('year')).float()
+    from gee.aoi_utils import get_historical_ndvi
+    
+    ndvi_images = []
+    for y in range(year_start, year_end + 1):
+        start_date = f"{y}-06-01"
+        end_date = f"{y}-08-31"
+        ndvi = get_historical_ndvi(aoi, y, start_date, end_date, 60).rename('NDVI')
+        ndvi_images.append(ndvi.addBands(ee.Image.constant(y).rename('year')).float())
         
-    years = ee.List.sequence(year_start, year_end)
-    ndvi_col = ee.ImageCollection(years.map(get_annual_ndvi))
+    ndvi_col = ee.ImageCollection(ndvi_images)
     
     # Linear trend of NDVI over time
     trend = ndvi_col.select(['year', 'NDVI']).reduce(ee.Reducer.linearFit())
@@ -78,9 +86,8 @@ def compute_biomass_depletion(aoi_config: dict, buffer_km: float = 3.0, year_sta
             lambda: depletion_score.reduceRegion(
                 reducer=ee.Reducer.mean().combine(ee.Reducer.max(), sharedInputs=True),
                 geometry=aoi,
-                scale=100,
-                maxPixels=1e9,
-                bestEffort=True
+                scale=dynamic_scale,
+                maxPixels=1e10
             ).getInfo()
         )
         
@@ -96,9 +103,8 @@ def compute_biomass_depletion(aoi_config: dict, buffer_km: float = 3.0, year_sta
         area_img = ee.Image.pixelArea().addBands(classes).reduceRegion(
             reducer=ee.Reducer.sum().group(groupField=1, groupName='class'),
             geometry=aoi,
-            scale=100,
-            maxPixels=1e9,
-            bestEffort=True
+            scale=dynamic_scale,
+            maxPixels=1e10
         )
         
         f_area = executor.submit(lambda: area_img.getInfo())
@@ -118,13 +124,11 @@ def compute_biomass_depletion(aoi_config: dict, buffer_km: float = 3.0, year_sta
         "Minimal Risk (1-25)": round(area_dict.get('1', 0) / 1e6, 2)
     }
 
-    heatmap_vis = depletion_score.unmask(0).focal_max(radius=1000, units="meters").focal_mean(radius=2000, units="meters").clip(aoi)
-    heatmap_vis = heatmap_vis.updateMask(heatmap_vis.gt(5))
-
-    map_id = heatmap_vis.getMapId(_VIS)
+    _CLASS_VIS = {"min": 1, "max": 4, "palette": ["#0000ff", "#00ff00", "#ffff00", "#ff0000"]}
+    map_id = classes.getMapId(_CLASS_VIS)
     
-    thumb_url = heatmap_vis.getThumbURL({
-        "min": _VIS["min"], "max": _VIS["max"], "palette": _VIS["palette"],
+    thumb_url = classes.getThumbURL({
+        "min": _CLASS_VIS["min"], "max": _CLASS_VIS["max"], "palette": _CLASS_VIS["palette"],
         "dimensions": 512, "region": aoi.bounds(), "format": "png"
     })
     
@@ -234,17 +238,14 @@ def export_factor_map(aoi_config: dict, factor_key: str, palette: list = None, b
         vis_min, vis_max = 0, 1
         
     elif factor_key == "degradation":
-        s2 = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED") \
-            .filterBounds(aoi) \
-            .filter(ee.Filter.calendarRange(6, 8, 'month')) \
-            .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 60))
-        def get_annual_ndvi(y):
-            start = ee.Date.fromYMD(y, 1, 1)
-            end = ee.Date.fromYMD(y, 12, 31)
-            ndvi = s2.filterDate(start, end).median().normalizedDifference(['B8', 'B4']).rename('NDVI')
-            return ndvi.addBands(ee.Image.constant(y).rename('year')).float()
-        years = ee.List.sequence(year_start, year_end)
-        ndvi_col = ee.ImageCollection(years.map(get_annual_ndvi))
+        from gee.aoi_utils import get_historical_ndvi
+        ndvi_images = []
+        for y in range(year_start, year_end + 1):
+            start_date = f"{y}-06-01"
+            end_date = f"{y}-08-31"
+            ndvi = get_historical_ndvi(aoi, y, start_date, end_date, 60).rename('NDVI')
+            ndvi_images.append(ndvi.addBands(ee.Image.constant(y).rename('year')).float())
+        ndvi_col = ee.ImageCollection(ndvi_images)
         slope = ndvi_col.select(['year', 'NDVI']).reduce(ee.Reducer.linearFit()).select('scale')
         img = slope.multiply(-1).divide(0.05).clamp(0, 1).unmask(0).clip(aoi).multiply(100).round()
         default_palette = ["#ffffcc", "#ffeda0", "#fed976", "#feb24c", "#fd8d3c", "#fc4e2a", "#e31a1c", "#b10026"]

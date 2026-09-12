@@ -46,5 +46,26 @@
     "source": "community",
     "contributor": null,
     "source_url": "https://drive.google.com/file/d/1wyzNn87ciwGQvGRra3wxpW_t5KRXumOS/view?usp=sharing"
+  },
+  {
+    "id": "82dd959c-fc26-480f-9438-6aae4b6cb909",
+    "name": "Rwanda_Base_Map_2014-0000000000-0000005376.tif [Portal ID: 82dd959c]",
+    "description": "",
+    "file_type": "tiff",
+    "storage_key": "local://rare_data/community_files/82dd959c-fc26-480f-9438-6aae4b6cb909_Rwanda_Base_Map_2014-0000000000-0000005376.tif",
+    "original_filename": "Rwanda_Base_Map_2014-0000000000-0000005376.tif",
+    "bbox": [
+      30.310594990647246,
+      -2.4965978376249742,
+      30.89971015397283,
+      -1.04779494739701
+    ],
+    "upload_date": "2026-09-05T17:34:18.500745+00:00",
+    "file_size_mb": 353.843,
+    "status": "ok",
+    "error_message": null,
+    "source": "community",
+    "contributor": null,
+    "source_url": "https://drive.google.com/file/d/1-cTjO0WanTIPfTbfppryP-4TO1oU1S8s/view?usp=sharing"
   }
 ]

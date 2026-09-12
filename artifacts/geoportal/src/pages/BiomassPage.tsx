@@ -1,6 +1,7 @@
 import { useState } from "react";
+
 import { useMutation } from "@tanstack/react-query";
-import { Flame, Loader2, Info } from "lucide-react";
+import { Flame, Loader2, Info , Play} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
@@ -91,7 +92,29 @@ function InteractiveFactorMapCard({ factorKey, factor, aoiConfig, bufferKm, year
           <div className="absolute inset-0 flex items-center justify-center bg-slate-50/80 backdrop-blur-sm z-10">
             <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
           </div>
-        ) : null}
+        ) : (
+          <div className="h-full relative bg-muted/20 rounded-lg overflow-hidden border">
+            <DistrictMap aoi={aoi} basemap="satellite" />
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-4 z-[1000]">
+              <div className="bg-background/80 backdrop-blur-md p-6 rounded-2xl shadow-xl border border-primary/20 text-center max-w-sm pointer-events-none transition-all hover:scale-105 duration-300">
+                <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4 text-primary shadow-inner">
+                  <Flame className="w-8 h-8" />
+                </div>
+                <h3 className="text-xl font-bold mb-2 text-foreground">Biomass Tracking</h3>
+                <p className="text-sm text-muted-foreground mb-6">
+                  Select a district and parameters from the sidebar, then run the analysis to visualize results here.
+                </p>
+                <Button 
+                  onClick={runAnalysis} 
+                  className="w-full gap-2 rounded-xl shadow-md hover:shadow-lg transition-all"
+                >
+                  <Play className="w-4 h-4 fill-current" />
+                  Run Analysis
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
         <img src={urls.thumb_url} alt={factor.title || factor.label} className="w-full h-full object-cover transition-transform group-hover:scale-[1.02] duration-300" />
       </div>
 

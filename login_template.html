@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login Page Template</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Inter', sans-serif;
+        }
+
+        body {
+            background-color: #000000;
+            color: #ffffff;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
+        }
+
+        /* Navigation Bar */
+        nav {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 30px 60px;
+            width: 100%;
+        }
+
+        .logo {
+            font-size: 26px;
+            font-weight: 700;
+            cursor: pointer;
+            letter-spacing: 0.5px;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 40px;
+            align-items: center;
+        }
+
+        .nav-links a {
+            color: #ffffff;
+            text-decoration: none;
+            font-size: 15px;
+            font-weight: 500;
+            transition: color 0.3s ease, opacity 0.3s ease;
+            opacity: 0.9;
+        }
+
+        .nav-links a:hover {
+            opacity: 1;
+            text-shadow: 0 0 10px rgba(255,255,255,0.3);
+        }
+
+        .nav-login-btn {
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.4);
+            color: white;
+            padding: 10px 28px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 15px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+
+        .nav-login-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.8);
+            box-shadow: 0 0 15px rgba(255,255,255,0.1);
+        }
+
+        /* Main Container */
+        .main-container {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        /* Glassmorphism Login Card */
+        .login-card {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
+            width: 100%;
+            max-width: 440px;
+            padding: 45px 50px;
+            position: relative;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.8);
+        }
+
+        /* Close Button */
+        .close-btn {
+            position: absolute;
+            top: -10px;
+            right: -10px;
+            background: rgba(40, 40, 40, 0.9);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #fff;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            font-size: 18px;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            z-index: 10;
+        }
+
+        .close-btn:hover {
+            background: rgba(60, 60, 60, 1);
+            transform: scale(1.05);
+        }
+
+        /* Card Content */
+        .login-card h2 {
+            text-align: center;
+            font-size: 32px;
+            margin-bottom: 35px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+
+        .input-group {
+            position: relative;
+            margin-bottom: 25px;
+        }
+
+        .input-group label {
+            display: block;
+            font-size: 13px;
+            margin-bottom: 8px;
+            color: rgba(255, 255, 255, 0.7);
+            font-weight: 500;
+        }
+
+        .input-group input {
+            width: 100%;
+            background: transparent;
+            border: none;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+            color: white;
+            font-size: 16px;
+            padding: 10px 30px 10px 5px; /* space for icon on right */
+            outline: none;
+            transition: border-color 0.3s ease;
+        }
+
+        .input-group input:focus {
+            border-bottom: 1px solid rgba(255, 255, 255, 0.8);
+        }
+
+        .input-group input::placeholder {
+            color: transparent;
+        }
+
+        .input-icon {
+            position: absolute;
+            right: 5px;
+            bottom: 12px;
+            width: 18px;
+            height: 18px;
+            opacity: 0.6;
+            pointer-events: none;
+        }
+
+        .options-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 13px;
+            margin-bottom: 35px;
+        }
+
+        .remember-me {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: rgba(255, 255, 255, 0.7);
+            cursor: pointer;
+        }
+
+        .remember-me input[type="checkbox"] {
+            cursor: pointer;
+            accent-color: rgba(255, 255, 255, 0.8);
+            width: 14px;
+            height: 14px;
+        }
+
+        .forgot-password {
+            color: rgba(255, 255, 255, 0.7);
+            text-decoration: none;
+            transition: color 0.3s ease;
+        }
+
+        .forgot-password:hover {
+            color: #ffffff;
+        }
+
+        .submit-btn {
+            width: 100%;
+            background: rgba(40, 40, 45, 0.8); 
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            color: white;
+            padding: 14px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-bottom: 25px;
+            letter-spacing: 0.5px;
+        }
+
+        .submit-btn:hover {
+            background: rgba(60, 60, 65, 0.9);
+            border-color: rgba(255, 255, 255, 0.2);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+        }
+
+        .register-link {
+            text-align: center;
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        .register-link a {
+            color: rgba(255, 255, 255, 0.9);
+            text-decoration: none;
+            font-weight: 500;
+            transition: color 0.3s ease;
+        }
+
+        .register-link a:hover {
+            color: #ffffff;
+            text-decoration: underline;
+        }
+
+        /* SVG Icons */
+        svg {
+            fill: currentColor;
+        }
+        
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+            nav {
+                padding: 20px 30px;
+            }
+            .nav-links {
+                display: none; /* simple mobile handling */
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <nav>
+        <div class="logo">Logo</div>
+        <div class="nav-links">
+            <a href="#">Home</a>
+            <a href="#">About</a>
+            <a href="#">Services</a>
+            <a href="#">Contact</a>
+            <button class="nav-login-btn">Login</button>
+        </div>
+    </nav>
+
+    <div class="main-container">
+        <div class="login-card">
+            <button class="close-btn" aria-label="Close">×</button>
+            
+            <h2>Login</h2>
+            
+            <form action="#" method="POST">
+                <div class="input-group">
+                    <label for="email">Email</label>
+                    <input type="email" id="email" required>
+                    <!-- Email Icon -->
+                    <div class="input-icon">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M20 4H4C2.9 4 2.01 4.9 2.01 6L2 18C2 19.1 2.9 20 4 20H20C21.1 20 22 19.1 22 18V6C22 4.9 21.1 4 20 4ZM20 18H4V8L12 13L20 8V18ZM12 11L4 6H20L12 11Z"/>
+                        </svg>
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label for="password">Password</label>
+                    <input type="password" id="password" required>
+                    <!-- Lock Icon -->
+                    <div class="input-icon">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M18 8H17V6C17 3.24 14.76 1 12 1C9.24 1 7 3.24 7 6V8H6C4.9 8 4 8.9 4 10V20C4 21.1 4.9 22 6 22H18C19.1 22 20 21.1 20 20V10C20 8.9 19.1 8 18 8ZM9 6C9 4.34 10.34 3 12 3C13.66 3 15 4.34 15 6V8H9V6ZM18 20H6V10H18V20ZM12 17C13.1 17 14 16.1 14 15C14 13.9 13.1 13 12 13C10.9 13 10 13.9 10 15C10 16.1 10.9 17 12 17Z"/>
+                        </svg>
+                    </div>
+                </div>
+
+                <div class="options-row">
+                    <label class="remember-me">
+                        <input type="checkbox"> Remember me
+                    </label>
+                    <a href="#" class="forgot-password">Forget Password?</a>
+                </div>
+
+                <button type="submit" class="submit-btn">Login</button>
+
+                <div class="register-link">
+                    Don't have an account? <a href="#">Register</a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+</body>
+</html>

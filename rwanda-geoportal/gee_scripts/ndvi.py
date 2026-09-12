@@ -44,7 +44,7 @@ def compute_ndvi(district_name: str, start_date: str, end_date: str, n_classes: 
     vis_params = {
         "min": -0.2,
         "max": 0.8,
-        "palette": ["#d73027", "#fc8d59", "#fee08b", "#91cf60", "#1a9850"],
+        "palette": ["#4575b4", "#d73027", "#fc8d59", "#fee08b", "#91cf60", "#1a9850"],
     }
     map_id = median.getMapId(vis_params)
 
@@ -63,8 +63,9 @@ def compute_ndvi(district_name: str, start_date: str, end_date: str, n_classes: 
     ).getInfo()
 
     classes = {
-        "Water / Bare (<0)": median.lt(0),
-        "Very Low (0–0.2)": median.gte(0).And(median.lt(0.2)),
+        "Water (<0)": median.lt(0),
+        "Bare Land (0–0.1)": median.gte(0).And(median.lt(0.1)),
+        "Very Low (0.1–0.2)": median.gte(0.1).And(median.lt(0.2)),
         "Low (0.2–0.4)": median.gte(0.2).And(median.lt(0.4)),
         "Moderate (0.4–0.6)": median.gte(0.4).And(median.lt(0.6)),
         "High (>0.6)": median.gte(0.6),
@@ -88,14 +89,22 @@ def compute_ndvi(district_name: str, start_date: str, end_date: str, n_classes: 
         aoi=aoi,
         scale=100,
         n_classes=n_classes,
+        reverse_palette=True,
     )
 
     bounds = aoi.bounds().getInfo()["coordinates"][0]
     center_lon = (bounds[0][0] + bounds[2][0]) / 2
     center_lat = (bounds[0][1] + bounds[2][1]) / 2
 
+    thumb_url = median.getThumbURL({
+        "min": -0.2, "max": 0.8,
+        "palette": ["#4575b4", "#d73027", "#fc8d59", "#fee08b", "#91cf60", "#1a9850"],
+        "region": bounds, "dimensions": 512, "format": "png"
+    })
+
     return {
         "tile_url": map_id["tile_fetcher"].url_format,
+        "thumb_url": thumb_url,
         "stats": {
             "Mean NDVI": round(stats.get("NDVI_mean") or 0, 4),
             "Min NDVI": round(stats.get("NDVI_min") or 0, 4),

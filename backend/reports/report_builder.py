@@ -16,38 +16,81 @@ from reports.cartography import enhance_map_cartography
 GREEN       = colors.HexColor("#1a9850")
 DARK        = colors.HexColor("#1a1a2e")
 LIGHT_GREEN = colors.HexColor("#d9ef8b")
-LIGHT_GRAY  = colors.HexColor("#f5f5f5")
+LIGHT_GRAY  = colors.HexColor("#f8f9fa")
+
+AGENCY_CONFIGS = {
+    "REMA": {
+        "name": "RWANDA ENVIRONMENT MANAGEMENT AUTHORITY (REMA)",
+        "subtitle": "ENVIRONMENTAL IMPACT & ECOLOGICAL VULNERABILITY DOSSIER",
+        "primary": colors.HexColor("#006633"),      # Official Rwanda Green
+        "secondary": colors.HexColor("#e8f5e9"),
+        "accent": colors.HexColor("#f4b400"),
+        "mandate": "Prepared pursuant to Law N°48/2018 of 13/08/2018 on Environment. Official technical assessment for environmental conservation and buffer regulation.",
+        "badge": "OFFICIAL REGULATORY DOSSIER",
+    },
+    "MINEMA": {
+        "name": "MINISTRY OF EMERGENCY MANAGEMENT (MINEMA)",
+        "subtitle": "MULTI-HAZARD RISK ASSESSMENT & CONTINGENCY PROFILE",
+        "primary": colors.HexColor("#c5221f"),      # Official Emergency Alert Red
+        "secondary": colors.HexColor("#fce8e6"),
+        "accent": colors.HexColor("#e37400"),
+        "mandate": "Formulated under the National Disaster Risk Management Policy. Official situational hazard profile for disaster mitigation and emergency preparedness.",
+        "badge": "DISASTER CONTINGENCY ADVISORY",
+    },
+    "RAB": {
+        "name": "RWANDA AGRICULTURE & ANIMAL RESOURCES BOARD (RAB)",
+        "subtitle": "AGRO-ECOLOGICAL SUITABILITY & SOIL CONSERVATION DOSSIER",
+        "primary": colors.HexColor("#2e7d32"),      # Agricultural Emerald
+        "secondary": colors.HexColor("#f1f8e9"),
+        "accent": colors.HexColor("#fb8c00"),
+        "mandate": "Prepared under Strategic Plan for Agriculture Transformation (PSTA 4). Technical guidance for radical terracing, irrigation, and catchment protection.",
+        "badge": "AGRICULTURAL POLICY DIRECTIVE",
+    },
+    "STANDARD": {
+        "name": "RWANDA ENVIRONMENTAL GEOPORTAL",
+        "subtitle": "SATELLITE EARTH OBSERVATION & SPATIAL ANALYTICS REPORT",
+        "primary": colors.HexColor("#1a9850"),
+        "secondary": colors.HexColor("#f5f5f5"),
+        "accent": colors.HexColor("#0288d1"),
+        "mandate": "Automated Earth Observation analysis computed on-demand via Copernicus Sentinel and USGS Landsat satellite missions.",
+        "badge": "SPATIAL INTELLIGENCE REPORT",
+    },
+}
 
 PAGE_W = A4[0] - 4 * cm    # usable width inside 2 cm margins
 
 
 # ─── helpers ──────────────────────────────────────────────────────────────────
 
-def _styles():
+def _styles(primary_color=GREEN):
     s = getSampleStyleSheet()
     return {
         "title": ParagraphStyle(
-            "Title", parent=s["Heading1"], fontSize=20,
-            textColor=DARK, spaceAfter=4, alignment=TA_CENTER,
+            "Title", parent=s["Heading1"], fontSize=18, leading=22,
+            textColor=DARK, spaceAfter=4, alignment=TA_CENTER, fontName="Helvetica-Bold"
         ),
         "subtitle": ParagraphStyle(
-            "Subtitle", parent=s["Normal"], fontSize=11,
-            textColor=colors.gray, spaceAfter=12, alignment=TA_CENTER,
+            "Subtitle", parent=s["Normal"], fontSize=10, leading=14,
+            textColor=primary_color, spaceAfter=12, alignment=TA_CENTER, fontName="Helvetica-Bold"
+        ),
+        "badge": ParagraphStyle(
+            "Badge", parent=s["Normal"], fontSize=8, leading=10,
+            textColor=colors.white, alignment=TA_CENTER, fontName="Helvetica-Bold"
         ),
         "section": ParagraphStyle(
-            "Section", parent=s["Heading2"], fontSize=13,
-            textColor=GREEN, spaceBefore=14, spaceAfter=6,
+            "Section", parent=s["Heading2"], fontSize=12, leading=16,
+            textColor=primary_color, spaceBefore=12, spaceAfter=6, fontName="Helvetica-Bold"
         ),
         "body": ParagraphStyle(
-            "Body", parent=s["Normal"], fontSize=10, leading=14,
+            "Body", parent=s["Normal"], fontSize=9, leading=13,
         ),
         "caption": ParagraphStyle(
-            "Caption", parent=s["Normal"], fontSize=8,
+            "Caption", parent=s["Normal"], fontSize=8, leading=11,
             textColor=colors.gray, alignment=TA_CENTER, spaceAfter=6,
         ),
         "note": ParagraphStyle(
-            "Note", parent=s["Normal"], fontSize=9,
-            textColor=colors.gray, leading=13,
+            "Note", parent=s["Normal"], fontSize=8, leading=11,
+            textColor=colors.dimgray,
         ),
     }
 
@@ -135,6 +178,65 @@ def _rl_image(buf: io.BytesIO, width: float, caption: str,
         return [Paragraph(f"[Map unavailable: {caption}]", st_styles["caption"])]
 
 
+def _build_action_matrix(module_name: str, stats: dict, class_areas: dict, agency_template: str, st_styles: dict) -> list:
+    """Intelligently generates policy/engineering actions based on analysis metrics."""
+    module_lower = module_name.lower()
+    actions = []
+    
+    if "rusle" in module_lower or "erosion" in module_lower:
+        mean_erosion = stats.get("Mean Erosion (t/ha/yr)", 0)
+        severe_area = class_areas.get("Severe", 0) + class_areas.get("Extreme", 0)
+        
+        if severe_area > 5 or mean_erosion > 20:
+            actions.append(["Construct Radical Terraces on slopes > 16° with deep soil profiles.", "Immediate"])
+            actions.append(["Plant Vetiver Grass (Chrysopogon zizanioides) hedgerows along contour lines.", "High"])
+        actions.append(["Enforce 10m vegetated buffer strips around stream channels.", "High"])
+        actions.append(["Promote agroforestry with Alnus acuminata and Grevillea robusta.", "Medium"])
+        
+    elif "flood" in module_lower or "water" in module_lower:
+        actions.append(["Desilt drainage canals and reinforce retention dykes in low-lying valleys.", "Immediate"])
+        actions.append(["Restrict new permanent construction in identified flood plains.", "High"])
+        actions.append(["Deploy community early-warning sensors along major riverbanks.", "Medium"])
+        
+    elif "landslide" in module_lower or "lsi" in module_lower:
+        actions.append(["Identify settlements located on high-risk slopes (>30°) for planned resettlement.", "Critical"])
+        actions.append(["Establish cut-off drains and sub-surface drainage trenches to divert runoff.", "High"])
+        actions.append(["Slope stabilization via deep-rooted bamboo and indigenous vegetation.", "Medium"])
+        
+    elif "drought" in module_lower or "ndvi" in module_lower or "dvi" in module_lower:
+        actions.append(["Prioritize small-scale solar irrigation systems for vulnerable smallholder farms.", "High"])
+        actions.append(["Distribute drought-resistant crop seeds (cassava, sorghum, drought-tolerant maize).", "High"])
+        actions.append(["Construct community rainwater harvesting ponds (Radier / water pans).", "Medium"])
+        
+    elif "uhi" in module_lower or "lst" in module_lower or "heat" in module_lower:
+        actions.append(["Expand urban green corridors, street tree planting, and pocket parks.", "High"])
+        actions.append(["Preserve urban wetland reserves to act as natural evaporative cooling sinks.", "High"])
+        actions.append(["Mandate cool roof / reflective materials on commercial and public buildings.", "Medium"])
+        
+    else:
+        actions.append(["Conduct ground-truth verification on high-risk sectors identified by satellite.", "High"])
+        actions.append(["Integrate findings into District Development Plan (DDP) environmental annex.", "Medium"])
+        
+    # Format as a table
+    data = [["Recommended Policy & Engineering Actions", "Urgency"]] + actions
+    t = Table(data, colWidths=[12 * cm, 4 * cm])
+    t.setStyle(TableStyle([
+        ("BACKGROUND",   (0, 0), (-1, 0), DARK),
+        ("TEXTCOLOR",    (0, 0), (-1, 0), colors.white),
+        ("FONTNAME",     (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE",     (0, 0), (-1, -1), 9),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [LIGHT_GRAY, colors.white]),
+        ("GRID",         (0, 0), (-1, -1), 0.5, colors.lightgrey),
+        ("TOPPADDING",   (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING",(0, 0), (-1, -1), 6),
+        ("LEFTPADDING",  (0, 0), (-1, -1), 8),
+    ]))
+    return [
+        Paragraph("Intervention Action Matrix", st_styles["section"]),
+        t, Spacer(1, 0.4 * cm),
+    ]
+
+
 # ─── public API ───────────────────────────────────────────────────────────────
 
 def build_report(
@@ -145,6 +247,8 @@ def build_report(
     class_areas: dict,
     extra_notes: str = "",
     maps: list[tuple[str, str]] = None,
+    agency_template: str = "STANDARD",
+    include_action_matrix: bool = True,
 ) -> bytes:
     """Generic PDF report for any analysis module (no embedded maps)."""
     buffer = io.BytesIO()
@@ -153,12 +257,16 @@ def build_report(
         leftMargin=2*cm, rightMargin=2*cm,
         topMargin=2*cm, bottomMargin=2*cm,
     )
-    st_styles = _styles()
+    
+    agency_key = agency_template.upper() if agency_template.upper() in AGENCY_CONFIGS else "STANDARD"
+    config = AGENCY_CONFIGS[agency_key]
+    st_styles = _styles(primary_color=config["primary"])
     story     = []
 
-    story.append(Paragraph("GEOPORTAL ANALYSIS", st_styles["title"]))
-    story.append(Paragraph(f"{module_name} Analysis Report",  st_styles["subtitle"]))
-    story.append(HRFlowable(width="100%", thickness=2, color=GREEN, spaceAfter=10))
+    story.append(Paragraph(config["name"], st_styles["title"]))
+    story.append(Paragraph(config["subtitle"],  st_styles["subtitle"]))
+    story.append(Paragraph(config["badge"], st_styles["badge"]))
+    story.append(HRFlowable(width="100%", thickness=2, color=config["primary"], spaceAfter=10))
     story.append(_meta_table(district, date_range))
     story.append(Spacer(1, 0.4 * cm))
     story.extend(_stats_table(stats, st_styles))
@@ -168,17 +276,22 @@ def build_report(
         story.append(Paragraph("Notes & Interpretation", st_styles["section"]))
         story.append(Paragraph(extra_notes, st_styles["body"]))
         story.append(Spacer(1, 0.3 * cm))
+    if include_action_matrix:
+        story.extend(_build_action_matrix(module_name, stats, class_areas, agency_key, st_styles))
     if maps:
         story.append(Spacer(1, 0.5 * cm))
         story.append(HRFlowable(width="100%", thickness=1, color=colors.lightgrey))
         story.append(Spacer(1, 0.2 * cm))
         story.append(Paragraph("Maps", st_styles["section"]))
-        for title, url in maps:
+        for item in maps:
+            title = item[0]
+            url = item[1]
+            map_class_areas = item[2] if len(item) > 2 else class_areas
             buf = _fetch_image(url)
             if buf:
                 # Enhance the raw thumbnail with cartographic elements
                 try:
-                    carto_buf = enhance_map_cartography(buf.read(), district, title, class_areas)
+                    carto_buf = enhance_map_cartography(buf.read(), district, title, map_class_areas)
                     story.extend(_rl_image(carto_buf, PAGE_W, title, st_styles))
                 except Exception as e:
                     # Fallback to raw image if cartography fails
@@ -191,6 +304,7 @@ def build_report(
     story.append(Spacer(1, 0.5 * cm))
     story.append(HRFlowable(width="100%", thickness=1, color=colors.lightgrey))
     story.append(Spacer(1, 0.2 * cm))
+    story.append(Paragraph(config["mandate"], st_styles["note"]))
     story.append(Paragraph(
         "This report was generated automatically by the GEOPORTAL ANALYSIS. "
         "All analyses are computed on-demand using Google Earth Engine satellite imagery. "

@@ -1,6 +1,17 @@
 import json
 """Agricultural Drought Vulnerability Index — no Streamlit dependency."""
 import ee
+
+def get_dynamic_scale(geom):
+    try:
+        area_sqkm = geom.area().divide(1e6).getInfo()
+        if area_sqkm > 10000: return 500
+        elif area_sqkm > 2000: return 250
+        elif area_sqkm > 500: return 100
+        else: return 30
+    except:
+        return 250
+
 from cachetools import TTLCache
 from threading import Lock
 from gee.classify_utils import quantile_classify
@@ -78,6 +89,7 @@ def compute_agricultural_drought(
 
     from gee.aoi_utils import get_aoi_geometry
     aoi = get_aoi_geometry(aoi_config)
+
     geometry = aoi.dissolve(maxError=1)
     geometry_buffered = geometry.buffer(500)
 
@@ -247,7 +259,7 @@ def compute_agricultural_drought(
         .rename("DVI").clip(geometry)
     )
     
-    dvi = dvi.reproject(crs="EPSG:4326", scale=250)
+    dvi = dvi.reproject(crs="EPSG:4326", scale=get_dynamic_scale(geometry))
 
     dvi_class = (
         ee.Image(0)
@@ -273,10 +285,10 @@ def compute_agricultural_drought(
             "stats": dvi.reduceRegion(
                 reducer=ee.Reducer.mean().combine(ee.Reducer.min(), sharedInputs=True)
                 .combine(ee.Reducer.max(), sharedInputs=True).combine(ee.Reducer.stdDev(), sharedInputs=True),
-                geometry=geometry, scale=250, maxPixels=10000, bestEffort=True, tileScale=4,
+                geometry=geometry, scale=get_dynamic_scale(geometry), maxPixels=1e10,
             ),
             "areas": class_area_bands.reduceRegion(
-                reducer=ee.Reducer.sum(), geometry=geometry, scale=250, maxPixels=10000, bestEffort=True, tileScale=4,
+                reducer=ee.Reducer.sum(), geometry=geometry, scale=get_dynamic_scale(geometry), maxPixels=1e10,
             ),
             "centroid": geometry.centroid(maxError=100).coordinates(),
             "bounds": geometry.bounds().coordinates().get(0)
@@ -294,7 +306,7 @@ def compute_agricultural_drought(
                 {"name": "CDD", "image": dry_pentads, "title": "Consecutive Dry Days (CDD)"},
                 {"name": "NDVI", "image": ndvi_current, "title": "NDVI Vegetation Health"},
             ],
-            aoi=geometry, scale=250, n_classes=n_classes,
+            aoi=geometry, scale=get_dynamic_scale(geometry), n_classes=n_classes,
         )
 
 

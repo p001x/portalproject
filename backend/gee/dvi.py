@@ -1,6 +1,17 @@
 import json
 """DVI computation — AHP-Weighted Drought Vulnerability Map"""
 import ee
+
+def get_dynamic_scale(geom):
+    try:
+        area_sqkm = geom.area().divide(1e6).getInfo()
+        if area_sqkm > 10000: return 500
+        elif area_sqkm > 2000: return 250
+        elif area_sqkm > 500: return 100
+        else: return 30
+    except:
+        return 250
+
 from cachetools import TTLCache
 from threading import Lock
 from gee.classify_utils import quantile_classify
@@ -50,6 +61,7 @@ def compute_dvi(
 
     from gee.aoi_utils import get_aoi_geometry
     geometry = get_aoi_geometry(aoi_config)
+
     geometryBuffered = geometry.buffer(500)
 
     # Date ranges
@@ -106,21 +118,21 @@ def compute_dvi(
 
     # CHIRPS
     chirps_col = ee.ImageCollection('UCSB-CHG/CHIRPS/PENTAD')
-    chirps_current = chirps_col.filterBounds(geometryBuffered).filterDate(seasonStart, seasonEnd).sum().rename('RF_CUMUL').reproject(crs='EPSG:32736', scale=30).clip(geometry)
+    chirps_current = chirps_col.filterBounds(geometryBuffered).filterDate(seasonStart, seasonEnd).sum().rename('RF_CUMUL').reproject(crs='EPSG:32736', scale=get_dynamic_scale(geometry)).clip(geometry)
 
     years = ee.List.sequence(2001, 2022)
     def get_chirps_yr(yr):
         return chirps_col.filterBounds(geometryBuffered).filter(ee.Filter.calendarRange(start_month, end_month, 'month')).filter(ee.Filter.calendarRange(yr, yr, 'year')).sum()
-    chirps_ltm = ee.ImageCollection(years.map(get_chirps_yr)).mean().rename('RF_LTM').reproject(crs='EPSG:32736', scale=30).clip(geometry)
+    chirps_ltm = ee.ImageCollection(years.map(get_chirps_yr)).mean().rename('RF_LTM').reproject(crs='EPSG:32736', scale=get_dynamic_scale(geometry)).clip(geometry)
     rf_anom = chirps_current.subtract(chirps_ltm).rename('RF_ANOM').clip(geometry)
 
     def is_dry(img): return img.lt(1).rename('dry')
-    dry_pentads = chirps_col.filterBounds(geometryBuffered).filterDate(seasonStart, seasonEnd).map(is_dry).sum().rename('CDD').reproject(crs='EPSG:32736', scale=30).clip(geometry)
+    dry_pentads = chirps_col.filterBounds(geometryBuffered).filterDate(seasonStart, seasonEnd).map(is_dry).sum().rename('CDD').reproject(crs='EPSG:32736', scale=get_dynamic_scale(geometry)).clip(geometry)
 
     # ERA5
     era5 = ee.ImageCollection('ECMWF/ERA5_LAND/MONTHLY_AGGR').select('volumetric_soil_water_layer_1')
-    sm_current = era5.filterBounds(geometryBuffered).filterDate(seasonStart, seasonEnd).mean().rename('SM').reproject(crs='EPSG:32736', scale=30).clip(geometry)
-    sm_ltm = era5.filterBounds(geometryBuffered).filter(ee.Filter.calendarRange(start_month, end_month, 'month')).filter(ee.Filter.calendarRange(2001, 2022, 'year')).mean().rename('SM_LTM').reproject(crs='EPSG:32736', scale=30).clip(geometry)
+    sm_current = era5.filterBounds(geometryBuffered).filterDate(seasonStart, seasonEnd).mean().rename('SM').reproject(crs='EPSG:32736', scale=get_dynamic_scale(geometry)).clip(geometry)
+    sm_ltm = era5.filterBounds(geometryBuffered).filter(ee.Filter.calendarRange(start_month, end_month, 'month')).filter(ee.Filter.calendarRange(2001, 2022, 'year')).mean().rename('SM_LTM').reproject(crs='EPSG:32736', scale=get_dynamic_scale(geometry)).clip(geometry)
     sm_anom = sm_current.subtract(sm_ltm).rename('SM_ANOM').clip(geometry)
 
     # Normalize
@@ -166,12 +178,11 @@ def compute_dvi(
             "stats": DVI.reduceRegion(
                 reducer=ee.Reducer.mean().combine(ee.Reducer.min(), sharedInputs=True).combine(ee.Reducer.max(), sharedInputs=True).combine(ee.Reducer.stdDev(), sharedInputs=True),
                 geometry=geometry,
-                scale=100, 
-                maxPixels=10000, bestEffort=True,
-                tileScale=4,
+                scale=get_dynamic_scale(geometry), 
+                maxPixels=1e10,
             ),
             "areas": class_area_bands.reduceRegion(
-                reducer=ee.Reducer.sum(), geometry=geometry, scale=100, maxPixels=10000, bestEffort=True, tileScale=4
+                reducer=ee.Reducer.sum(), geometry=geometry, scale=get_dynamic_scale(geometry), maxPixels=1e10
             ),
             "bounds": geometry.bounds()
         })
@@ -181,7 +192,7 @@ def compute_dvi(
         return quantile_classify(
             layers=[{"name": "DVI", "image": DVI, "title": "Drought Vulnerability Index"}],
             aoi=geometry,
-            scale=100,
+            scale=get_dynamic_scale(geometry),
             n_classes=n_classes,
         )
 

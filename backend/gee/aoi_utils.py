@@ -71,33 +71,41 @@ def get_aoi_geometry(aoi_config: dict) -> ee.Geometry:
             raise ValueError("Missing geojson data in AOI config.")
         return parse_geojson_to_ee_geometry(geojson)
 
-    elif aoi_type == "rwanda":
+    elif aoi_type in ("rwanda", "rwanda-micro"):
         province = aoi_config.get("province")
         district = aoi_config.get("district")
         sector = aoi_config.get("sector")
+        cell = aoi_config.get("cell")
+        village = aoi_config.get("village")
 
         import geopandas as gpd
         from shapely.geometry import mapping
         
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-        shp_path = os.path.join(base_dir, "sectrstu", "sector.shp")
+        shp_path = os.path.join(base_dir, "sectrstu", "villages.shp")
         gdf = gpd.read_file(shp_path)
-        if gdf.crs != "EPSG:4326":
-            gdf = gdf.to_crs("EPSG:4326")
-
+        if gdf.crs != "EPSG:4326": gdf = gdf.to_crs("EPSG:4326")
+        
+        filtered = gdf
+        if province and province != "none":
+            filtered = filtered[filtered["NAME_1"] == province]
+        if district and district != "none":
+            filtered = filtered[filtered["NAME_2"] == district]
         if sector and sector != "none":
-            filtered = gdf[(gdf["REGION"] == province) & (gdf["DISTR"] == district) & (gdf["NOMSECT"] == sector)]
-        elif district and district != "none":
-            filtered = gdf[(gdf["REGION"] == province) & (gdf["DISTR"] == district)]
-        elif province and province != "none":
-            filtered = gdf[gdf["REGION"] == province]
-        else:
-            filtered = gdf
+            filtered = filtered[filtered["NAME_3"] == sector]
+        if cell and cell != "none":
+            filtered = filtered[filtered["NAME_4"] == cell]
+        if village and village != "none":
+            filtered = filtered[filtered["NAME_5"] == village]
 
         if len(filtered) == 0:
             raise ValueError("No area matched the specified Rwanda hierarchy.")
             
-        boundary = filtered.geometry.unary_union
+        if hasattr(filtered.geometry, "union_all"):
+            boundary = filtered.geometry.union_all()
+        else:
+            boundary = filtered.geometry.unary_union
+            
         boundary_simplified = boundary.simplify(0.001, preserve_topology=True)
         geojson = mapping(boundary_simplified)
         return parse_geojson_to_ee_geometry(geojson)
@@ -135,3 +143,36 @@ def get_aoi_geometry(aoi_config: dict) -> ee.Geometry:
     # Fallback to old behavior for backwards compatibility during refactor
     district = aoi_config.get("district", "Musanze")
     return get_district_geometry(district)
+
+
+def get_historical_ndvi(aoi, year: int, start_date: str = None, end_date: str = None, cloud_limit=30):
+    import ee
+    
+    if not start_date: start_date = f"{year}-01-01"
+    if not end_date: end_date = f"{year}-12-31"
+    
+    if year >= 2016:
+        col = (
+            ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+            .filterDate(start_date, end_date)
+            .filterBounds(aoi)
+            .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", cloud_limit))
+            .map(lambda img: img.normalizedDifference(["B8", "B4"]).rename("NDVI"))
+        )
+    elif year >= 2014:
+        col = (
+            ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
+            .filterDate(start_date, end_date)
+            .filterBounds(aoi)
+            .filter(ee.Filter.lt("CLOUD_COVER", cloud_limit))
+            .map(lambda img: img.normalizedDifference(["SR_B5", "SR_B4"]).rename("NDVI"))
+        )
+    else:
+        col = (
+            ee.ImageCollection("LANDSAT/LE07/C02/T1_L2")
+            .filterDate(start_date, end_date)
+            .filterBounds(aoi)
+            .filter(ee.Filter.lt("CLOUD_COVER", cloud_limit))
+            .map(lambda img: img.normalizedDifference(["SR_B4", "SR_B3"]).rename("NDVI"))
+        )
+    return col.median().rename("NDVI").clip(aoi)

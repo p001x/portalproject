@@ -120,6 +120,7 @@ elif "lst_result" in st.session_state:
         st_folium(m, width="100%", height=500, returned_objects=[])
         st.markdown(
             "**Legend (°C):** "
+            "<span style='color:#08306b'>■</span> Water (NDWI&gt;0) &nbsp;"
             "<span style='color:#313695'>■</span> Cool (&lt;20) &nbsp;"
             "<span style='color:#74add1'>■</span> Moderate (20–25) &nbsp;"
             "<span style='color:#fee090'>■</span> Warm (25–30) &nbsp;"
@@ -140,7 +141,7 @@ elif "lst_result" in st.session_state:
         )
         fig = px.bar(
             df, x="Zone", y="Area (km²)", color="Zone",
-            color_discrete_sequence=["#313695", "#74add1", "#fee090", "#f46d43", "#a50026"],
+            color_discrete_sequence=["#08306b", "#313695", "#74add1", "#fee090", "#f46d43", "#a50026"],
             title=f"LST Temperature Zone Areas — {result['district']}",
         )
         fig.update_layout(showlegend=False)

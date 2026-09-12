@@ -9,7 +9,7 @@ import {
   ResponsiveContainer,
   Cell,
 } from "recharts";
-import { Loader2, Thermometer, FileText } from "lucide-react";
+import { Loader2, Thermometer, FileText , Play} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
@@ -26,6 +26,12 @@ import { DistrictMap } from "@/components/DistrictMap";
 import { ReportDownloadButton } from "@/components/ReportDownloadButton";
 import { MapExportControls } from "@/components/MapExportControls";
 import { StudyAreaSelector } from "@/components/StudyAreaSelector";
+
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/components/ui/resizable";
 
 const DISTRICTS = [
   "Bugesera","Burera","Gakenke","Gasabo","Gatsibo","Gicumbi","Gisagara",
@@ -70,9 +76,10 @@ export function LSTPage() {
 
 
   return (
-    <div className="flex flex-col md:flex-row h-full overflow-y-auto md:overflow-hidden">
-      {/* ── Controls sidebar ─────────────────────────────────────── */}
-      <aside className="w-full md:w-64 shrink-0 border-b md:border-b-0 md:border-r bg-card flex flex-col gap-5 p-5 md:overflow-y-auto">
+    <ResizablePanelGroup direction="horizontal" className="h-full items-stretch">
+      {/* ΓöÇΓöÇ Controls sidebar ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ */}
+      <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
+        <aside className="h-full w-full md:border-b md:border-b-0 md:border-r bg-card flex flex-col gap-5 p-5 md:overflow-y-auto">
         <div className="flex items-center gap-2 text-primary font-semibold text-lg">
           <Thermometer className="w-5 h-5" />
           LST Analysis
@@ -127,7 +134,7 @@ export function LSTPage() {
           ) : (
             <Thermometer className="w-4 h-4" />
           )}
-          {isPending ? "Computing…" : "Calculate LST"}
+          {isPending ? "ComputingΓÇª" : "Calculate LST"}
         </Button>
 
         {error && (
@@ -137,19 +144,32 @@ export function LSTPage() {
         )}
       </aside>
 
-      {/* ── Results ──────────────────────────────────────────────── */}
-      <main id="report-container" className="flex-1 md:overflow-y-auto p-4 md:p-6 bg-background">
+      {/* ΓöÇΓöÇ Results ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ */}
+      </ResizablePanel>
+      
+      <ResizableHandle withHandle />
+      
+      <ResizablePanel defaultSize={75}>
+        <main id="report-container" className="h-full flex flex-col flex-1 md:overflow-y-auto p-4 md:p-6 bg-background">
         {!data && !isPending && (
-          <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
-            Select a district and date range, then click <strong className="mx-1">Calculate LST</strong>.
+          <div className="h-full relative bg-muted/20 rounded-lg overflow-hidden border">
+            <DistrictMap aoi={aoi} basemap="satellite" />
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-4 z-[1000]">
+              <div className="bg-background/80 backdrop-blur-md p-6 rounded-2xl shadow-xl border border-primary/20 text-center max-w-sm pointer-events-none transition-all hover:scale-105 duration-300">
+                <h3 className="text-xl font-bold mb-2 text-foreground">Analysis Configuration</h3>
+                <p className="text-sm text-muted-foreground">
+                  Select a study area and parameters from the sidebar, then click run to visualize the results here.
+                </p>
+              </div>
+            </div>
           </div>
         )}
 
         {isPending && (
           <div className="h-full flex flex-col items-center justify-center gap-3 text-muted-foreground">
             <Loader2 className="w-8 h-8 animate-spin text-primary" />
-            <p>Computing LST for {aoi.name || 'Custom'}…</p>
-            <p className="text-xs">GEE analysis typically takes 15–60 seconds.</p>
+            <p>Computing LST for {aoi.name || 'Custom'}ΓÇª</p>
+            <p className="text-xs">GEE analysis typically takes 15ΓÇô60 seconds.</p>
           </div>
         )}
 
@@ -185,10 +205,10 @@ export function LSTPage() {
             <TabsContent value="stats" className="space-y-6">
               <div>
                 <h2 className="font-semibold text-lg mb-1">
-                  Statistics — {data.district}
+                  Statistics ΓÇö {data.district}
                 </h2>
                 <p className="text-sm text-muted-foreground">
-                  Period: {data.start_date} → {data.end_date}
+                  Period: {data.start_date} ΓåÆ {data.end_date}
                 </p>
               </div>
 
@@ -212,8 +232,8 @@ export function LSTPage() {
                     }))}
                   >
                     <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={50} />
-                    <YAxis unit=" km²" tick={{ fontSize: 11 }} />
-                    <Tooltip formatter={(v: number) => [`${v} km²`, "Area"]} />
+                    <YAxis unit=" km┬▓" tick={{ fontSize: 11 }} />
+                    <Tooltip formatter={(v: number) => [`${v} km┬▓`, "Area"]} />
                     <Bar dataKey="area" radius={[4, 4, 0, 0]}>
                       {Object.keys(data.class_areas_km2).map((_, i) => (
                         <Cell key={i} fill={TEMP_COLORS[i % TEMP_COLORS.length]} />
@@ -226,7 +246,7 @@ export function LSTPage() {
                   <thead className="bg-muted">
                     <tr>
                       <th className="text-left px-3 py-2 font-medium">Class</th>
-                      <th className="text-right px-3 py-2 font-medium">Area (km²)</th>
+                      <th className="text-right px-3 py-2 font-medium">Area (km┬▓)</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -251,7 +271,7 @@ export function LSTPage() {
             <TabsContent value="classify" className="space-y-6">
               <div>
                 <h2 className="font-semibold text-lg mb-1">
-                  Quantile Classification — {data.district}
+                  Quantile Classification ΓÇö {data.district}
                 </h2>
                 <p className="text-sm text-muted-foreground">
                   Breakpoints computed from the actual pixel distribution within the district.
@@ -306,8 +326,8 @@ export function LSTPage() {
                         }))}
                       >
                         <XAxis dataKey="name" tick={{ fontSize: 10 }} />
-                        <YAxis unit=" km²" tick={{ fontSize: 10 }} />
-                        <Tooltip formatter={(v: number) => [`${v} km²`, "Area"]} />
+                        <YAxis unit=" km┬▓" tick={{ fontSize: 10 }} />
+                        <Tooltip formatter={(v: number) => [`${v} km┬▓`, "Area"]} />
                         <Bar dataKey="area" radius={[3, 3, 0, 0]}>
                           {Object.keys(panel.areas).map((_, i) => (
                             <Cell key={i} fill={palette(data.classify.n_classes)[i]} />
@@ -320,7 +340,7 @@ export function LSTPage() {
               </div>
             </TabsContent>
 
-            {/* ── Report ── */}
+            {/* ΓöÇΓöÇ Report ΓöÇΓöÇ */}
             {/* Static Maps */}
             <TabsContent value="static-map" className="flex-1 overflow-y-auto space-y-4">
               <div>
@@ -340,15 +360,15 @@ export function LSTPage() {
 
             <TabsContent value="report" className="space-y-6">
               <div>
-                <h2 className="font-semibold text-lg mb-1">PDF Report — {data.district}</h2>
+                <h2 className="font-semibold text-lg mb-1">PDF Report ΓÇö {data.district}</h2>
                 <p className="text-sm text-muted-foreground">
                   Download a full PDF report including LST statistics, temperature zone areas, and classification maps.
                 </p>
               </div>
               <div className="bg-card border rounded-lg p-5 space-y-4">
                 <p className="text-sm text-muted-foreground leading-relaxed">
-                  <strong>Contents:</strong> District metadata · LST statistics (min, max, mean, std) ·
-                  Temperature zone area table · Quantile classification panels · Methodology notes.
+                  <strong>Contents:</strong> District metadata ┬╖ LST statistics (min, max, mean, std) ┬╖
+                  Temperature zone area table ┬╖ Quantile classification panels ┬╖ Methodology notes.
                 </p>
                 <ReportDownloadButton aoi={aoi}
                   moduleName="Land Surface Temperature"
@@ -356,7 +376,7 @@ export function LSTPage() {
                   dateRange={`${data.start_date} to ${data.end_date}`}
                   stats={data.stats as Record<string, number>}
                   classAreas={data.class_areas_km2}
-                  extraNotes={`LST in °C derived from Landsat 8/9 thermal infrared using the mono-window algorithm with NDVI-based emissivity correction. Analysis covers ${data.district} district from ${data.start_date} to ${data.end_date}.`}
+                  extraNotes={`LST in ┬░C derived from Landsat 8/9 thermal infrared using the mono-window algorithm with NDVI-based emissivity correction. Analysis covers ${data.district} district from ${data.start_date} to ${data.end_date}.`}
                   maps={data.classify?.panels?.map((p) => [p.title, p.thumb_url] as [string, string]) ?? []}
                   filename={`LST_${data.district}_${data.start_date}.pdf`}
                 />
@@ -365,6 +385,7 @@ export function LSTPage() {
           </Tabs>
         )}
       </main>
-    </div>
+      </ResizablePanel>
+    </ResizablePanelGroup>
   );
 }

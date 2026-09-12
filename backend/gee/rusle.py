@@ -105,14 +105,26 @@ def compute_rusle(
 
     from gee.aoi_utils import get_aoi_geometry
     aoi = get_aoi_geometry(aoi_config)
+    
+    # Calculate dynamic scale based on geometry size (sq km)
+    area_sqkm = aoi.area().divide(1e6).getInfo()
+    if area_sqkm > 10000:
+        dynamic_scale = 500   # Entire Country (High memory footprint)
+    elif area_sqkm > 2000:
+        dynamic_scale = 250   # Province
+    elif area_sqkm > 500:
+        dynamic_scale = 100   # Large District
+    else:
+        dynamic_scale = 30    # Sector or small polygon
+
     start = f"{year}-01-01"
     end = f"{year}-12-31"
 
     chirps_annual = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY").filterDate(start, end).filterBounds(aoi).sum()
     R = chirps_annual.multiply(0.35).add(38.5).rename("R")
 
-    clay = ee.Image("projects/soilgrids-isric/clay_mean_0-5cm_250m").select(0).divide(10)
-    sand = ee.Image("projects/soilgrids-isric/sand_mean_0-5cm_250m").select(0).divide(10)
+    clay = ee.Image("OpenLandMap/SOL/SOL_CLAY-WFRACTION_USDA-3A1A1A_M/v02").select("b0")
+    sand = ee.Image("OpenLandMap/SOL/SOL_SAND-WFRACTION_USDA-3A1A1A_M/v02").select("b0")
     silt = clay.add(sand).multiply(-1).add(100).max(1)
     f_csand = sand.multiply(clay.add(sand).divide(100)).multiply(-0.0256).exp().multiply(0.3).add(0.2)
     f_cl_si = silt.divide(clay.add(silt).max(1)).pow(0.3)
@@ -131,28 +143,33 @@ def compute_rusle(
     S = S_gentle.where(slope_deg.gte(5.14), S_steep).max(0.03)
     LS = L.multiply(S).min(300).rename("LS")
 
-    s2_ndvi_col = (
-        ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
-        .filterDate(start, end)
-        .filterBounds(aoi)
-        .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 30))
-        .map(lambda img: img.normalizedDifference(["B8", "B4"]).rename("NDVI"))
-    )
-    l8_ndvi_col = (
-        ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
-        .filterDate(start, end)
-        .filterBounds(aoi)
-        .filter(ee.Filter.lt("CLOUD_COVER", 30))
-        .map(lambda img: img.normalizedDifference(["SR_B5", "SR_B4"]).rename("NDVI"))
-    )
-    l7_ndvi_col = (
-        ee.ImageCollection("LANDSAT/LE07/C02/T1_L2")
-        .filterDate(start, end)
-        .filterBounds(aoi)
-        .filter(ee.Filter.lt("CLOUD_COVER", 30))
-        .map(lambda img: img.normalizedDifference(["SR_B4", "SR_B3"]).rename("NDVI"))
-    )
-    ndvi = s2_ndvi_col.merge(l8_ndvi_col).merge(l7_ndvi_col).median()
+    if year >= 2016:
+        s2_ndvi_col = (
+            ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+            .filterDate(start, end)
+            .filterBounds(aoi)
+            .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 30))
+            .map(lambda img: img.normalizedDifference(["B8", "B4"]).rename("NDVI"))
+        )
+        ndvi = s2_ndvi_col.median()
+    elif year >= 2014:
+        l8_ndvi_col = (
+            ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
+            .filterDate(start, end)
+            .filterBounds(aoi)
+            .filter(ee.Filter.lt("CLOUD_COVER", 30))
+            .map(lambda img: img.normalizedDifference(["SR_B5", "SR_B4"]).rename("NDVI"))
+        )
+        ndvi = l8_ndvi_col.median()
+    else:
+        l7_ndvi_col = (
+            ee.ImageCollection("LANDSAT/LE07/C02/T1_L2")
+            .filterDate(start, end)
+            .filterBounds(aoi)
+            .filter(ee.Filter.lt("CLOUD_COVER", 30))
+            .map(lambda img: img.normalizedDifference(["SR_B4", "SR_B3"]).rename("NDVI"))
+        )
+        ndvi = l7_ndvi_col.median()
     ndvi_safe = ndvi.max(0.001).min(0.990)
     C = ndvi_safe.multiply(-2).divide(ndvi_safe.multiply(-1).add(1)).exp().max(0.001).min(1.0).rename("C")
 
@@ -193,7 +210,7 @@ def compute_rusle(
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         f_combined = executor.submit(
             lambda: all_factors_img.reduceRegion(
-                reducer=combined_reducer, geometry=aoi, scale=250, maxPixels=10000, bestEffort=True, tileScale=4
+                reducer=combined_reducer, geometry=aoi, scale=dynamic_scale, maxPixels=1e10
             ).getInfo()
         )
         f_bounds = executor.submit(
@@ -289,12 +306,12 @@ def compute_rusle(
     combined_area_img = ee.Image.cat([fixed_area_img, risk_area_img, a_class_area_img])
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         f_combined_area = executor.submit(
-            lambda: combined_area_img.reduceRegion(reducer=ee.Reducer.sum(), geometry=aoi, scale=250, maxPixels=10000, bestEffort=True, tileScale=4).getInfo()
+            lambda: combined_area_img.reduceRegion(reducer=ee.Reducer.sum(), geometry=aoi, scale=dynamic_scale, maxPixels=1e10).getInfo()
         )
         f_risk_stats = executor.submit(
             lambda: risk_index.reduceRegion(
                 reducer=ee.Reducer.mean().combine(ee.Reducer.stdDev(), sharedInputs=True),
-                geometry=aoi, scale=250, maxPixels=10000, bestEffort=True, tileScale=4,
+                geometry=aoi, scale=dynamic_scale, maxPixels=1e10,
             ).getInfo()
         )
 
@@ -319,6 +336,8 @@ def compute_rusle(
     class_areas = {lbl: round((fixed_area_dict.get(f"c{i}", 0) or 0) / 1e6, 2) for i, lbl in enumerate(fixed_labels)}
 
     center = [(bounds[0][1] + bounds[2][1]) / 2, (bounds[0][0] + bounds[2][0]) / 2]
+
+    district_name = aoi_config.get("district", aoi_config.get("name", "Custom")).replace(" ", "_")
 
     # OPTIMIZATION: Generate raw map download URLs asynchronously and at 250m scale to prevent timeouts
     def get_dl_url(img):

@@ -1,11 +1,7 @@
 import { useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Loader2, Lock, Mail, Map, ArrowRight, User } from "lucide-react";
-import { SiteBrand } from "@/components/SiteBrand";
-import { Link } from "wouter";
+import { Loader2, Lock, Mail, User, X } from "lucide-react";
+import { Link, useLocation } from "wouter";
 
 export function AuthPage() {
   const [isLogin, setIsLogin] = useState(true);
@@ -16,6 +12,7 @@ export function AuthPage() {
   const { login, register, forgotPassword, isLoading } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [, setLocation] = useLocation();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,193 +50,155 @@ export function AuthPage() {
   };
 
   return (
-    <div className="min-h-screen flex w-full bg-background">
-      
-      {/* Left Side: Branding / Showcase */}
-      <div className="hidden lg:flex flex-col flex-1 bg-slate-900 relative overflow-hidden justify-between p-12">
-        <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1524661135-423995f22d0b?q=80&w=2074&auto=format&fit=crop')] bg-cover bg-center opacity-20 mix-blend-overlay pointer-events-none"></div>
-        <div className="absolute inset-0 bg-gradient-to-br from-slate-900/90 via-slate-900/50 to-teal-900/80 pointer-events-none"></div>
-        
-        <div className="relative z-10">
-          <SiteBrand />
-        </div>
+    <div 
+      className="min-h-screen flex flex-col w-full text-white overflow-x-hidden font-sans relative"
+      style={{
+        backgroundImage: "url('https://images.unsplash.com/photo-1507204122176-35cb8a6aeb20?auto=format&fit=crop&w=2000&q=80')",
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        backgroundRepeat: "no-repeat"
+      }}
+    >
+      {/* Dark overlay to ensure text readability */}
+      <div className="absolute inset-0 bg-black/30 z-0 pointer-events-none" />
 
-        <div className="relative z-10 max-w-lg mt-auto pb-12">
-          <h1 className="text-4xl font-bold text-white mb-6 leading-tight">
-            Advanced Environmental Intelligence
-          </h1>
-          <p className="text-lg text-slate-300 mb-8 leading-relaxed">
-            Harness the power of Google Earth Engine to monitor droughts, track floods, and analyze vegetation health with unprecedented accuracy.
-          </p>
-          <div className="flex gap-4">
-            <div className="flex items-center gap-2 text-sm text-slate-400">
-              <Map className="w-5 h-5 text-teal-400" />
-              15+ Analysis Modules
-            </div>
-            <div className="flex items-center gap-2 text-sm text-slate-400">
-              <Lock className="w-5 h-5 text-teal-400" />
-              Secure Data Vault
-            </div>
-          </div>
-          <div className="mt-8 flex gap-4">
-            <Link href="/">
-              <span className="text-sm font-medium text-teal-400 hover:text-teal-300 transition-colors flex items-center gap-1 cursor-pointer">
-                &larr; Back to Home
-              </span>
-            </Link>
-            <Link href="/blog">
-              <span className="text-sm font-medium text-teal-400 hover:text-teal-300 transition-colors flex items-center gap-1 cursor-pointer">
-                Read our Blog &rarr;
-              </span>
-            </Link>
-          </div>
+      {/* Navigation Bar */}
+      <nav className="relative z-10 flex justify-between items-center py-8 px-8 sm:px-16 w-full">
+        <Link href="/">
+          <div className="text-[28px] font-bold cursor-pointer tracking-wide drop-shadow-md">Logo</div>
+        </Link>
+        <div className="hidden md:flex gap-10 items-center">
+          <Link href="/" className="text-white text-[15px] font-medium opacity-90 hover:opacity-100 hover:drop-shadow-[0_0_10px_rgba(255,255,255,0.8)] transition-all drop-shadow-md">Home</Link>
+          <Link href="/about" className="text-white text-[15px] font-medium opacity-90 hover:opacity-100 hover:drop-shadow-[0_0_10px_rgba(255,255,255,0.8)] transition-all drop-shadow-md">About</Link>
+          <Link href="/services" className="text-white text-[15px] font-medium opacity-90 hover:opacity-100 hover:drop-shadow-[0_0_10px_rgba(255,255,255,0.8)] transition-all drop-shadow-md">Services</Link>
+          <Link href="/contact" className="text-white text-[15px] font-medium opacity-90 hover:opacity-100 hover:drop-shadow-[0_0_10px_rgba(255,255,255,0.8)] transition-all drop-shadow-md">Contact</Link>
+          <button onClick={() => { setIsLogin(true); setIsForgotPassword(false); }} className="bg-transparent border border-white/50 text-white py-2 px-8 rounded-md cursor-pointer text-[15px] font-medium transition-all hover:bg-white/20 hover:border-white/90 hover:shadow-[0_0_15px_rgba(255,255,255,0.2)] backdrop-blur-sm">Login</button>
         </div>
-      </div>
+      </nav>
 
-      {/* Right Side: Auth Form */}
-      <div className="flex-1 flex flex-col justify-center px-8 sm:px-16 lg:px-24">
-        <div className="w-full max-w-sm mx-auto space-y-8">
+      {/* Main Container */}
+      <div className="relative z-10 flex-1 flex justify-center items-center p-5 pb-20">
+        <div className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl w-full max-w-[420px] px-10 py-10 relative shadow-[0_8px_32px_0_rgba(0,0,0,0.4)]">
           
-          <div className="text-center lg:text-left">
-            <h2 className="text-3xl font-bold tracking-tight text-foreground">
-              {isForgotPassword ? "Reset Password" : isLogin ? "Welcome back" : "Create an account"}
-            </h2>
-            <p className="text-muted-foreground mt-2 text-sm">
-              {isForgotPassword
-                ? "Enter your email to receive a password reset link."
-                : isLogin 
-                ? "Enter your credentials to access the geoportal." 
-                : "Sign up to start saving and managing your spatial data."}
-            </p>
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-5">
+          <button onClick={() => setLocation("/")} className="absolute -top-3 -right-3 bg-[#111] border border-white/20 text-white w-8 h-8 rounded-full flex items-center justify-center cursor-pointer font-bold text-lg transition-all hover:bg-[#333] hover:scale-105 shadow-lg" aria-label="Close">
+            <X className="w-4 h-4" />
+          </button>
+          
+          <h2 className="text-center text-[32px] font-semibold mb-8 tracking-wide">
+            {isForgotPassword ? "Reset Password" : isLogin ? "Login" : "Register"}
+          </h2>
+          
+          <form onSubmit={handleSubmit}>
             {!isLogin && !isForgotPassword && (
-              <div className="space-y-2">
-                <Label htmlFor="name">Full Name</Label>
-                <div className="relative">
-                  <User className="w-4 h-4 absolute left-3 top-3 text-muted-foreground" />
-                  <Input
-                    id="name"
-                    type="text"
-                    placeholder="John Doe"
-                    className="pl-9"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    required
-                  />
-                </div>
+              <div className="relative mb-6">
+                <label htmlFor="name" className="block text-[13px] mb-2 text-white/70 font-medium">Full Name</label>
+                <input
+                  id="name"
+                  type="text"
+                  required
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="w-full bg-transparent border-0 border-b border-white/20 text-white text-base py-2.5 pl-1 pr-8 outline-none transition-colors focus:border-white/80"
+                />
+                <User className="absolute right-1 bottom-3 w-[18px] h-[18px] opacity-60 pointer-events-none" />
               </div>
             )}
 
-            <div className="space-y-2">
-              <Label htmlFor="email">Email address</Label>
-              <div className="relative">
-                <Mail className="w-4 h-4 absolute left-3 top-3 text-muted-foreground" />
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="name@example.com"
-                  className="pl-9"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                />
-              </div>
+            <div className="relative mb-6">
+              <label htmlFor="email" className="block text-[13px] mb-2 text-white/70 font-medium">Email</label>
+              <input
+                id="email"
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full bg-transparent border-0 border-b border-white/20 text-white text-base py-2.5 pl-1 pr-8 outline-none transition-colors focus:border-white/80"
+              />
+              <Mail className="absolute right-1 bottom-3 w-[18px] h-[18px] opacity-60 pointer-events-none" />
             </div>
 
             {!isForgotPassword && (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="password">Password</Label>
-                  {isLogin && (
-                    <button type="button" onClick={() => {setIsForgotPassword(true); setError(null); setSuccess(null);}} className="text-xs font-medium text-primary hover:underline">
-                      Forgot password?
-                    </button>
-                  )}
-                </div>
-                <div className="relative">
-                  <Lock className="w-4 h-4 absolute left-3 top-3 text-muted-foreground" />
-                  <Input
-                    id="password"
-                    type="password"
-                    placeholder="••••••••"
-                    className="pl-9"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    required
-                  />
-                </div>
-                {!isLogin && (
-                  <p className="text-xs text-muted-foreground">
-                    Password must be 8-15 characters long and contain uppercase, lowercase, and numbers.
-                  </p>
-                )}
+              <div className="relative mb-6">
+                <label htmlFor="password" className="block text-[13px] mb-2 text-white/70 font-medium">Password</label>
+                <input
+                  id="password"
+                  type="password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full bg-transparent border-0 border-b border-white/20 text-white text-base py-2.5 pl-1 pr-8 outline-none transition-colors focus:border-white/80"
+                />
+                <Lock className="absolute right-1 bottom-3 w-[18px] h-[18px] opacity-60 pointer-events-none" />
+              </div>
+            )}
+
+            {!isForgotPassword && (
+              <div className="flex justify-between items-center text-[13px] mb-8">
+                <label className="flex items-center gap-2 text-white/70 cursor-pointer">
+                  <input type="checkbox" className="cursor-pointer accent-white/80 w-3.5 h-3.5" />
+                  Remember me
+                </label>
+                <button type="button" onClick={() => { setIsForgotPassword(true); setError(null); setSuccess(null); }} className="text-white/70 no-underline transition-colors hover:text-white">
+                  Forget Password?
+                </button>
               </div>
             )}
 
             {error && (
-              <div className="text-sm font-medium text-destructive bg-destructive/10 p-3 rounded-md">
+              <div className="text-sm font-medium text-red-400 bg-red-400/10 p-3 rounded-md mb-6 border border-red-400/20">
                 {error}
               </div>
             )}
             
             {success && (
-              <div className="text-sm font-medium text-green-600 bg-green-50 p-3 rounded-md">
+              <div className="text-sm font-medium text-emerald-400 bg-emerald-400/10 p-3 rounded-md mb-6 border border-emerald-400/20">
                 {success}
               </div>
             )}
 
-            {!isForgotPassword && (
-              <p className="text-xs text-muted-foreground text-center">
-                By signing in or creating an account, you agree to receive our platform updates and newsletter. You can unsubscribe at any time via email.
-              </p>
-            )}
-
-            <Button type="submit" className="w-full" size="lg" disabled={isLoading}>
+            <button type="submit" disabled={isLoading} className="w-full bg-[#28282d]/80 border border-white/5 text-white p-3.5 rounded-lg text-base font-medium cursor-pointer transition-all tracking-wide mb-6 hover:bg-[#3c3c41]/90 hover:border-white/20 hover:shadow-[0_4px_15px_rgba(0,0,0,0.3)] disabled:opacity-70 flex justify-center items-center">
               {isLoading ? (
-                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                <Loader2 className="w-5 h-5 animate-spin" />
               ) : isForgotPassword ? (
                 "Send Reset Link"
+              ) : isLogin ? (
+                "Login"
               ) : (
-                <>{isLogin ? "Sign In" : "Create Account"} <ArrowRight className="w-4 h-4 ml-2" /></>
+                "Create Account"
               )}
-            </Button>
-          </form>
+            </button>
 
-          <div className="text-center text-sm">
-            {isForgotPassword ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setIsForgotPassword(false);
-                  setIsLogin(true);
-                  setError(null);
-                  setSuccess(null);
-                }}
-                className="font-semibold text-primary hover:underline"
-              >
-                Back to Sign in
-              </button>
-            ) : (
-              <>
-                <span className="text-muted-foreground">
-                  {isLogin ? "Don't have an account? " : "Already have an account? "}
-                </span>
+            <div className="text-center text-[14px] text-white/60">
+              {isForgotPassword ? (
                 <button
                   type="button"
                   onClick={() => {
-                    setIsLogin(!isLogin);
+                    setIsForgotPassword(false);
+                    setIsLogin(true);
                     setError(null);
+                    setSuccess(null);
                   }}
-                  className="font-semibold text-primary hover:underline"
+                  className="text-white/90 font-medium no-underline transition-colors hover:text-white hover:underline cursor-pointer"
                 >
-                  {isLogin ? "Sign up" : "Sign in"}
+                  Back to Sign in
                 </button>
-              </>
-            )}
-          </div>
-
+              ) : isLogin ? (
+                <>
+                  Don't have an account?{" "}
+                  <button type="button" onClick={() => { setIsLogin(false); setError(null); }} className="text-white/90 font-medium no-underline transition-colors hover:text-white hover:underline cursor-pointer">
+                    Register
+                  </button>
+                </>
+              ) : (
+                <>
+                  Already have an account?{" "}
+                  <button type="button" onClick={() => { setIsLogin(true); setError(null); }} className="text-white/90 font-medium no-underline transition-colors hover:text-white hover:underline cursor-pointer">
+                    Login
+                  </button>
+                </>
+              )}
+            </div>
+          </form>
         </div>
       </div>
     </div>

@@ -343,7 +343,12 @@ class HarvesterScanner:
         
         try:
             r = cls._fetch_url_resilient(meta_url)
-            data = r.json()
+            # Extra try-catch for JSON specifically, as some servers return HTML error pages
+            try:
+                data = r.json()
+            except ValueError:
+                raise ValueError("Server did not return valid JSON for ArcGIS service.")
+                
             service_name = data.get("name") or data.get("mapName") or data.get("description") or service_name
             
             # Layers in service
@@ -456,12 +461,20 @@ class HarvesterScanner:
         discovered = []
         seen_urls = set()
 
+        # Cap links to prevent massive DOMs from crashing the system
+        max_links_to_process = 500
+        processed_count = 0
+
         for full_url, link_text in scraper.links:
+            if processed_count >= max_links_to_process:
+                break
+                
             if not full_url or full_url.startswith("#") or full_url.startswith("javascript:") or full_url.startswith("mailto:"):
                 continue
             if full_url in seen_urls:
                 continue
             seen_urls.add(full_url)
+            processed_count += 1
 
             filename = full_url.split("/")[-1].split("?")[0] or "dataset"
             generic_texts = {"view", "download", "link", "here", "click here", "get data", "download data", "view data", "download file", "data"}
@@ -738,7 +751,15 @@ class HarvesterTransferManager:
                 logger.warning("Zip internal extract warning: %s", zip_err)
 
         if not os.path.splitext(filename)[1]:
-            ext = ".geojson" if "geojson" in source_url else ".tif"
+            # Detect by magic bytes before blindly assuming .tif
+            if data_bytes.startswith(b'PK\x03\x04'):
+                ext = ".zip"
+            elif data_bytes.startswith(b'II*\x00') or data_bytes.startswith(b'MM\x00*'):
+                ext = ".tif"
+            elif data_bytes.lstrip().startswith(b'{') or data_bytes.lstrip().startswith(b'['):
+                ext = ".geojson"
+            else:
+                ext = ".geojson" if "geojson" in source_url else ".tif"
             filename += ext
 
         dataset_id = str(uuid.uuid4())
@@ -838,7 +859,31 @@ class HarvesterTransferManager:
                     pass
                     
             if not os.path.splitext(filename)[1]:
-                ext = ".geojson" if "geojson" in source_url else ".tif"
+                ext = None
+                magic = b''
+                try:
+                    if data_bytes is not None:
+                        magic = data_bytes[:4]
+                    else:
+                        with open(temp_path, "rb") as f:
+                            magic = f.read(4)
+                    
+                    if magic.startswith(b'PK\x03\x04'):
+                        ext = ".zip"
+                    elif magic.startswith(b'II*\x00') or magic.startswith(b'MM\x00*'):
+                        ext = ".tif"
+                    elif magic.lstrip().startswith(b'{') or magic.lstrip().startswith(b'['):
+                        ext = ".geojson"
+                except Exception:
+                    pass
+                
+                if not ext:
+                    # If we can't identify it, it might be an HTML error page or unsupported binary.
+                    # Prevent saving garbage data as a .tif.
+                    is_html = b'<html' in magic.lower() or b'<!doc' in magic.lower()
+                    if is_html:
+                        raise ValueError("The provided link downloaded an HTML webpage instead of a spatial dataset. Please provide a direct download link.")
+                    ext = ".geojson" if "geojson" in source_url else ".tif"
                 filename += ext
                 
             import uuid

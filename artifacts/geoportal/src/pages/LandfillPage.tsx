@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
+
 import { useMutation } from "@tanstack/react-query";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
 } from "recharts";
-import { Loader2, Trash2, FileText, Printer } from "lucide-react";
+import { Loader2, Trash2, FileText, Printer , Play} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
@@ -16,6 +17,12 @@ import { api, LandfillResult , AOIConfig} from "@/lib/api";
 import { DistrictMap, LegendItem } from "@/components/DistrictMap";
 import { StudyAreaSelector } from "@/components/StudyAreaSelector";
 import { MapExportControls } from "@/components/MapExportControls";
+
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/components/ui/resizable";
 
 const DISTRICTS = [
   "Bugesera","Burera","Gakenke","Gasabo","Gatsibo","Gicumbi","Gisagara",
@@ -146,7 +153,7 @@ function FactorMapCard({ factorKey, factor, analysisDate }: {
         target="_blank"
         rel="noreferrer"
       >
-        ↓ Download GeoTIFF
+        ? Download GeoTIFF
       </a>
     </div>
   );
@@ -391,9 +398,10 @@ export function LandfillPage() {
   });
 
   return (
-    <div className="flex h-full">
+    <ResizablePanelGroup direction="horizontal" className="h-full items-stretch">
       {/* ── Controls sidebar ─────────────────────────────────────── */}
-      <aside className="w-72 shrink-0 border-r bg-card flex flex-col gap-4 p-4 overflow-y-auto">
+      <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
+        <aside className="h-full border-r bg-card flex flex-col gap-4 p-4 overflow-y-auto">
         <div className="flex items-center gap-2 text-primary font-semibold text-base">
           <Trash2 className="w-5 h-5" />
           Landfill Suitability
@@ -497,11 +505,23 @@ export function LandfillPage() {
       </aside>
 
       {/* ── Results ──────────────────────────────────────────────── */}
-      <main className="flex-1 overflow-y-auto p-6">
+      </ResizablePanel>
+      
+      <ResizableHandle withHandle />
+      
+      <ResizablePanel defaultSize={75}>
+        <main className="h-full overflow-y-auto p-6">
         {!data && !isPending && (
-          <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
-            Select a district and parameters, then click{" "}
-            <strong className="mx-1">Analyze Suitability</strong>.
+          <div className="h-full relative bg-muted/20 rounded-lg overflow-hidden border">
+            <DistrictMap aoi={aoi} basemap="satellite" />
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-4 z-[1000]">
+              <div className="bg-background/80 backdrop-blur-md p-6 rounded-2xl shadow-xl border border-primary/20 text-center max-w-sm pointer-events-none transition-all hover:scale-105 duration-300">
+                <h3 className="text-xl font-bold mb-2 text-foreground">Analysis Configuration</h3>
+                <p className="text-sm text-muted-foreground">
+                  Select a study area and parameters from the sidebar, then click run to visualize the results here.
+                </p>
+              </div>
+            </div>
           </div>
         )}
 
@@ -874,6 +894,10 @@ export function LandfillPage() {
           </Tabs>
         )}
       </main>
-    </div>
+      </ResizablePanel>
+    </ResizablePanelGroup>
   );
 }
+
+
+

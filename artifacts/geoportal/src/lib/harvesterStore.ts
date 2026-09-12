@@ -32,6 +32,7 @@ export interface GeeTaskState {
   downloaded_mb?: number;
   total_mb?: number;
   asset_id?: string;
+  dataset_id?: string;
   error?: string;
 }
 
@@ -187,6 +188,7 @@ export const harvesterStore = {
           downloaded_mb: resData.downloaded_mb,
           total_mb: resData.total_mb,
           asset_id: resData.asset_id,
+          dataset_id: resData.dataset_id,
           error: status.error,
         });
 

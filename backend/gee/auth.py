@@ -114,11 +114,23 @@ from datetime import datetime, timezone
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 
-_individual_sessions: dict[str, dict] = {}
-# Mapping: token → { "email": str, "authenticated_at": str }
+import threading
+
+import re
+import secrets
+from datetime import datetime, timezone
+
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
+
+from storage.db import (
+    get_all_gee_sessions, 
+    add_gee_session, 
+    get_gee_session, 
+    delete_gee_session
+)
 
 _EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$")
-
 
 def authenticate_individual(token_credential: str, project_name: str | None = None) -> dict:
     """Validate a Google ID token and create an authenticated session.
@@ -157,7 +169,8 @@ def authenticate_individual(token_credential: str, project_name: str | None = No
             raise ValueError(f"Invalid Google ID token: {exc}")
 
     # Check if this email already has an active session — reuse it
-    for token, session in _individual_sessions.items():
+    all_sessions = get_all_gee_sessions()
+    for token, session in all_sessions.items():
         if session["email"] == email and session.get("project_name") == project_name:
             logger.info("Reusing existing GEE individual session for %s", email)
             return {"ok": True, "token": token, "email": email, "project_name": project_name}
@@ -177,11 +190,8 @@ def authenticate_individual(token_credential: str, project_name: str | None = No
 
     # Create a new session
     session_token = secrets.token_urlsafe(32)
-    _individual_sessions[session_token] = {
-        "email": email,
-        "project_name": project_name,
-        "authenticated_at": datetime.now(timezone.utc).isoformat(),
-    }
+    authenticated_at = datetime.now(timezone.utc).isoformat()
+    add_gee_session(session_token, email, project_name, authenticated_at)
     logger.info("Created new GEE individual session for %s (token=%s...)", email, session_token[:8])
     return {"ok": True, "token": session_token, "email": email, "project_name": project_name}
 
@@ -190,21 +200,24 @@ def verify_individual_session(token: str | None) -> dict | None:
     """Return the session dict if the token is valid, else None."""
     if not token:
         return None
-    return _individual_sessions.get(token)
+    return get_gee_session(token)
 
 
 def logout_individual(token: str) -> bool:
     """Remove an individual session.  Returns True if it existed."""
-    removed = _individual_sessions.pop(token, None)
-    if removed:
-        logger.info("Logged out GEE individual session for %s", removed["email"])
-    return removed is not None
+    session = get_gee_session(token)
+    if session:
+        delete_gee_session(token)
+        logger.info("Logged out GEE individual session for %s", session["email"])
+        return True
+    return False
 
 
 def get_all_sessions() -> list[dict]:
     """Return a summary of all active individual sessions (admin use)."""
+    sessions = get_all_gee_sessions()
     return [
         {"email": s["email"], "project_name": s.get("project_name"), "authenticated_at": s["authenticated_at"]}
-        for s in _individual_sessions.values()
+        for s in sessions.values()
     ]
 

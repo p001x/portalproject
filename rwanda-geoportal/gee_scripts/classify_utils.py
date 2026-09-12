@@ -36,7 +36,7 @@ def class_labels(n: int) -> list:
     return presets.get(n, [f"Class {i + 1}" for i in range(n)])
 
 
-def quantile_classify(layers: list, aoi, scale: int, n_classes: int) -> dict:
+def quantile_classify(layers: list, aoi, scale: int, n_classes: int, reverse_palette: bool = False) -> dict:
     """
     Classify each layer into n_classes using quantile breakpoints computed within
     `aoi`. All breakpoints and all class areas are fetched in exactly two GEE
@@ -69,6 +69,8 @@ def quantile_classify(layers: list, aoi, scale: int, n_classes: int) -> dict:
     n = max(2, min(n_classes, 10))
     pct_steps = [round(100 * j / n) for j in range(1, n)]
     pal  = class_palette(n)
+    if reverse_palette:
+        pal = pal[::-1]
     lbls = class_labels(n)
     vis  = {"min": 1, "max": n, "palette": pal}
 

@@ -40,15 +40,18 @@ export function clearGeeAuth(): void {
 }
 
 
-export interface AOIConfig {
-  type: "gaul0" | "gaul1" | "gaul2" | "geojson";
+export type AOIConfig = {
+  type: string;
   country?: string;
   level1?: string;
   level2?: string;
-  geojson?: any;
+  province?: string;
   district?: string;
-  name?: string;
-}
+  sector?: string;
+  cell?: string;
+  geojson?: any;
+  name?: string; // friendly name
+};
 
 export interface NDVIRequest {
   aoi: AOIConfig;
@@ -224,6 +227,7 @@ export interface HabitatFactorMap {
   tile_url: string;
   thumb_url: string;
   download_url: string;
+  labels?: string[];
 }
 
 export interface HabitatMapResult {
@@ -293,7 +297,8 @@ export interface IrrigationStatsResult {
 export interface IrrigationExportResult {
   download_url?: string;
   thumb_url?: string;
-  factors: Record<string, { download_url?: string; thumb_url?: string }>;
+  labels?: string[];
+  factors: Record<string, { download_url?: string; thumb_url?: string; labels?: string[] }>;
 }
 export interface LandslideStatsResult {
   stats: Record<string, number>;
@@ -313,7 +318,9 @@ export interface AccessibilityRequest {
   aoi: AOIConfig;
   district?: string;
   amenities: string[];
+  dest_amenities?: string[];
   n_classes?: number;
+  service_threshold_mins?: number;
 }
 export interface AccessibilityMapResult {
   travel_time_tile_url: string;
@@ -323,6 +330,7 @@ export interface AccessibilityMapResult {
   bbox?: number[];
   district?: string;
   facilities?: { lon: number; lat: number; name: string; type: string }[];
+  origins?: { lon: number; lat: number; name: string; type: string }[];
   nearest_road_geojson?: any;
   farthest_road_geojson?: any;
   incidents?: { lon: number; lat: number; name: string }[];
@@ -330,6 +338,13 @@ export interface AccessibilityMapResult {
 }
 export interface AccessibilityStatsResult {
   stats: Record<string, number>;
+  served?: {
+    threshold_mins: number;
+    area_km2: number;
+    population: number;
+    total_population: number;
+    pop_percent: number;
+  };
   class_areas_km2: Record<string, number>;
   nearest_facility?: { lon: number; lat: number; name: string; type: string; distance_km: number };
   farthest_facility?: { lon: number; lat: number; name: string; type: string; distance_km: number };
@@ -446,7 +461,10 @@ function parseApiError(err: any, fallback: string): string {
   if (!err) return fallback;
   if (typeof err.detail === "string") return err.detail;
   if (Array.isArray(err.detail)) {
-    return err.detail.map((e: any) => e.msg || e.detail || JSON.stringify(e)).join("; ");
+    return err.detail.map((e: any) => {
+      const field = e.loc ? e.loc[e.loc.length - 1] : "";
+      return field ? `${field}: ${e.msg}` : (e.msg || e.detail || JSON.stringify(e));
+    }).join("; ");
   }
   if (typeof err.detail === "object" && err.detail !== null) {
     return err.detail.msg || err.detail.error || err.detail.message || JSON.stringify(err.detail);
@@ -549,6 +567,14 @@ export const api = {
 
   async getRwandaHierarchy(): Promise<Record<string, Record<string, string[]>>> {
     return get("/aoi/rwanda-hierarchy");
+  },
+
+  async getRwandaMicroHierarchy(): Promise<Record<string, Record<string, string[]>>> {
+    return get("/aoi/rwanda-micro-hierarchy");
+  },
+
+  async getRwandaFullHierarchy(): Promise<any> {
+    return get("/aoi/rwanda-full-hierarchy");
   },
 
   async uploadShapefile(file: File): Promise<{geojson: any}> {
@@ -670,6 +696,55 @@ export const api = {
     }
     return res.json();
   },
+  academy: {
+    getBooks: () => get<{ books: any[] }>("/academy/books"),
+    deleteBook: async (id: string) => {
+      const headers: Record<string, string> = {};
+      const appToken = localStorage.getItem("spetro_token");
+      if (appToken) headers["Authorization"] = `Bearer ${appToken}`;
+      const res = await fetch(`${BASE}/academy/books/${id}`, { method: "DELETE", headers });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(parseApiError(err, res.statusText));
+      }
+      return res.json() as Promise<{ ok: boolean }>;
+    },
+    updateBook: async (id: string, data: any): Promise<{ ok: boolean, book: any }> => {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      const appToken = localStorage.getItem("spetro_token");
+      if (appToken) headers["Authorization"] = `Bearer ${appToken}`;
+      const res = await fetch(`${BASE}/academy/books/${id}`, {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({
+          title: data.title,
+          author: data.author || "Unknown",
+          description: data.description || "",
+          pages: parseInt(data.pages) || 0
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(parseApiError(err, res.statusText));
+      }
+      return res.json();
+    },
+    uploadBook: async (formData: FormData): Promise<{ ok: boolean, book: any }> => {
+      const headers: Record<string, string> = {};
+      const appToken = localStorage.getItem("spetro_token");
+      if (appToken) headers["Authorization"] = `Bearer ${appToken}`;
+      const res = await fetch(`${BASE}/academy/books/upload`, {
+        method: "POST",
+        headers,
+        body: formData,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(parseApiError(err, res.statusText));
+      }
+      return res.json();
+    }
+  },
   habitat: {
     map: (req: any) => post<HabitatMapResult>("/habitat/map", req),
     stats: (req: any) => post<HabitatStatsResult>("/habitat/stats", req),
@@ -678,9 +753,9 @@ export const api = {
     ahp: (customWeights: Record<string, number> | null) => post<AhpData>("/habitat/ahp", { custom_weights: customWeights || {} }),
   },
   waterHarvesting: {
-    map: (req: { aoi: AOIConfig; year: number; runoff_coefficient?: number; manual_area_m2?: number; use_building_footprint?: boolean }) => post<any>("/water-harvesting/map", req),
-    stats: (req: { aoi: AOIConfig; year: number; runoff_coefficient?: number; manual_area_m2?: number; use_building_footprint?: boolean }) => post<any>("/water-harvesting/stats", req),
-    export: (req: { aoi: AOIConfig; year: number; runoff_coefficient?: number; manual_area_m2?: number; use_building_footprint?: boolean }) => post<any>("/water-harvesting/export", req),
+    map: (req: { aoi: AOIConfig; year: number; runoff_coefficient?: number; manual_area_m2?: number; use_building_footprint?: boolean; household_size?: number; daily_water_use_liters?: number }) => post<any>("/water-harvesting/map", req),
+    stats: (req: { aoi: AOIConfig; year: number; runoff_coefficient?: number; manual_area_m2?: number; use_building_footprint?: boolean; household_size?: number; daily_water_use_liters?: number }) => post<any>("/water-harvesting/stats", req),
+    export: (req: { aoi: AOIConfig; year: number; runoff_coefficient?: number; manual_area_m2?: number; use_building_footprint?: boolean; household_size?: number; daily_water_use_liters?: number }) => post<any>("/water-harvesting/export", req),
   },
   wellscope: {
     map: (req: { aoi: AOIConfig; custom_weights?: Record<string, number> }) => post<any>("/wellscope/map", req),
@@ -696,6 +771,8 @@ export const api = {
     class_areas: Record<string, number>;
     extra_notes?: string;
     maps?: Array<[string, string]>;
+    agency_template?: string;
+    include_action_matrix?: boolean;
   }): Promise<Blob> => {
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     const appToken = localStorage.getItem("spetro_token");
@@ -787,7 +864,7 @@ export const api = {
       return r.json() as Promise<{ ok: boolean }>;
     },
     classify: (body?: any) =>
-      post<{ tile_url: string; download_url?: string; visualized_download_url?: string; classes: string[]; colors: Record<string, string>; class_values?: Record<string, number>; areas: Record<string, number>; accuracy?: any }>(
+      post<{ tile_url: string; download_url?: string; visualized_download_url?: string; classes: string[]; colors: Record<string, string>; class_values?: Record<string, number>; areas: Record<string, number>; accuracy?: any; feature_importance?: Record<string, number> }>(
         "/classify/supervised",
         body ?? {},
         { withGeeAuth: true }

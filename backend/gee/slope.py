@@ -18,6 +18,17 @@ def compute_slope(aoi_config: dict, n_classes: int = 5) -> dict:
 
     from gee.aoi_utils import get_aoi_geometry
     aoi = get_aoi_geometry(aoi_config)
+    # Calculate dynamic scale based on geometry size (sq km)
+    area_sqkm = aoi.area().divide(1e6).getInfo()
+    if area_sqkm > 10000:
+        dynamic_scale = 500   # Entire Country (High memory footprint)
+    elif area_sqkm > 2000:
+        dynamic_scale = 250   # Province
+    elif area_sqkm > 500:
+        dynamic_scale = 100   # Large District
+    else:
+        dynamic_scale = 30    # Sector or small polygon
+
 
     dem = ee.Image("USGS/SRTMGL1_003").select("elevation").clip(aoi)
     terrain = ee.Terrain.products(dem)
@@ -55,13 +66,13 @@ def compute_slope(aoi_config: dict, n_classes: int = 5) -> dict:
                 .combine(ee.Reducer.max(), sharedInputs=True)
                 .combine(ee.Reducer.percentile([25, 75]), sharedInputs=True)
                 .combine(ee.Reducer.min(), sharedInputs=True),
-                geometry=aoi, scale=30, maxPixels=10000, bestEffort=True, tileScale=4,
+                geometry=aoi, scale=dynamic_scale, maxPixels=1e10,
             ).getInfo()
         )
 
         f_area = executor.submit(
             lambda: area_img.reduceRegion(
-                reducer=ee.Reducer.sum(), geometry=aoi, scale=30, maxPixels=10000, bestEffort=True, tileScale=4
+                reducer=ee.Reducer.sum(), geometry=aoi, scale=dynamic_scale, maxPixels=1e10
             ).getInfo()
         )
 
@@ -72,7 +83,7 @@ def compute_slope(aoi_config: dict, n_classes: int = 5) -> dict:
                     {"name": "elevation", "image": dem, "title": "Elevation (m)"},
                     {"name": "aspect", "image": aspect, "title": "Aspect (°)"},
                 ],
-                aoi=aoi, scale=30, n_classes=n_classes,
+                aoi=aoi, scale=dynamic_scale, n_classes=n_classes,
             )
         )
 

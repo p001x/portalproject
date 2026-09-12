@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Loader2, Thermometer, FileText } from "lucide-react";
+import { Loader2, Thermometer, FileText , Play} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
@@ -18,14 +18,11 @@ import { ReportDownloadButton } from "@/components/ReportDownloadButton";
 import { MapExportControls } from "@/components/MapExportControls";
 import { StudyAreaSelector } from "@/components/StudyAreaSelector";
 
-const DISTRICTS = [
-  "Bugesera","Burera","Gakenke","Gasabo","Gatsibo","Gicumbi","Gisagara",
-  "Huye","Kamonyi","Karongi","Kayonza","Kicukiro","Kirehe","Muhanga",
-  "Musanze","Ngoma","Ngororero","Nyabihu","Nyagatare","Nyamagabe",
-  "Nyamasheke","Nyanza","Nyarugenge","Nyaruguru","Rubavu","Ruhango",
-  "Rulindo","Rusizi","Rutsiro","Rwamagana",
-  "Custom Study Area",
-];
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/components/ui/resizable";
 
 function today() {
   return new Date().toISOString().slice(0, 10);
@@ -56,7 +53,7 @@ export function UHIPage() {
     mutationFn: () =>
       api.uhi({
         aoi,
-                start_date: startDate,
+        start_date: startDate,
         end_date: endDate,
         grid_size: gridSize,
       }),
@@ -70,9 +67,10 @@ export function UHIPage() {
     : "";
 
   return (
-    <div className="flex flex-col md:flex-row h-full overflow-y-auto md:overflow-hidden">
+    <ResizablePanelGroup direction="horizontal" className="h-full items-stretch">
       {/* ── Controls sidebar ─────────────────────────────────────── */}
-      <aside className="w-full md:w-64 shrink-0 border-b md:border-b-0 md:border-r bg-card flex flex-col gap-5 p-5 md:overflow-y-auto">
+      <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
+        <aside className="h-full w-full md:border-b md:border-b-0 md:border-r bg-card flex flex-col gap-5 p-5 md:overflow-y-auto">
         <div className="flex items-center gap-2 text-primary font-semibold text-lg">
           <Thermometer className="w-5 h-5" />
           UHI Analysis
@@ -138,11 +136,23 @@ export function UHIPage() {
       </aside>
 
       {/* ── Results ──────────────────────────────────────────────── */}
-      <main id="report-container" className="flex-1 md:overflow-y-auto p-4 md:p-6 bg-background">
+      </ResizablePanel>
+      
+      <ResizableHandle withHandle />
+      
+      <ResizablePanel defaultSize={75}>
+        <main id="report-container" className="h-full flex flex-col flex-1 md:overflow-y-auto p-4 md:p-6 bg-background">
         {!data && !isPending && (
-          <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
-            Select a district and date range, then click{" "}
-            <strong className="mx-1">Analyze UHI</strong>.
+          <div className="h-full relative bg-muted/20 rounded-lg overflow-hidden border">
+            <DistrictMap aoi={aoi} basemap="satellite" />
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-4 z-[1000]">
+              <div className="bg-background/80 backdrop-blur-md p-6 rounded-2xl shadow-xl border border-primary/20 text-center max-w-sm pointer-events-none transition-all hover:scale-105 duration-300">
+                <h3 className="text-xl font-bold mb-2 text-foreground">Analysis Configuration</h3>
+                <p className="text-sm text-muted-foreground">
+                  Select a study area and parameters from the sidebar, then click run to visualize the results here.
+                </p>
+              </div>
+            </div>
           </div>
         )}
 
@@ -372,6 +382,10 @@ export function UHIPage() {
           </Tabs>
         )}
       </main>
-    </div>
+      </ResizablePanel>
+    </ResizablePanelGroup>
   );
 }
+
+
+

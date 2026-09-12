@@ -185,14 +185,15 @@ def compute_rusle(
     )
     R = chirps_annual.multiply(0.35).add(38.5).rename("R")
 
-    # ── K: Soil Erodibility ───────────────────────────────────────────────────
     clay = (
-        ee.Image("projects/soilgrids-isric/clay_mean_0-5cm_250m")
-        .select(0).divide(10).clip(aoi)
+        ee.Image("OpenLandMap/SOL/SOL_CLAY-WFRACTION_USDA-3A1A1A_M/v02")
+        .select("b0")
+        .clip(aoi)
     )
     sand = (
-        ee.Image("projects/soilgrids-isric/sand_mean_0-5cm_250m")
-        .select(0).divide(10).clip(aoi)
+        ee.Image("OpenLandMap/SOL/SOL_SAND-WFRACTION_USDA-3A1A1A_M/v02")
+        .select("b0")
+        .clip(aoi)
     )
     silt = clay.add(sand).multiply(-1).add(100).max(1)
     f_csand = (

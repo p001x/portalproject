@@ -19,6 +19,7 @@ _gaul_cache = {
 
 # In-memory cache for Rwanda hierarchy to avoid reading the shapefile multiple times
 _rwanda_hierarchy = None
+_rwanda_micro_hierarchy = None
 
 @router.get("/regions")
 def get_regions(country: Optional[str] = None, level1: Optional[str] = None):
@@ -177,3 +178,59 @@ def get_rwanda_hierarchy():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error reading Rwanda shapefile: {str(e)}")
 
+@router.get("/rwanda-full-hierarchy")
+def get_rwanda_full_hierarchy():
+    """
+    Reads the local sectrstu/villages.shp and returns a nested dictionary of:
+    { "ProvinceName": { "DistrictName": { "SectorName": { "CellName": ["Village1", "Village2"] } } } }
+    """
+    global _rwanda_micro_hierarchy
+    if _rwanda_micro_hierarchy is not None:
+        return _rwanda_micro_hierarchy
+
+    try:
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        shp_path = os.path.join(base_dir, "sectrstu", "villages.shp")
+        
+        if not os.path.exists(shp_path):
+            raise HTTPException(status_code=404, detail="Rwanda villages shapefile not found.")
+
+        gdf = gpd.read_file(shp_path)
+        
+        hierarchy = {}
+        for _, row in gdf.iterrows():
+            prov = row.get("NAME_1")
+            dist = row.get("NAME_2")
+            sect = row.get("NAME_3")
+            cell = row.get("NAME_4")
+            vill = row.get("NAME_5")
+            
+            if not prov or not dist or not sect or not cell or not vill:
+                continue
+                
+            if prov not in hierarchy:
+                hierarchy[prov] = {}
+            if dist not in hierarchy[prov]:
+                hierarchy[prov][dist] = {}
+            if sect not in hierarchy[prov][dist]:
+                hierarchy[prov][dist][sect] = {}
+            if cell not in hierarchy[prov][dist][sect]:
+                hierarchy[prov][dist][sect][cell] = []
+            if vill not in hierarchy[prov][dist][sect][cell]:
+                hierarchy[prov][dist][sect][cell].append(vill)
+                
+        # Sort everything alphabetically for the frontend
+        sorted_hierarchy = {}
+        for prov in sorted(hierarchy.keys()):
+            sorted_hierarchy[prov] = {}
+            for dist in sorted(hierarchy[prov].keys()):
+                sorted_hierarchy[prov][dist] = {}
+                for sect in sorted(hierarchy[prov][dist].keys()):
+                    sorted_hierarchy[prov][dist][sect] = {}
+                    for cell in sorted(hierarchy[prov][dist][sect].keys()):
+                        sorted_hierarchy[prov][dist][sect][cell] = sorted(list(set(hierarchy[prov][dist][sect][cell])))
+                
+        _rwanda_micro_hierarchy = sorted_hierarchy
+        return _rwanda_micro_hierarchy
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error reading Rwanda villages shapefile: {str(e)}")

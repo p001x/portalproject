@@ -106,7 +106,7 @@ def get_training_imagery_tile(aoi_bounds: list, data_source: str, custom_asset_i
         return ""
 
 
-def train_and_classify(samples: list, aoi=None, data_source="sentinel2", custom_asset_id=None) -> dict:
+def train_and_classify(samples: list, aoi=None, data_source="sentinel2", custom_asset_id=None, ml_model="random_forest", train_split=70, use_indices=True, hyperparam_trees=50) -> dict:
     if data_source == "native_cog":
         from gee.native_classify import train_and_classify_native
         return train_and_classify_native(samples, custom_asset_id, aoi=aoi)
@@ -162,8 +162,6 @@ def train_and_classify(samples: list, aoi=None, data_source="sentinel2", custom_
     training_fc = ee.FeatureCollection(features).limit(200)
 
     # Resolve AOI
-    with open("aoi_debug.json", "w") as f:
-        json.dump(aoi if aoi is not None else "NONE", f)
 
     should_clip_to_aoi = True
     if aoi is None:
@@ -185,6 +183,17 @@ def train_and_classify(samples: list, aoi=None, data_source="sentinel2", custom_
         try:
             from gee.aoi_utils import get_aoi_geometry
             aoi_geom = get_aoi_geometry(aoi)
+            # Calculate dynamic scale based on geometry size (sq km)
+            area_sqkm = aoi_geom.area().divide(1e6).getInfo()
+            if area_sqkm > 10000:
+                dynamic_scale = 500   # Entire Country (High memory footprint)
+            elif area_sqkm > 2000:
+                dynamic_scale = 250   # Province
+            elif area_sqkm > 500:
+                dynamic_scale = 100   # Large District
+            else:
+                dynamic_scale = 30    # Sector or small polygon
+
         except Exception as e:
             logger.warning(f"Failed to parse AOI: {e}. Falling back to training bounds.")
             aoi_geom = training_fc.geometry().bounds().buffer(100000)
@@ -201,6 +210,10 @@ def train_and_classify(samples: list, aoi=None, data_source="sentinel2", custom_
     try:
         feature_image, scale, _ = _get_feature_image(aoi_geom, data_source, custom_asset_id)
         all_bands = feature_image.bandNames()
+        if not use_indices:
+            exclude_bands = ee.List(['NDVI', 'NDBI', 'NDWI', 'SAVI', 'elevation', 'slope'])
+            all_bands = all_bands.removeAll(exclude_bands)
+            feature_image = feature_image.select(all_bands)
     except Exception as e:
         logger.error(f"Failed to load data source: {e}")
         raise ValueError(f"Could not load data source: {e}")
@@ -215,12 +228,31 @@ def train_and_classify(samples: list, aoi=None, data_source="sentinel2", custom_
         geometries=False,
     )
 
-    # Train Random Forest classifier with 20 decision trees (reduces memory limit errors on download)
-    classifier = ee.Classifier.smileRandomForest(20).train(
-        features=training_data,
-        classProperty="class",
-        inputProperties=all_bands,
-    )
+    # Train the chosen classifier
+    if ml_model == "random_forest":
+        classifier = ee.Classifier.smileRandomForest(hyperparam_trees).train(
+            features=training_data,
+            classProperty="class",
+            inputProperties=all_bands,
+        )
+    elif ml_model == "cart":
+        classifier = ee.Classifier.smileCart().train(
+            features=training_data,
+            classProperty="class",
+            inputProperties=all_bands,
+        )
+    elif ml_model == "svm":
+        classifier = ee.Classifier.libsvm().train(
+            features=training_data,
+            classProperty="class",
+            inputProperties=all_bands,
+        )
+    else:
+        classifier = ee.Classifier.smileRandomForest(hyperparam_trees).train(
+            features=training_data,
+            classProperty="class",
+            inputProperties=all_bands,
+        )
     
     if not should_clip_to_aoi:
         # If no study area was defined, DO NOT clip the rendered image so it covers the whole world/map!
@@ -266,27 +298,56 @@ def train_and_classify(samples: list, aoi=None, data_source="sentinel2", custom_
             return [_sanitize_json_floats(v) for v in obj]
         return obj
 
-    # Accuracy Assessment (70/30 train/test split)
-    accuracy_metrics = {"overall_accuracy": 0.945, "kappa": 0.912}
+    # Feature Importance
+    importance_dict = {}
     try:
-        with_random = training_data.randomColumn()
-        train_set = with_random.filter(ee.Filter.lt("random", 0.7))
-        test_set = with_random.filter(ee.Filter.gte("random", 0.7))
+        explanation = classifier.explain().getInfo()
+        if 'importance' in explanation:
+            importance_dict = explanation['importance']
+    except Exception as e:
+        logger.warning(f"Could not get feature importance: {e}")
 
-        val_classifier = ee.Classifier.smileRandomForest(20).train(
-            features=train_set, classProperty="class", inputProperties=all_bands
-        )
+    # Accuracy Assessment (train/test split)
+    accuracy_metrics = {"overall_accuracy": 0.0, "kappa": 0.0}
+    try:
+        split_ratio = train_split / 100.0
+        with_random = training_data.randomColumn()
+        train_set = with_random.filter(ee.Filter.lt("random", split_ratio))
+        test_set = with_random.filter(ee.Filter.gte("random", split_ratio))
+
+        if ml_model == "random_forest":
+            val_classifier = ee.Classifier.smileRandomForest(hyperparam_trees).train(
+                features=train_set, classProperty="class", inputProperties=all_bands
+            )
+        elif ml_model == "cart":
+            val_classifier = ee.Classifier.smileCart().train(
+                features=train_set, classProperty="class", inputProperties=all_bands
+            )
+        elif ml_model == "svm":
+            val_classifier = ee.Classifier.libsvm().train(
+                features=train_set, classProperty="class", inputProperties=all_bands
+            )
+        else:
+            val_classifier = ee.Classifier.smileRandomForest(hyperparam_trees).train(
+                features=train_set, classProperty="class", inputProperties=all_bands
+            )
         validated = test_set.classify(val_classifier)
         conf_matrix = validated.errorMatrix("class", "classification")
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
             f_acc = executor.submit(lambda: conf_matrix.accuracy().getInfo())
             f_kappa = executor.submit(lambda: conf_matrix.kappa().getInfo())
             f_conf = executor.submit(lambda: conf_matrix.getInfo())
+            f_prod = executor.submit(lambda: conf_matrix.producersAccuracy().getInfo())
+            f_cons = executor.submit(lambda: conf_matrix.consumersAccuracy().getInfo())
+            f_order = executor.submit(lambda: conf_matrix.order().getInfo())
             
             acc_val = f_acc.result()
             kappa_val = f_kappa.result()
             conf_info = f_conf.result()
+            prod_val = f_prod.result()
+            cons_val = f_cons.result()
+            order_val = f_order.result()
 
         if acc_val is not None and not math.isnan(acc_val) and not math.isinf(acc_val):
             accuracy_metrics["overall_accuracy"] = round(float(acc_val), 4)
@@ -294,6 +355,44 @@ def train_and_classify(samples: list, aoi=None, data_source="sentinel2", custom_
             accuracy_metrics["kappa"] = round(float(kappa_val), 4)
         if conf_info is not None:
             accuracy_metrics["matrix"] = conf_info
+            
+        producers_dict = {}
+        users_dict = {}
+        missing_classes = []
+        
+        try:
+            # Map the order values back to class names
+            val_to_cls = {v: k for k, v in class_values.items()}
+            
+            if order_val and prod_val and cons_val:
+                for i, class_val in enumerate(order_val):
+                    cls_name = val_to_cls.get(class_val, f"Unknown_{class_val}")
+                    
+                    # Producer's accuracy is Nx1 array
+                    p_val = prod_val[i][0] if isinstance(prod_val[i], list) else prod_val[i]
+                    producers_dict[cls_name] = round(float(p_val), 4) if not (math.isnan(float(p_val)) or math.isinf(float(p_val))) else 0.0
+                    
+                    # Consumer's accuracy is 1xN array
+                    c_val = cons_val[0][i] if len(cons_val) > 0 else 0.0
+                    users_dict[cls_name] = round(float(c_val), 4) if not (math.isnan(float(c_val)) or math.isinf(float(c_val))) else 0.0
+            
+            # Identify missing classes
+            for cls_name in unique_classes:
+                if cls_name not in producers_dict:
+                    producers_dict[cls_name] = 0.0
+                    users_dict[cls_name] = 0.0
+                    missing_classes.append(cls_name)
+                    
+        except Exception as e:
+            logger.warning(f"Failed to parse per-class accuracies: {e}")
+            
+        accuracy_metrics["producers_accuracy"] = producers_dict
+        accuracy_metrics["users_accuracy"] = users_dict
+        accuracy_metrics["missing_classes"] = missing_classes
+        
+        # Add order mapping for the frontend to render the matrix labels
+        accuracy_metrics["matrix_labels"] = [val_to_cls.get(v, str(v)) for v in order_val] if order_val else unique_classes
+
     except Exception as exc:
         logger.warning("Accuracy evaluation fallback: %s", exc)
 
@@ -335,7 +434,7 @@ def train_and_classify(samples: list, aoi=None, data_source="sentinel2", custom_
             geometry=aoi_geom,  # Use original geometry instead of bounds to avoid corners
             scale=calc_scale,
             tileScale=16,
-            maxPixels=10000, bestEffort=True
+            maxPixels=1e10
         )
         area_results = areas_computed.getInfo().get('groups', [])
         
@@ -408,6 +507,7 @@ def train_and_classify(samples: list, aoi=None, data_source="sentinel2", custom_
         "colors": class_colors,
         "class_values": class_values,
         "accuracy": accuracy_metrics,
-        "areas": class_areas_dict
+        "areas": class_areas_dict,
+        "feature_importance": importance_dict
     }
     return _sanitize_json_floats(res)

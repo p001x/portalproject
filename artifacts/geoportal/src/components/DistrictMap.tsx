@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MapContainer, TileLayer, useMap, CircleMarker, Popup, GeoJSON } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
@@ -26,9 +26,9 @@ export interface MapFacility {
 }
 
 interface Props {
-  center: [number, number];
+  center?: [number, number];
   bbox?: number[][];
-  tileUrl: string;
+  tileUrl?: string;
   zoom?: number;
   title?: string;
   legend?: LegendItem[];
@@ -39,6 +39,8 @@ interface Props {
   farthestRoadGeojson?: any;
   incidents?: { lon: number; lat: number; name: string }[];
   routes?: { geometry: any; incident_name: string; facility_name: string; distance_km: number }[];
+  aoi?: any;
+  basemap?: string;
 }
 
 /** Updates the GEE tile layer when tileUrl changes. */
@@ -77,12 +79,14 @@ function GEELayer({ tileUrl }: { tileUrl: string }) {
 }
 
 /** Fly to a new center/bounds when it changes. */
-function FlyTo({ center, zoom, bbox }: { center: [number, number]; zoom: number; bbox?: number[][] }) {
+function FlyTo({ center, zoom, bbox }: { center?: [number, number]; zoom: number; bbox?: number[][] }) {
   const map = useMap();
-  const centerStr = JSON.stringify(center);
+  const safeCenter = center || [-1.94, 29.87]; // Default to Rwanda center
+  const centerStr = JSON.stringify(safeCenter);
   const bboxStr = JSON.stringify(bbox || null);
 
   useEffect(() => {
+    if (!centerStr) return;
     const parsedCenter = JSON.parse(centerStr);
     const parsedBbox = JSON.parse(bboxStr);
 
@@ -122,7 +126,7 @@ function NorthArrow() {
 }
 
 export function DistrictMap({
-  center,
+  center = [-1.94, 29.87],
   bbox,
   tileUrl,
   zoom = 10,
@@ -135,7 +139,10 @@ export function DistrictMap({
   farthestRoadGeojson,
   incidents,
   routes,
+  basemap: initialBasemap = "light",
 }: Props) {
+  const [activeBasemap, setActiveBasemap] = useState(initialBasemap);
+
   return (
     <div style={{ position: "relative", height: "100%", width: "100%" }}>
       <MapContainer
@@ -144,11 +151,31 @@ export function DistrictMap({
         style={{ height: "100%", width: "100%", borderRadius: "0.5rem" }}
         scrollWheelZoom
       >
-        <TileLayer
-          url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-          attribution='&copy; <a href="https://carto.com/">CARTO</a>'
-        />
-        <GEELayer tileUrl={tileUrl} />
+        {activeBasemap === "light" && (
+          <TileLayer
+            url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
+            attribution='&copy; <a href="https://carto.com/">CARTO</a>'
+          />
+        )}
+        {activeBasemap === "satellite" && (
+          <TileLayer
+            url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+            attribution="Tiles &copy; Esri"
+          />
+        )}
+        {activeBasemap === "terrain" && (
+          <TileLayer
+            url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}"
+            attribution="Tiles &copy; Esri"
+          />
+        )}
+        {activeBasemap === "osm" && (
+          <TileLayer
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+          />
+        )}
+        {tileUrl && <GEELayer tileUrl={tileUrl} />}
         {overlayUrl && <GEELayer tileUrl={overlayUrl} />}
         {facilities && facilities.map((f, i) => {
           const isHighlight = f.isNearest || f.isFarthest;
@@ -243,6 +270,23 @@ export function DistrictMap({
         title="North"
       >
         <NorthArrow />
+      </div>
+
+      {/* Basemap Switcher */}
+      <div
+        style={{ position: "absolute", top: 8, left: 50, zIndex: 1000 }}
+        className="bg-white/90 border border-gray-200 shadow-sm rounded overflow-hidden pointer-events-auto flex items-center"
+      >
+        <select
+          value={activeBasemap}
+          onChange={(e) => setActiveBasemap(e.target.value as any)}
+          className="text-xs bg-transparent border-none outline-none cursor-pointer py-1 px-2 text-gray-700 font-medium"
+        >
+          <option value="light">Carto Light</option>
+          <option value="satellite">Satellite</option>
+          <option value="terrain">Terrain</option>
+          <option value="osm">OpenStreetMap</option>
+        </select>
       </div>
 
       {/* Legend */}

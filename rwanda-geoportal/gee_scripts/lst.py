@@ -17,6 +17,8 @@ def lst_image_and_aoi(district_name: str, start_date: str, end_date: str):
     )
     aoi = rwanda.geometry()
 
+    from gee_scripts.landsat_utils import get_harmonized_landsat_collection, gap_fill
+
     def apply_scale_factors(image):
         optical = image.select("SR_B.").multiply(0.0000275).add(-0.2)
         thermal = image.select("ST_B10").multiply(0.00341802).add(149.0)
@@ -24,6 +26,7 @@ def lst_image_and_aoi(district_name: str, start_date: str, end_date: str):
 
     def compute_lst_image(image):
         ndvi = image.normalizedDifference(["SR_B5", "SR_B4"]).rename("NDVI")
+        ndwi = image.normalizedDifference(["SR_B3", "SR_B5"]).rename("NDWI")
         fvc = ndvi.subtract(0.2).divide(0.5 - 0.2).pow(2).rename("FVC")
         fvc = fvc.where(ndvi.lt(0.2), 0).where(ndvi.gt(0.5), 1)
         emissivity = fvc.multiply(0.004).add(0.986).rename("emissivity")
@@ -40,18 +43,16 @@ def lst_image_and_aoi(district_name: str, start_date: str, end_date: str):
             .subtract(273.15)
             .rename("LST")
         )
-        return lst_celsius.copyProperties(image, ["system:time_start"])
+        return lst_celsius.addBands(ndwi).copyProperties(image, ["system:time_start"])
 
-    collection = (
-        ee.ImageCollection("LANDSAT/LC09/C02/T1_L2")
-        .filterDate(start_date, end_date)
-        .filterBounds(aoi)
-        .filter(ee.Filter.lt("CLOUD_COVER", 20))
-        .map(apply_scale_factors)
+    collection = get_harmonized_landsat_collection(start_date, end_date, aoi, max_cloud_cover=20) \
+        .map(apply_scale_factors) \
         .map(compute_lst_image)
-    )
 
-    lst_median = collection.median().clip(aoi)
+    if collection.size().getInfo() == 0:
+        raise ValueError("No satellite imagery (Landsat 4-9) found for this area and date range with <20% cloud cover. Try expanding the date range or choosing a different area.")
+
+    lst_median = gap_fill(collection.median()).clip(aoi)
     return lst_median, aoi
 
 
@@ -63,12 +64,21 @@ def compute_lst(district_name: str, start_date: str, end_date: str, n_classes: i
     """
     lst_median, aoi = lst_image_and_aoi(district_name, start_date, end_date)
 
-    vis_params = {
-        "min": 15,
-        "max": 40,
-        "palette": ["#313695", "#74add1", "#fee090", "#f46d43", "#a50026"],
-    }
-    map_id = lst_median.getMapId(vis_params)
+    water = lst_median.select("NDWI").gt(0)
+    lst = lst_median.select("LST")
+
+    lst_viz = lst.where(water, 10)
+    map_id = lst_viz.getMapId({
+        "min": 10, "max": 40,
+        "palette": ["#08306b", "#313695", "#74add1", "#fee090", "#f46d43", "#a50026"]
+    })
+
+    bounds = aoi.bounds().getInfo()["coordinates"][0]
+    thumb_url = lst_viz.getThumbURL({
+        "min": 10, "max": 40,
+        "palette": ["#08306b", "#313695", "#74add1", "#fee090", "#f46d43", "#a50026"],
+        "region": bounds, "dimensions": 800, "format": "png"
+    })
 
     stats = lst_median.reduceRegion(
         reducer=ee.Reducer.mean().combine(
@@ -85,11 +95,12 @@ def compute_lst(district_name: str, start_date: str, end_date: str, n_classes: i
     ).getInfo()
 
     classes = {
-        "Cool (<20°C)": lst_median.lt(20),
-        "Moderate (20–25°C)": lst_median.gte(20).And(lst_median.lt(25)),
-        "Warm (25–30°C)": lst_median.gte(25).And(lst_median.lt(30)),
-        "Hot (30–35°C)": lst_median.gte(30).And(lst_median.lt(35)),
-        "Very Hot (>35°C)": lst_median.gte(35),
+        "Water (NDWI > 0)": water,
+        "Cool (<20°C)": lst.lt(20).And(water.Not()),
+        "Moderate (20–25°C)": lst.gte(20).And(lst.lt(25)).And(water.Not()),
+        "Warm (25–30°C)": lst.gte(25).And(lst.lt(30)).And(water.Not()),
+        "Hot (30–35°C)": lst.gte(30).And(lst.lt(35)).And(water.Not()),
+        "Very Hot (>35°C)": lst.gte(35).And(water.Not()),
     }
     # Single batched reduceRegion for all class areas instead of one call per class.
     labels = list(classes.keys())
@@ -104,7 +115,7 @@ def compute_lst(district_name: str, start_date: str, end_date: str, n_classes: i
     }
 
     classify = quantile_classify(
-        layers=[{"name": "LST", "image": lst_median, "title": "Land Surface Temperature (°C)"}],
+        layers=[{"name": "LST", "image": lst, "title": "Land Surface Temperature (°C)"}],
         aoi=aoi,
         scale=100,
         n_classes=n_classes,
@@ -116,6 +127,7 @@ def compute_lst(district_name: str, start_date: str, end_date: str, n_classes: i
 
     return {
         "tile_url": map_id["tile_fetcher"].url_format,
+        "thumb_url": thumb_url,
         "stats": {
             "Mean LST (°C)": round(stats.get("LST_mean") or 0, 2),
             "Min LST (°C)": round(stats.get("LST_min") or 0, 2),

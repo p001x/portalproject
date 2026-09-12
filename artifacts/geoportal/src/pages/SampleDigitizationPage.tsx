@@ -50,6 +50,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { MapContainer, TileLayer, GeoJSON, Polyline as LeafletPolyline, Polygon as LeafletPolygon, useMapEvents, useMap, FeatureGroup } from "react-leaflet";
 import { EditControl } from "react-leaflet-draw";
 import "leaflet/dist/leaflet.css";
@@ -1035,235 +1036,273 @@ export function SampleDigitizationPage() {
   };
 
   return (
-      <div className="flex flex-col h-full bg-background overflow-y-auto p-6 relative">
-      <div className="flex items-center gap-2 text-primary font-semibold text-xl mb-2">
-        <Edit className="w-5 h-5" />
-        Sample Digitization &amp; Machine Learning
-      </div>
-      <p className="text-sm text-muted-foreground mb-6">
-        Digitize training samples, import datasets from RARE DATA or URLs, and train Supervised Machine Learning classifiers.
-      </p>
+    <div className="flex flex-col h-full bg-background overflow-hidden relative">
+      {/* Top Header */}
+      <div className="flex flex-wrap items-center justify-between px-6 py-4 border-b bg-card/95 backdrop-blur z-[50]">
+        <div className="flex flex-col">
+          <div className="flex items-center gap-2 text-emerald-500 font-bold text-xl">
+            <Edit className="w-5 h-5" />
+            Sample Digitization &amp; ML
+          </div>
+          <p className="text-xs text-muted-foreground mt-1">
+            Digitize training samples and train Supervised Machine Learning classifiers.
+          </p>
+        </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col">
-        <TabsList className="mb-4 self-start">
-          <TabsTrigger value="map" className="gap-1.5">
-            <Edit className="w-4 h-4" /> Map &amp; Digitizer
-          </TabsTrigger>
-          <TabsTrigger value="classify" className="gap-1.5">
-            <Cpu className="w-4 h-4 text-emerald-500" /> Supervised Classification
-          </TabsTrigger>
-          <TabsTrigger value="import" className="gap-1.5">
-            <Database className="w-4 h-4 text-blue-500" /> Import RARE DATA &amp; Links
-          </TabsTrigger>
-          <TabsTrigger value="gee" className="gap-1.5">
-            <Upload className="w-4 h-4 text-amber-500" /> GEE Asset Upload
-          </TabsTrigger>
-        </TabsList>
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-auto mt-4 sm:mt-0">
+          <TabsList className="bg-muted">
+            <TabsTrigger value="map" className="gap-1.5 data-[state=active]:bg-emerald-500 data-[state=active]:text-white transition-all">
+              <Edit className="w-4 h-4" /> Map &amp; Digitizer
+            </TabsTrigger>
+            <TabsTrigger value="classify" className="gap-1.5 data-[state=active]:bg-emerald-500 data-[state=active]:text-white transition-all">
+              <Cpu className="w-4 h-4" /> Supervised Classification
+            </TabsTrigger>
+            <TabsTrigger value="import" className="gap-1.5 data-[state=active]:bg-blue-500 data-[state=active]:text-white transition-all">
+              <Database className="w-4 h-4" /> Import Data
+            </TabsTrigger>
+            <TabsTrigger value="gee" className="gap-1.5 data-[state=active]:bg-amber-500 data-[state=active]:text-white transition-all">
+              <Upload className="w-4 h-4" /> GEE Asset
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </div>
+      
+      <div className="flex-1 relative overflow-hidden flex flex-col">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col h-full w-full">
 
         {/* 1. MAP & SAMPLES TAB */}
-        <TabsContent value="map" className="flex-1 space-y-6">
-          <div className="flex gap-4">
-            <div className="w-80 shrink-0 space-y-4">
-              <div className="border rounded-lg p-4 space-y-3 bg-card">
-                <div className="flex items-center justify-between font-medium text-sm">
-                  <span>Add Training Sample</span>
-                  <span className="text-[10px] text-muted-foreground">Click map to pin point</span>
-                </div>
+        <TabsContent value="map" className="h-full w-full m-0 p-0 flex absolute inset-0">
+          <div className="w-96 flex-none bg-card/95 backdrop-blur-xl border-r border-border overflow-y-auto custom-scrollbar z-10 flex flex-col p-4 space-y-4 shadow-xl">
+            <Accordion type="multiple" defaultValue={["add-sample", "study-area"]} className="w-full">
+              
+              {/* Add Sample Accordion */}
+              <AccordionItem value="add-sample" className="border-b-0">
+                <AccordionTrigger className="hover:no-underline py-2">
+                  <div className="flex items-center gap-2">
+                    <Edit className="w-4 h-4 text-emerald-500" />
+                    <span className="font-semibold text-sm">Add Training Sample</span>
+                  </div>
+                </AccordionTrigger>
+                <AccordionContent>
+                  <div className="space-y-4 pt-2">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs font-semibold text-muted-foreground">Quick Select Class (or type a new one below)</Label>
+                      <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto p-1.5 border rounded-md bg-muted/20">
+                        {[
+                          { name: "Built-up", color: "#ff0000" },
+                          { name: "Vegetation", color: "#00ff00" },
+                          { name: "Water", color: "#0000ff" },
+                          { name: "Rocks", color: "#8b4513" },
+                          { name: "Swamp", color: "#800080" },
+                          { name: "Forest", color: "#006400" },
+                          { name: "Cropland", color: "#ffff00" },
+                          { name: "Grass", color: "#7cfc00" },
+                          { name: "Shrubland", color: "#a0522d" },
+                          { name: "Mangrove", color: "#004d00" },
+                          { name: "Rural Settlement", color: "#ffa500" },
+                          { name: "Dense Forest", color: "#228b22" },
+                          { name: "Bare Land", color: "#d2b48c" },
+                          { name: "Permanent Water", color: "#4169e1" },
+                          { name: "Plantation Crops", color: "#9acd32" },
+                          { name: "Savanna Woodland", color: "#bdb76b" },
+                          { name: "Dense Urban", color: "#8b0000" },
+                          { name: "Floodplain", color: "#87ceeb" },
+                          { name: "Aquatic Vegetation", color: "#20b2aa" }
+                        ].map((p) => (
+                          <button
+                            key={p.name}
+                            type="button"
+                            onClick={() => { 
+                              setClassLabel(p.name); 
+                              setColor(p.color); 
+                              if (isEditing) {
+                                setTimeout(() => autoStartDrawMode(drawMode, true), 50);
+                              }
+                            }}
+                            className="text-[10px] px-1.5 py-0.5 rounded border flex items-center gap-1 bg-background hover:bg-accent transition-colors"
+                          >
+                            <span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: p.color }} />
+                            {p.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
 
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold text-muted-foreground">Quick Select Class (or type a new one below)</Label>
-                  <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto p-1.5 border rounded-md bg-muted/20">
-                    {[
-                      { name: "Built-up", color: "#ff0000" },
-                      { name: "Vegetation", color: "#00ff00" },
-                      { name: "Water", color: "#0000ff" },
-                      { name: "Rocks", color: "#8b4513" },
-                      { name: "Swamp", color: "#800080" },
-                      { name: "Forest", color: "#006400" },
-                      { name: "Cropland", color: "#ffff00" },
-                      { name: "Grass", color: "#7cfc00" },
-                      { name: "Shrubland", color: "#a0522d" },
-                      { name: "Mangrove", color: "#004d00" },
-                      { name: "Rural Settlement", color: "#ffa500" },
-                      { name: "Dense Forest", color: "#228b22" },
-                      { name: "Bare Land", color: "#d2b48c" },
-                      { name: "Permanent Water", color: "#4169e1" },
-                      { name: "Plantation Crops", color: "#9acd32" },
-                      { name: "Savanna Woodland", color: "#bdb76b" },
-                      { name: "Dense Urban", color: "#8b0000" },
-                      { name: "Floodplain", color: "#87ceeb" },
-                      { name: "Aquatic Vegetation", color: "#20b2aa" }
-                    ].map((p) => (
-                      <button
-                        key={p.name}
-                        type="button"
-                        onClick={() => { 
-                          setClassLabel(p.name); 
-                          setColor(p.color); 
-                          // Keep drawing tool enabled
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <Label>Class Label</Label>
+                        <input
+                          value={classLabel}
+                          onChange={(e) => setClassLabel(e.target.value)}
+                          placeholder="e.g. Forest, Urban"
+                          className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Numerical ID</Label>
+                        <input
+                          type="number"
+                          value={classValue}
+                          onChange={(e) => setClassValue(parseInt(e.target.value) || 1)}
+                          className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <Label>Color</Label>
+                        <input
+                          type="color"
+                          value={color}
+                          onChange={(e) => setColor(e.target.value)}
+                          className="w-full h-9 rounded-md border border-input cursor-pointer p-0.5"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Creator</Label>
+                        <input
+                          value={creator}
+                          onChange={(e) => setCreator(e.target.value)}
+                          placeholder="Your name"
+                          className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                        />
+                      </div>
+                    </div>
+
+                    <Accordion type="single" collapsible className="w-full">
+                      <AccordionItem value="advanced" className="border-none">
+                        <AccordionTrigger className="text-xs text-muted-foreground hover:text-foreground py-1">Advanced Settings (GeoJSON)</AccordionTrigger>
+                        <AccordionContent>
+                          <textarea
+                            value={geoJsonText}
+                            onChange={(e) => setGeoJsonText(e.target.value)}
+                            placeholder='{"type":"Point","coordinates":[29.87,-1.94]}'
+                            rows={4}
+                            className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-ring font-mono mt-2 resize-y"
+                          />
+                        </AccordionContent>
+                      </AccordionItem>
+                    </Accordion>
+
+                    {parseError && <p className="text-xs text-destructive">{parseError}</p>}
+
+                    <Button
+                      className={`w-full gap-2 font-bold transition-all ${isEditing ? "bg-emerald-600 hover:bg-emerald-500 text-white" : ""}`}
+                      onClick={handleSaveSample}
+                      disabled={addMut.isPending || !classLabel || !geoJsonText}
+                    >
+                      {addMut.isPending ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : isEditing ? (
+                        <Save className="w-4 h-4" />
+                      ) : (
+                        <Edit className="w-4 h-4" />
+                      )}
+                      {isEditing ? `Add to Buffer (#${sessionSamples.length + 1})` : "Save Sample"}
+                    </Button>
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+
+              {/* Study Area Accordion */}
+              <AccordionItem value="study-area" className="border-b-0">
+                <AccordionTrigger className="hover:no-underline py-2">
+                  <div className="flex items-center gap-2">
+                    <MapPin className="w-4 h-4 text-destructive" />
+                    <span className="font-semibold text-sm">Define Study Area</span>
+                  </div>
+                </AccordionTrigger>
+                <AccordionContent>
+                  <div className="space-y-3 pt-2">
+                    <p className="text-xs text-muted-foreground">You must define a study area before digitizing samples.</p>
+                    
+                    <div className="flex gap-2 items-center flex-wrap">
+                      <Button 
+                        size="sm" 
+                        variant={isDrawingStudyArea ? "default" : "outline"} 
+                        className="h-8 text-xs flex-1" 
+                        onClick={() => {
                           if (isEditing) {
-                            setTimeout(() => autoStartDrawMode(drawMode, true), 50);
+                            toast({ title: "Stop Edit Session first" });
+                            return;
+                          }
+                          if (!isDrawingStudyArea) {
+                            setIsDrawingStudyArea(true);
+                            setStudyArea(null);
+                            setTimeout(() => autoStartDrawMode("polygon", true), 300);
+                          } else {
+                            setIsDrawingStudyArea(false);
                           }
                         }}
-                        className="text-[10px] px-1.5 py-0.5 rounded border flex items-center gap-1 bg-background hover:bg-accent transition-colors"
                       >
-                        <span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: p.color }} />
-                        {p.name}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <div className="space-y-1">
-                    <Label>Class Label</Label>
-                    <input
-                      value={classLabel}
-                      onChange={(e) => setClassLabel(e.target.value)}
-                      placeholder="e.g. Forest, Urban, Water"
-                      className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label>Numerical ID</Label>
-                    <input
-                      type="number"
-                      value={classValue}
-                      onChange={(e) => setClassValue(parseInt(e.target.value) || 1)}
-                      className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <Label>Color</Label>
-                  <input
-                    type="color"
-                    value={color}
-                    onChange={(e) => setColor(e.target.value)}
-                    className="w-full h-9 rounded-md border border-input cursor-pointer"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <Label>Creator</Label>
-                  <input
-                    value={creator}
-                    onChange={(e) => setCreator(e.target.value)}
-                    placeholder="Your name"
-                    className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                  />
-                </div>
-
-                <div className="space-y-1">
-                  <Label>Geometry (GeoJSON)</Label>
-                  <textarea
-                    value={geoJsonText}
-                    onChange={(e) => setGeoJsonText(e.target.value)}
-                    placeholder='{"type":"Point","coordinates":[29.87,-1.94]}'
-                    rows={4}
-                    className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring font-mono resize-y"
-                  />
-                </div>
-
-                {parseError && <p className="text-xs text-destructive">{parseError}</p>}
-
-                <Button
-                  className={`w-full gap-2 font-bold ${isEditing ? "bg-emerald-600 hover:bg-emerald-500 text-white" : ""}`}
-                  onClick={handleSaveSample}
-                  disabled={addMut.isPending || !classLabel || !geoJsonText}
-                >
-                  {addMut.isPending ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : isEditing ? (
-                    <Save className="w-4 h-4" />
-                  ) : (
-                    <Edit className="w-4 h-4" />
-                  )}
-                  {isEditing ? `Add Feature to Session Buffer (#${sessionSamples.length + 1})` : "Save Sample Immediately"}
-                </Button>
-              </div>
-            </div>
-
-            <div className="flex-1 space-y-2">
-              {/* Study Area Section */}
-              <div className="bg-card p-3 rounded-lg border border-destructive/30 space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label className="text-sm font-bold uppercase tracking-wider text-destructive/80">0. Define Study Area</Label>
-                  {studyArea && <Badge variant="outline" className="bg-emerald-500/10 text-emerald-600 border-emerald-500/20">Set</Badge>}
-                </div>
-                <p className="text-xs text-muted-foreground">You must define a study area before digitizing samples.</p>
-                <div className="flex gap-2 items-center flex-wrap">
-                  <Button 
-                    size="sm" 
-                    variant={isDrawingStudyArea ? "default" : "outline"} 
-                    className="h-8 text-xs" 
-                    onClick={() => {
-                      if (isEditing) {
-                        toast({ title: "Stop Edit Session first" });
-                        return;
-                      }
-                      if (!isDrawingStudyArea) {
-                        setIsDrawingStudyArea(true);
-                        setStudyArea(null);
-                        setTimeout(() => autoStartDrawMode("polygon", true), 300);
-                      } else {
-                        setIsDrawingStudyArea(false);
-                      }
-                    }}
-                  >
-                    {isDrawingStudyArea ? "Cancel Draw" : "Draw on Map"}
-                  </Button>
-                  
-                  <div className="relative">
-                    <input 
-                      type="file" 
-                      accept=".zip" 
-                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                      onChange={async (e) => {
-                        const file = e.target.files?.[0];
-                        if (!file) return;
-                        try {
-                          const buffer = await file.arrayBuffer();
-                          const shp = await import('shpjs');
-                          const geojson = await shp.default(buffer);
-                          setStudyArea(geojson);
-                          toast({ title: "Study Area Uploaded" });
-                        } catch (err) {
-                          console.error(err);
-                          toast({ title: "Upload Failed", description: "Could not parse zip shapefile", variant: "destructive" });
-                        }
-                        e.target.value = '';
-                      }}
-                    />
-                    <Button size="sm" variant="outline" className="h-8 text-xs">Upload .zip Shapefile</Button>
-                  </div>
-                  
-                  {studyArea && (
-                    <div className="flex items-center gap-4 ml-auto">
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          id="show-study-area"
-                          checked={showStudyArea}
-                          onChange={(e) => setShowStudyArea(e.target.checked)}
-                          className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-                        />
-                        <Label htmlFor="show-study-area" className="text-xs cursor-pointer">
-                          Show on Map
-                        </Label>
-                      </div>
-                      <Button size="sm" variant="destructive" className="h-8 text-xs" onClick={() => {
-                         setStudyArea(null);
-                         if (isEditing) setIsEditing(false); 
-                      }}>
-                        Clear
+                        {isDrawingStudyArea ? "Cancel Draw" : "Draw on Map"}
                       </Button>
+                      
+                      <div className="relative flex-1">
+                        <input 
+                          type="file" 
+                          accept=".zip" 
+                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                          onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            try {
+                              const buffer = await file.arrayBuffer();
+                              const shp = await import('shpjs');
+                              const geojson = await shp.default(buffer);
+                              setStudyArea(geojson);
+                              toast({ title: "Study Area Uploaded" });
+                            } catch (err) {
+                              console.error(err);
+                              toast({ title: "Upload Failed", description: "Could not parse zip shapefile", variant: "destructive" });
+                            }
+                            e.target.value = '';
+                          }}
+                        />
+                        <Button size="sm" variant="outline" className="h-8 text-xs w-full">Upload .zip Shapefile</Button>
+                      </div>
                     </div>
-                  )}
-                </div>
-              </div>
 
+                    {studyArea && (
+                      <div className="flex flex-col gap-2 mt-2 bg-destructive/10 p-2 rounded border border-destructive/20">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-medium text-destructive">Study Area Defined</span>
+                          <Badge variant="outline" className="bg-emerald-500/10 text-emerald-600 border-emerald-500/20 text-[10px]">Set</Badge>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              id="show-study-area"
+                              checked={showStudyArea}
+                              onChange={(e) => setShowStudyArea(e.target.checked)}
+                              className="h-3.5 w-3.5 rounded border-gray-300 text-primary focus:ring-primary"
+                            />
+                            <Label htmlFor="show-study-area" className="text-xs cursor-pointer">
+                              Show on Map
+                            </Label>
+                          </div>
+                          <Button size="sm" variant="destructive" className="h-6 text-[10px] px-2" onClick={() => {
+                             setStudyArea(null);
+                             if (isEditing) setIsEditing(false); 
+                          }}>
+                            Clear
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+            </Accordion>
+          </div>
+          
+          <div className="flex-1 relative bg-muted/10 overflow-hidden flex flex-col">
+            {/* Overlay toolbars inside map area */}
+            {/* Left Overlay toolbars */}
+            <div className="absolute top-4 left-4 right-[24rem] z-[1000] flex flex-col gap-2 pointer-events-none">
+                <div className="pointer-events-auto w-full flex flex-col gap-2 max-w-2xl">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-card p-2 rounded-lg border">
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground mr-1">Draw Tool:</Label>
@@ -1537,6 +1576,11 @@ export function SampleDigitizationPage() {
                 </div>
               )}
 
+                </div>
+            </div>
+            {/* Right Overlay toolbars */}
+            <div className="absolute top-4 right-4 z-[1000] flex flex-col gap-2 pointer-events-none w-80">
+                <div className="pointer-events-auto w-full flex flex-col gap-2">
               {/* ──────────────────────────────────────────────────────────────
                    TIMELAPSE IMAGERY PANEL
               ────────────────────────────────────────────────────────────── */}
@@ -1796,7 +1840,9 @@ export function SampleDigitizationPage() {
                 )}
               </div>
 
-              <div className="rounded-lg border overflow-hidden" style={{ height: "480px" }}>
+                </div>
+            </div>
+<div className="h-full w-full absolute inset-0 z-0 bg-muted/10">
 
                 <MapContainer center={[-1.94, 29.87]} zoom={9} style={{ height: "100%", width: "100%" }} scrollWheelZoom>
                   <MapBoundsController bbox={activeBbox} />
@@ -1962,7 +2008,6 @@ export function SampleDigitizationPage() {
                     <LeafletPolygon positions={activePoints} color="#00E5FF" fillColor="#00E5FF" fillOpacity={0.35} />
                   )}
                 </MapContainer>
-              </div>
             </div>
           </div>
 
@@ -2666,6 +2711,7 @@ export function SampleDigitizationPage() {
           </div>
         </TabsContent>
       </Tabs>
+      </div>
 
       {/* ADD DATA MODAL */}
       <Dialog open={isAddDataModalOpen} onOpenChange={setIsAddDataModalOpen}>
@@ -2680,10 +2726,9 @@ export function SampleDigitizationPage() {
           </DialogHeader>
 
           <Tabs value={addDataTab} onValueChange={setAddDataTab}>
-            <TabsList className="w-full grid grid-cols-3">
+            <TabsList className="w-full grid grid-cols-2">
               <TabsTrigger value="upload">Upload Local</TabsTrigger>
               <TabsTrigger value="rare">RARE DATA</TabsTrigger>
-              <TabsTrigger value="url">Link / URL</TabsTrigger>
             </TabsList>
             
             <TabsContent value="upload" className="space-y-4 pt-4">
@@ -2770,72 +2815,7 @@ export function SampleDigitizationPage() {
               </Button>
             </TabsContent>
             
-            <TabsContent value="url" className="space-y-4 pt-4">
-              <div className="space-y-1">
-                <div className="flex justify-between items-end">
-                  <Label>Dataset Link URL</Label>
-                  <select
-                    className="text-xs border rounded px-2 py-1 bg-muted/30 max-w-[200px]"
-                    onChange={(e) => {
-                      if (e.target.value) {
-                        setLinkUrl(e.target.value);
-                        e.target.value = "";
-                      }
-                    }}
-                  >
-                    <option value="">Quick Templates...</option>
-                    <optgroup label="Working Test Links">
-                      <option value="https://github.com/mapbox/rasterio/raw/master/tests/data/RGB.byte.tif">Mapbox RGB.byte.tif</option>
-                      <option value="https://sentinel-cogs.s3.us-west-2.amazonaws.com/sentinel-s2-l2a-cogs/36/M/BE/2024/1/S2A_36MBE_20240115_0_L2A/B04.tif">Sentinel-2 COG</option>
-                      <option value="https://storage.googleapis.com/gcp-public-data-landsat/LC08/01/044/034/LC80440342016259LGN00/LC80440342016259LGN00_B4.TIF">Landsat 8 GCS</option>
-                      <option value="https://s3.amazonaws.com/elevation-tiles-prod/geotiff/12/2340/1600.tif">AWS Elevation DEM</option>
-                      <option value="https://earth-search.aws.element84.com/v1/collections/sentinel-2-l2a/items/S2A_36MBE_20240115_0_L2A">STAC Item JSON</option>
-                      <option value="https://github.com/OSGeo/gdal/raw/master/autotest/gdrivers/data/small_world.zip">GDAL Zipped Raster</option>
-                    </optgroup>
-                  </select>
-                </div>
-                <input
-                  value={linkUrl}
-                  onChange={(e) => setLinkUrl(e.target.value)}
-                  placeholder="https://example.com/rwanda_data.tif"
-                  className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring font-mono"
-                />
-              </div>
-              <Button
-                onClick={() => {
-                  if (!linkUrl) return;
-                  if (linkUrl.includes("{") && linkUrl.includes("}")) {
-                    toast({ variant: "destructive", title: "Placeholders Detected", description: "You must replace the {placeholders} in the template URL with actual values before using it." });
-                    return;
-                  }
-                  if (linkUrl.startsWith("http") && !linkUrl.includes("googleapis.com/storage") && !linkUrl.endsWith(".geojson")) {
-                    toast({
-                      title: "Preparing Native Analysis Engine",
-                      description: "Configuring local classification and flying to dataset location..."
-                    });
-                    setClassificationSource("native_cog");
-                    setCustomAssetId(linkUrl);
-                    setActiveTab("map");
-                    setNativePreviewUrl(`https://geoportal-api-ygzi.onrender.com/api/native/imagery/tiles/{z}/{x}/{y}?url=${encodeURIComponent(linkUrl)}`);
-                    fetch(`https://geoportal-api-ygzi.onrender.com/api/native/imagery/bounds?url=${encodeURIComponent(linkUrl)}`)
-                      .then((r) => r.json())
-                      .then((d) => {
-                        if (d.bbox) setActiveBbox(d.bbox);
-                      })
-                      .catch(() => {});
-                    setIsAddDataModalOpen(false);
-                    return;
-                  }
-                  loadImageryMut.mutate({ dataSource: "custom", customAssetId: linkUrl });
-                  setIsAddDataModalOpen(false);
-                }}
-                disabled={loadImageryMut.isPending || !linkUrl}
-                className="w-full gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
-              >
-                {loadImageryMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4" />}
-                Classify by Here
-              </Button>
-            </TabsContent>
+
           </Tabs>
         </DialogContent>
       </Dialog>

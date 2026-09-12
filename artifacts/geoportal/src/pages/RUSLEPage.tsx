@@ -28,6 +28,12 @@ import { ReportDownloadButton } from "@/components/ReportDownloadButton";
 import { MapExportControls } from "@/components/MapExportControls";
 import { StudyAreaSelector } from "@/components/StudyAreaSelector";
 
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/components/ui/resizable";
+
 const DISTRICTS = [
   "Bugesera","Burera","Gakenke","Gasabo","Gatsibo","Gicumbi","Gisagara",
   "Huye","Kamonyi","Karongi","Kayonza","Kicukiro","Kirehe","Muhanga",
@@ -96,9 +102,10 @@ export function RUSLEPage() {
   };
 
   return (
-    <div className="flex flex-col md:flex-row h-full overflow-y-auto md:overflow-hidden">
+    <ResizablePanelGroup direction="horizontal" className="h-full items-stretch">
       {/* ── Controls sidebar ─────────────────────────────────────── */}
-      <aside className="w-full md:w-64 shrink-0 border-b md:border-b-0 md:border-r bg-card flex flex-col gap-5 p-5 md:overflow-y-auto">
+      <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
+        <aside className="h-full w-full md:border-b md:border-b-0 md:border-r bg-card flex flex-col gap-5 p-5 md:overflow-y-auto">
         <div className="flex items-center gap-2 text-primary font-semibold text-lg">
           <Mountain className="w-5 h-5" />
           RUSLE Analysis
@@ -180,10 +187,23 @@ export function RUSLEPage() {
       </aside>
 
       {/* ── Results ──────────────────────────────────────────────── */}
-      <main id="report-container" className="flex-1 md:overflow-y-auto p-4 md:p-6 bg-background">
+      </ResizablePanel>
+      
+      <ResizableHandle withHandle />
+      
+      <ResizablePanel defaultSize={75}>
+        <main id="report-container" className="h-full flex flex-col flex-1 md:overflow-y-auto p-4 md:p-6 bg-background">
         {!data && !isPending && (
-          <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
-            Select a district and year, then click <strong className="mx-1">Run RUSLE</strong>.
+          <div className="h-full relative bg-muted/20 rounded-lg overflow-hidden border">
+            <DistrictMap aoi={aoi} basemap="satellite" />
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-4 z-[1000]">
+              <div className="bg-background/80 backdrop-blur-md p-6 rounded-2xl shadow-xl border border-primary/20 text-center max-w-sm pointer-events-none transition-all hover:scale-105 duration-300">
+                <h3 className="text-xl font-bold mb-2 text-foreground">Analysis Configuration</h3>
+                <p className="text-sm text-muted-foreground">
+                  Select a study area and parameters from the sidebar, then click run to visualize the results here.
+                </p>
+              </div>
+            </div>
           </div>
         )}
 
@@ -452,6 +472,7 @@ export function RUSLEPage() {
           </Tabs>
         )}
       </main>
-    </div>
+      </ResizablePanel>
+    </ResizablePanelGroup>
   );
 }

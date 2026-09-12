@@ -32,7 +32,6 @@ export function GEEAuthGate({ children }: GEEAuthGateProps) {
   const [email, setEmail] = useState("");
   const [projectName, setProjectName] = useState("");
   const [loginEmail, setLoginEmail] = useState("");
-  const [loginProjectName, setLoginProjectName] = useState("");
   const [loginError, setLoginError] = useState("");
   const [loggingIn, setLoggingIn] = useState(false);
   const [useDevFallback, setUseDevFallback] = useState(false);
@@ -98,7 +97,7 @@ export function GEEAuthGate({ children }: GEEAuthGateProps) {
     } catch (e) {
       console.error("Error initializing Google Sign-In button:", e);
     }
-  }, [loginProjectName]);
+  }, []);
 
   useEffect(() => {
     if (!authenticated && !checking) {
@@ -126,13 +125,12 @@ export function GEEAuthGate({ children }: GEEAuthGateProps) {
     setLoginError("");
     setLoggingIn(true);
     try {
-      const result = await api.geeAuth.login(credential, loginProjectName.trim() || undefined);
+      const result = await api.geeAuth.login(credential, undefined);
       if (result.ok && result.token) {
         setGeeAuth(result.token, result.email, result.project_name);
         setAuthenticated(true);
         setEmail(result.email);
         if (result.project_name) setProjectName(result.project_name);
-        setLoginProjectName("");
       } else {
         setLoginError("Authentication failed. Please try again.");
       }
@@ -153,14 +151,13 @@ export function GEEAuthGate({ children }: GEEAuthGateProps) {
     setLoggingIn(true);
     try {
       // In dev fallback mode, we pass email as token credential
-      const result = await api.geeAuth.login(trimmed, loginProjectName.trim() || undefined);
+      const result = await api.geeAuth.login(trimmed, undefined);
       if (result.ok && result.token) {
         setGeeAuth(result.token, result.email, result.project_name);
         setAuthenticated(true);
         setEmail(result.email);
         if (result.project_name) setProjectName(result.project_name);
         setLoginEmail("");
-        setLoginProjectName("");
       } else {
         setLoginError("Authentication failed. Please try again.");
       }
@@ -229,26 +226,6 @@ export function GEEAuthGate({ children }: GEEAuthGateProps) {
 
             {/* Login Form */}
             <div className="px-8 py-6 space-y-5">
-              <div className="space-y-2">
-                <Label
-                  htmlFor="gee-project"
-                  className="text-sm font-medium flex items-center gap-2"
-                >
-                  <Globe2 className="w-4 h-4 text-muted-foreground" />
-                  GEE Project Name (Optional)
-                </Label>
-                <Input
-                  id="gee-project"
-                  type="text"
-                  placeholder="e.g. ee-petersonyang87"
-                  value={loginProjectName}
-                  onChange={(e) => {
-                    setLoginProjectName(e.target.value);
-                    setLoginError("");
-                  }}
-                  className="h-11 text-sm"
-                />
-              </div>
 
               {loginError && (
                 <div className="flex items-start gap-2 p-3 rounded-lg bg-destructive/10 border border-destructive/20">

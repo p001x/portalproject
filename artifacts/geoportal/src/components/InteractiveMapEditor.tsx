@@ -31,6 +31,8 @@ interface ElementData {
   color?: string;
   bgColor?: string;
   fontSize?: number;
+  fontFamily?: string;
+  legendItems?: { label: string; color: string }[];
   visible: boolean;
   variant?: string;
 }
@@ -98,6 +100,10 @@ export function InteractiveMapEditor({
       color: "#1a1a2e",
       visible: !!classAreas,
       variant: "vertical",
+      legendItems: classAreas && palette ? Object.keys(classAreas).map((cls, i) => ({
+        label: cls.split(" (")[0],
+        color: palette[i % palette.length]
+      })) : undefined,
     },
     {
       id: "north-arrow",
@@ -141,6 +147,25 @@ export function InteractiveMapEditor({
       return next;
     });
   }, [canvasSize]);
+
+  // Sync palette and classAreas props to legend element if it exists
+  useEffect(() => {
+    setElementsState(prev => {
+      let changed = false;
+      const next = prev.map(el => {
+        if (el.id === "legend-box" && el.type === "legend" && classAreas && palette) {
+          const newLegendItems = Object.keys(classAreas).map((cls, i) => ({
+            label: cls.split(" (")[0],
+            color: palette[i % palette.length]
+          }));
+          changed = true;
+          return { ...el, legendItems: newLegendItems };
+        }
+        return el;
+      });
+      return changed ? next : prev;
+    });
+  }, [classAreas, palette]);
 
   const commitHistoryRef = useRef(elements);
   useEffect(() => {
@@ -343,7 +368,7 @@ export function InteractiveMapEditor({
         {el.type === "text" && (
           <div
             className="w-full h-full bg-transparent border-none outline-none font-bold flex items-center"
-            style={{ fontSize: `${el.fontSize}px`, color: el.color }}
+            style={{ fontSize: `${el.fontSize}px`, color: el.color, fontFamily: el.fontFamily || "inherit" }}
           >
             {el.content}
           </div>
@@ -352,19 +377,19 @@ export function InteractiveMapEditor({
         {el.type === "legend" && (
           <div 
             className="p-2 text-xs border rounded shadow-sm flex flex-col"
-            style={{ borderColor: el.color || "#e5e7eb" }}
+            style={{ borderColor: el.color || "#e5e7eb", fontFamily: el.fontFamily || "inherit" }}
           >
             <div className="font-semibold mb-2" style={{ color: el.color }}>Legend</div>
-            {classAreas && palette ? (
+            {el.legendItems ? (
               <div className={`flex ${el.variant === "compact" ? "flex-row flex-wrap" : "flex-col"} gap-1.5 overflow-hidden`}>
-                {Object.keys(classAreas).map((cls, i) => (
-                  <div key={cls} className="flex items-center gap-2">
+                {el.legendItems.map((item, i) => (
+                  <div key={i} className="flex items-center gap-2">
                     <div
                       className="w-3 h-3 border shrink-0 rounded-sm"
-                      style={{ backgroundColor: palette[i % palette.length], borderColor: el.color || "#d1d5db" }}
+                      style={{ backgroundColor: item.color, borderColor: el.color || "#d1d5db" }}
                     />
-                    <span className="truncate whitespace-nowrap" title={cls} style={{ color: el.color }}>
-                      {cls.split(" (")[0]}
+                    <span className="truncate whitespace-nowrap" title={item.label} style={{ color: el.color }}>
+                      {item.label}
                     </span>
                   </div>
                 ))}
@@ -836,6 +861,62 @@ export function InteractiveMapEditor({
                 className="w-full"
               />
               <div className="text-xs text-right text-muted-foreground">{selectedElement.fontSize}px</div>
+            </div>
+          )}
+
+          {selectedElement && (selectedElement.type === "text" || selectedElement.type === "legend") && (
+            <div className="space-y-2">
+              <Label>Font Family</Label>
+              <Select 
+                value={selectedElement.fontFamily || "inherit"} 
+                onValueChange={(val) => {
+                  updateElement(selectedElement.id, { fontFamily: val });
+                  commitHistory();
+                }}
+              >
+                <SelectTrigger><SelectValue placeholder="System Default" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="inherit">System Default</SelectItem>
+                  <SelectItem value="Arial, sans-serif">Arial</SelectItem>
+                  <SelectItem value="Calibri, sans-serif">Calibri</SelectItem>
+                  <SelectItem value="Times New Roman, serif">Times New Roman</SelectItem>
+                  <SelectItem value="Georgia, serif">Georgia</SelectItem>
+                  <SelectItem value="Courier New, monospace">Courier New</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {selectedElement && selectedElement.type === "legend" && selectedElement.legendItems && (
+            <div className="space-y-2 pt-2 border-t">
+              <Label>Edit Legend Classes</Label>
+              <div className="flex flex-col gap-2 max-h-60 overflow-y-auto pr-1">
+                {selectedElement.legendItems.map((item, idx) => (
+                  <div key={idx} className="flex items-center gap-2 bg-muted p-1 rounded border">
+                    <input
+                      type="color"
+                      value={item.color}
+                      onChange={(e) => {
+                        const nextItems = [...(selectedElement.legendItems || [])];
+                        nextItems[idx].color = e.target.value;
+                        updateElement(selectedElement.id, { legendItems: nextItems });
+                      }}
+                      onBlur={() => commitHistory()}
+                      className="w-6 h-6 p-0 border-0 rounded cursor-pointer bg-transparent shrink-0"
+                    />
+                    <input
+                      value={item.label}
+                      onChange={(e) => {
+                        const nextItems = [...(selectedElement.legendItems || [])];
+                        nextItems[idx].label = e.target.value;
+                        updateElement(selectedElement.id, { legendItems: nextItems });
+                      }}
+                      onBlur={() => commitHistory()}
+                      className="flex-1 w-full bg-background px-2 py-1 text-xs border rounded"
+                    />
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 

@@ -150,7 +150,7 @@ def commit_and_push(message: str = "Auto-save", max_retries: int = 3) -> bool:
 
 def _log_sync_entry(timestamp: str, message: str, success: bool, backend: str):
     """Append to config/sync-log.md."""
-    from backend.storage.storage_service import StorageService
+    from storage.storage_service import StorageService
     status = "✅" if success else "❌"
     entry = f"| {timestamp} | {status} | {backend} | {message} |"
     try:

@@ -2,6 +2,17 @@ import json
 """Landfill site suitability (SMCE / Weighted Overlay) — FastAPI backend."""
 import math
 import ee
+
+def get_dynamic_scale(geom):
+    try:
+        area_sqkm = geom.area().divide(1e6).getInfo()
+        if area_sqkm > 10000: return 500
+        elif area_sqkm > 2000: return 250
+        elif area_sqkm > 500: return 100
+        else: return 30
+    except:
+        return 250
+
 from cachetools import TTLCache
 from threading import Lock
 import concurrent.futures
@@ -74,7 +85,8 @@ def compute_ahp_data(weights: dict) -> dict:
     }
 
 
-def _distance_km(mask, aoi, scale=100):
+def _distance_km(mask, aoi, scale=None):
+    if scale is None: scale = get_dynamic_scale(aoi)
     filled = mask.unmask(0).selfMask().unmask(0).toByte()
     distance_m = (
         filled.fastDistanceTransform(256, "pixels", "squared_euclidean")
@@ -147,6 +159,7 @@ def compute_landfill_suitability(
     from gee.aoi_utils import get_aoi_geometry
     aoi = get_aoi_geometry(aoi_config)
 
+
     # ── Slope ──────────────────────────────────────────────────────────────────
     dem = ee.Image("USGS/SRTMGL1_003").select("elevation")
     slope_deg = ee.Terrain.slope(dem)
@@ -207,10 +220,11 @@ def compute_landfill_suitability(
 
     # ── Class areas ────────────────────────────────────────────────────────────
     classes = {
-        "Unsuitable (<2)": suitability.lt(2),
-        "Marginally Suitable (2–3)": suitability.gte(2).And(suitability.lt(3)),
-        "Moderately Suitable (3–4)": suitability.gte(3).And(suitability.lt(4)),
-        "Highly Suitable (4–5)": suitability.gte(4).And(suitability.lte(5)),
+        "Very Unsuitable (< 1.8)": suitability.lt(1.8),
+        "Unsuitable (1.8–2.6)": suitability.gte(1.8).And(suitability.lt(2.6)),
+        "Marginally Suitable (2.6–3.4)": suitability.gte(2.6).And(suitability.lt(3.4)),
+        "Moderately Suitable (3.4–4.2)": suitability.gte(3.4).And(suitability.lt(4.2)),
+        "Highly Suitable (> 4.2)": suitability.gte(4.2),
     }
     labels = list(classes.keys())
     area_img = ee.Image.cat([
@@ -221,7 +235,7 @@ def compute_landfill_suitability(
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
         f_area = executor.submit(
             lambda: area_img.reduceRegion(
-                reducer=ee.Reducer.sum(), geometry=aoi, scale=100, maxPixels=10000, bestEffort=True, tileScale=4
+                reducer=ee.Reducer.sum(), geometry=aoi, scale=get_dynamic_scale(aoi), maxPixels=1e10
             ).getInfo()
         )
 
@@ -229,13 +243,13 @@ def compute_landfill_suitability(
             lambda: quantile_classify(
                 layers=[
                     {"name": "suitability",    "image": suitability,               "title": "Suitability Index"},
-                    {"name": "river_score",    "image": score_images["river"],      "title": "River Distance"},
-                    {"name": "resid_score",    "image": score_images["residential"],"title": "Residential Distance"},
-                    {"name": "slope_score",    "image": score_images["slope"],      "title": "Slope"},
-                    {"name": "road_score",     "image": score_images["road"],       "title": "Road Accessibility"},
-                    {"name": "lulc_score",     "image": score_images["lulc"],       "title": "Land Cover"},
+                    {"name": "river_score",    "image": river_dist_km,      "title": "River Distance (km)"},
+                    {"name": "resid_score",    "image": residential_dist_km,"title": "Residential Distance (km)"},
+                    {"name": "slope_score",    "image": slope_pct,      "title": "Slope (%)"},
+                    {"name": "road_score",     "image": residential_dist_km,       "title": "Road Accessibility (km)"},
+                    {"name": "lulc_score",     "image": lc,       "title": "Land Cover (Categorical)"},
                 ],
-                aoi=aoi, scale=100, n_classes=n_classes,
+                aoi=aoi, scale=get_dynamic_scale(aoi), n_classes=n_classes,
             )
         )
 

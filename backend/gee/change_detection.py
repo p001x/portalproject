@@ -26,17 +26,22 @@ def compute_change_detection(
 
     from gee.aoi_utils import get_aoi_geometry
     aoi = get_aoi_geometry(aoi_config)
+    # Calculate dynamic scale based on geometry size (sq km)
+    area_sqkm = aoi.area().divide(1e6).getInfo()
+    if area_sqkm > 10000:
+        dynamic_scale = 500   # Entire Country (High memory footprint)
+    elif area_sqkm > 2000:
+        dynamic_scale = 250   # Province
+    elif area_sqkm > 500:
+        dynamic_scale = 100   # Large District
+    else:
+        dynamic_scale = 30    # Sector or small polygon
 
+
+    from gee.aoi_utils import get_historical_ndvi
     def get_ndvi(start, end):
-        s2 = (
-            ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
-            .filterDate(start, end)
-            .filterBounds(aoi)
-            .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 20))
-            .select(["B8", "B4"])
-            .median()
-        )
-        return s2.normalizedDifference(["B8", "B4"]).rename("NDVI").clip(aoi)
+        year = int(start[:4])
+        return get_historical_ndvi(aoi, year, start, end, 20)
 
     before_ndvi = get_ndvi(before_start, before_end)
     after_ndvi = get_ndvi(after_start, after_end)
@@ -73,15 +78,14 @@ def compute_change_detection(
                 .combine(ee.Reducer.max(), sharedInputs=True)
                 .combine(ee.Reducer.stdDev(), sharedInputs=True),
                 geometry=aoi,
-                scale=100,
-                maxPixels=10000, bestEffort=True,
-                tileScale=4,
+                scale=dynamic_scale,
+                maxPixels=1e10,
             ).getInfo()
         )
 
         f_area = executor.submit(
             lambda: area_img.reduceRegion(
-                reducer=ee.Reducer.sum(), geometry=aoi, scale=100, maxPixels=10000, bestEffort=True, tileScale=4
+                reducer=ee.Reducer.sum(), geometry=aoi, scale=dynamic_scale, maxPixels=1e10
             ).getInfo()
         )
 

@@ -42,7 +42,8 @@ def class_labels(n: int) -> list:
 
 def add_legend_to_image(thumb_url: str, labels: list, palette: list) -> str:
     try:
-        resp = requests.get(thumb_url, timeout=10)
+        print(f"Fetching thumb_url with timeout=30...")
+        resp = requests.get(thumb_url, timeout=30)
         resp.raise_for_status()
         img = Image.open(io.BytesIO(resp.content)).convert("RGBA")
     except Exception as e:
@@ -68,16 +69,82 @@ def add_legend_to_image(thumb_url: str, labels: list, palette: list) -> str:
     b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
     return f"data:image/png;base64,{b64}"
 
-def quantile_classify(layers: list, aoi, scale: int, n_classes: int) -> dict:
+def get_jenks_breaks(hist, n_classes):
+    import random
+    hist = [b for b in hist if b[1] > 0]
+    if not hist: return []
+    if len(hist) <= n_classes: return sorted([b[0] for b in hist])
+    
+    values = sorted([b[0] for b in hist])
+    centroids = [values[int(i * len(values) / n_classes)] for i in range(n_classes)]
+    
+    for _ in range(30):
+        clusters = [[] for _ in range(n_classes)]
+        cluster_sums = [0.0] * n_classes
+        cluster_counts = [0.0] * n_classes
+        
+        for val, count in hist:
+            distances = [abs(val - c) for c in centroids]
+            min_dist_idx = distances.index(min(distances))
+            clusters[min_dist_idx].append((val, count))
+            cluster_sums[min_dist_idx] += val * count
+            cluster_counts[min_dist_idx] += count
+            
+        new_centroids = []
+        for i, cl in enumerate(clusters):
+            if cluster_counts[i] > 0:
+                new_centroids.append(cluster_sums[i] / cluster_counts[i])
+            else:
+                new_centroids.append(random.choice(values))
+        new_centroids.sort()
+        
+        if centroids == new_centroids:
+            break
+        centroids = new_centroids
+        
+    breaks = []
+    for cl in clusters[:-1]:
+        if cl:
+            breaks.append(max(v for v, c in cl))
+            
+    return sorted(list(set(breaks)))
+
+def get_equal_interval_breaks(hist, n_classes):
+    hist = [b for b in hist if b[1] > 0]
+    if not hist: return []
+    if len(hist) <= n_classes: return sorted([b[0] for b in hist])
+    min_val = hist[0][0]
+    max_val = hist[-1][0]
+    step = (max_val - min_val) / n_classes
+    return [min_val + i * step for i in range(1, n_classes)]
+
+def get_quantile_breaks(hist, n_classes):
+    hist = [b for b in hist if b[1] > 0]
+    if not hist: return []
+    if len(hist) <= n_classes: return sorted([b[0] for b in hist])
+    total = sum(b[1] for b in hist)
+    target_step = total / n_classes
+    breaks = []
+    cum = 0
+    target = target_step
+    for val, count in hist:
+        cum += count
+        while cum >= target and len(breaks) < n_classes - 1:
+            breaks.append(val)
+            target += target_step
+    return sorted(list(set(breaks)))
+
+def quantile_classify(layers: list, aoi, scale: int, n_classes: int, reverse_palette: bool = False, custom_labels: list = None, method: str = "natural_breaks") -> dict:
     """
-    Classify each layer into n_classes using quantile breakpoints computed within
-    `aoi`. All breakpoints and all class areas are fetched in exactly two GEE
-    round-trips regardless of how many layers or classes are requested.
+    Classify each layer into n_classes using Natural Breaks (Jenks 1D KMeans approximation)
+    computed within `aoi`. All breakpoints and all class areas are fetched in exactly 
+    two GEE round-trips.
     """
-    n = max(1, min(n_classes, 10))
-    pct_steps = [round(100 * j / n) for j in range(1, n)]
+    n = max(2, min(n_classes, 10))
     pal  = class_palette(n)
-    lbls = class_labels(n)
+    if reverse_palette:
+        pal = pal[::-1]
+    lbls = custom_labels if custom_labels and len(custom_labels) == n else class_labels(n)
     vis  = {"min": 1, "max": n, "palette": pal}
 
     names  = [lay["name"]  for lay in layers]
@@ -86,20 +153,28 @@ def quantile_classify(layers: list, aoi, scale: int, n_classes: int) -> dict:
 
     all_bands = ee.Image.cat([img.rename(nm) for nm, img in zip(names, images)])
     
-    if not pct_steps:
-        pct_raw = ee.Dictionary()
-    else:
-        pct_raw = all_bands.reduceRegion(
-            reducer=ee.Reducer.percentile(pct_steps),
-            geometry=aoi,
-            scale=scale,
-            maxPixels=10000, bestEffort=True, tileScale=4,
-        ).getInfo()
+    hist_raw = all_bands.reduceRegion(
+        reducer=ee.Reducer.autoHistogram(maxBuckets=100),
+        geometry=aoi,
+        scale=scale,
+        maxPixels=10000, bestEffort=True,
+    ).getInfo()
 
     classified = []
     area_bands = []
     for j, (nm, img) in enumerate(zip(names, images)):
-        bps = [pct_raw.get(f"{nm}_p{p}", 0) or 0 for p in pct_steps] if pct_steps else []
+        band_hist = hist_raw.get(nm) or []
+        if method == "equal_interval":
+            bps = get_equal_interval_breaks(band_hist, n)
+        elif method == "quantiles":
+            bps = get_quantile_breaks(band_hist, n)
+        else:
+            bps = get_jenks_breaks(band_hist, n)
+        # Pad or truncate bps to exactly n-1 elements
+        while len(bps) < n - 1:
+            bps.append(bps[-1] + 0.001 if bps else 1.0)
+        bps = bps[:n-1]
+        
         cls = ee.Image(1)
         for i, bp in enumerate(bps):
             cls = cls.where(img.gt(bp), i + 2)
@@ -112,21 +187,32 @@ def quantile_classify(layers: list, aoi, scale: int, n_classes: int) -> dict:
 
     area_img  = ee.Image.cat(area_bands)
     area_raw  = area_img.reduceRegion(
-        reducer=ee.Reducer.sum(), geometry=aoi, scale=scale, maxPixels=10000, bestEffort=True, tileScale=4
+        reducer=ee.Reducer.sum(), geometry=aoi, scale=scale, maxPixels=10000, bestEffort=True
     ).getInfo()
 
-    panels = []
-    for j, (nm, title) in enumerate(zip(names, titles)):
-        bps = classified[j]["bps"]
-        cls = classified[j]["cls"]
-
+    panels = [None] * len(names)
+    import concurrent.futures
+    
+    def process_panel(j, nm, title, bps, cls):
+        print(f"[{nm}] process_panel start")
         tile_url  = cls.getMapId(vis)["tile_fetcher"].url_format
+        print(f"[{nm}] getMapId done")
         thumb_url = cls.getThumbURL({
             **vis, "region": aoi.bounds(), "dimensions": 512, "format": "png",
         })
-        
+        print(f"[{nm}] getThumbURL done")
+        try:
+            print(f"[{nm}] getDownloadURL start")
+            download_url = cls.getDownloadURL({"scale": scale, "region": aoi.bounds(), "format": "GEO_TIFF"}) if hasattr(cls, "getDownloadURL") else None
+            print(f"[{nm}] getDownloadURL done")
+        except Exception as e:
+            print(f"[{nm}] getDownloadURL error:", e)
+            download_url = None
+            
+        print(f"[{nm}] add_legend_to_image start")
         # Add legend to the downloaded static map
         thumb_url_with_legend = add_legend_to_image(thumb_url, lbls, pal)
+        print(f"[{nm}] add_legend_to_image done")
 
         areas = {}
         for ci, lbl in enumerate(lbls):
@@ -141,14 +227,27 @@ def quantile_classify(layers: list, aoi, scale: int, n_classes: int) -> dict:
             km2 = round((area_raw.get(f"b{j}c{ci}", 0) or 0) / 1e6, 2)
             areas[lbl + suffix] = km2
 
-        panels.append({
+        return {
             "letter":      PANEL_LETTERS[j],
             "name":        nm,
             "title":       title,
             "tile_url":    tile_url,
             "thumb_url":   thumb_url_with_legend,
+            "download_url": download_url,
             "areas":       areas,
             "breakpoints": bps,
-        })
+        }
 
-    return {"panels": panels, "n_classes": n, "percentile_steps": pct_steps, "labels": lbls}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(names), 10)) as executor:
+        futures = {
+            executor.submit(
+                process_panel, j, names[j], titles[j], classified[j]["bps"], classified[j]["cls"]
+            ): j for j in range(len(names))
+        }
+        concurrent.futures.wait(futures.keys())
+        
+    for future in futures:
+        j = futures[future]
+        panels[j] = future.result()
+
+    return {"panels": panels, "n_classes": n, "labels": lbls}

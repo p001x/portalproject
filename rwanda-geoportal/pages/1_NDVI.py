@@ -4,6 +4,8 @@ from streamlit_folium import st_folium
 import plotly.express as px
 import pandas as pd
 from datetime import date, timedelta
+from folium import plugins
+from branca.element import Template, MacroElement
 from gee_scripts.auth import initialize_gee
 from gee_scripts.ndvi import compute_ndvi, RWANDA_DISTRICTS
 from gee_scripts.classify_utils import class_palette, class_labels
@@ -23,7 +25,7 @@ st.markdown(
 def _render_panels(classify, district_name):
     """Render A/B/C classified-map panels in a 2-column grid."""
     n   = classify["n_classes"]
-    pal = class_palette(n)
+    pal = class_palette(n)[::-1]  # NDVI uses reversed Red-to-Green palette
     lbls = class_labels(n)
     panels = classify["panels"]
 
@@ -34,14 +36,18 @@ def _render_panels(classify, district_name):
 
     # Colour legend strip
     swatches = "".join(
-        f"<span style='display:inline-flex;align-items:center;margin:2px 8px 2px 0'>"
-        f"<span style='background:{c};width:14px;height:14px;border-radius:3px;"
-        f"display:inline-block;margin-right:5px'></span>"
-        f"<span style='font-size:0.82rem'>{lbl}</span></span>"
+        f"<div style='display:flex;align-items:center;'>"
+        f"<span style='background:{c};width:16px;height:16px;border-radius:4px;border:1px solid rgba(0,0,0,0.1);"
+        f"display:inline-block;margin-right:6px'></span>"
+        f"<span style='font-size:0.85rem;font-weight:500;'>{lbl}</span></div>"
         for c, lbl in zip(pal, lbls)
     )
-    st.markdown(f"<div style='margin:4px 0 12px'><b>Legend:</b> {swatches}</div>",
-                unsafe_allow_html=True)
+    st.markdown(
+        f"<div style='background:#f8f9fa;padding:10px 14px;border-radius:8px;border:1px solid #e9ecef;"
+        f"display:flex;flex-wrap:wrap;align-items:center;gap:16px;margin:8px 0 16px'>"
+        f"<b style='font-size:0.9rem;color:#333;margin-right:4px'>Legend:</b> {swatches}</div>",
+        unsafe_allow_html=True
+    )
 
     for i in range(0, len(panels), 2):
         row  = panels[i : i + 2]
@@ -111,7 +117,7 @@ elif "ndvi_result" in st.session_state:
     )
 
     with tab_map:
-        m = folium.Map(location=result["center"], zoom_start=10, tiles="CartoDB positron")
+        m = folium.Map(location=result["center"], zoom_start=10, tiles="CartoDB positron", control_scale=True)
         folium.TileLayer(
             tiles=result["tile_url"],
             attr="Google Earth Engine",
@@ -119,16 +125,40 @@ elif "ndvi_result" in st.session_state:
             overlay=True,
         ).add_to(m)
         folium.LayerControl().add_to(m)
+        
+        plugins.Fullscreen().add_to(m)
+        plugins.MousePosition().add_to(m)
+        
+        legend_html = """
+        {% macro html(this, kwargs) %}
+        <!doctype html>
+        <html lang="en">
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1">
+        </head>
+        <body>
+        <div id='maplegend' class='maplegend' 
+            style='position: absolute; z-index:9999; bottom: 30px; right: 10px; 
+            background-color: rgba(255, 255, 255, 0.95); border-radius: 8px; 
+            padding: 12px; font-size: 13px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); 
+            font-family: Inter, Arial, sans-serif; border: 1px solid #eee;'>
+        <div style='margin-bottom: 8px; font-weight: 600; font-size: 14px; border-bottom: 1px solid #e0e0e0; padding-bottom: 6px; color: #2c3e50;'>NDVI Vegetation Health</div>
+        <div style='display: flex; align-items: center; margin-bottom: 4px;'><span style='background:#a50026; width:16px; height:16px; border-radius:4px; display:inline-block; margin-right:8px; border:1px solid rgba(0,0,0,0.1);'></span> Very Low (&lt; 0.2)</div>
+        <div style='display: flex; align-items: center; margin-bottom: 4px;'><span style='background:#fc8d59; width:16px; height:16px; border-radius:4px; display:inline-block; margin-right:8px; border:1px solid rgba(0,0,0,0.1);'></span> Low (0.2 &ndash; 0.4)</div>
+        <div style='display: flex; align-items: center; margin-bottom: 4px;'><span style='background:#fee090; width:16px; height:16px; border-radius:4px; display:inline-block; margin-right:8px; border:1px solid rgba(0,0,0,0.1);'></span> Moderate (0.4 &ndash; 0.6)</div>
+        <div style='display: flex; align-items: center; margin-bottom: 4px;'><span style='background:#91cf60; width:16px; height:16px; border-radius:4px; display:inline-block; margin-right:8px; border:1px solid rgba(0,0,0,0.1);'></span> High (0.6 &ndash; 0.8)</div>
+        <div style='display: flex; align-items: center; margin-bottom: 0px;'><span style='background:#1a9850; width:16px; height:16px; border-radius:4px; display:inline-block; margin-right:8px; border:1px solid rgba(0,0,0,0.1);'></span> Very High (&gt; 0.8)</div>
+        </div>
+        </body>
+        </html>
+        {% endmacro %}
+        """
+        macro = MacroElement()
+        macro._template = Template(legend_html)
+        m.get_root().add_child(macro)
+        
         st_folium(m, width="100%", height=500, returned_objects=[])
-        st.markdown(
-            "**Legend:** "
-            "<span style='color:#a50026'>■</span> Very Low &nbsp;"
-            "<span style='color:#fc8d59'>■</span> Low &nbsp;"
-            "<span style='color:#fee090'>■</span> Moderate &nbsp;"
-            "<span style='color:#91cf60'>■</span> High &nbsp;"
-            "<span style='color:#1a9850'>■</span> Very High",
-            unsafe_allow_html=True,
-        )
 
     with tab_stats:
         st.subheader(f"Statistics — {result['district']}")
@@ -142,7 +172,7 @@ elif "ndvi_result" in st.session_state:
         )
         fig = px.bar(
             df, x="Class", y="Area (km²)", color="Class",
-            color_discrete_sequence=["#d73027", "#fc8d59", "#fee08b", "#91cf60", "#1a9850"],
+            color_discrete_sequence=["#4575b4", "#d73027", "#fc8d59", "#fee08b", "#91cf60", "#1a9850"],
             title=f"NDVI Class Areas — {result['district']}",
         )
         fig.update_layout(showlegend=False)
@@ -165,10 +195,10 @@ elif "ndvi_result" in st.session_state:
         )
         # Collect map thumbnails for the report
         maps = []
-        if "tile_url" in result:
-            maps.append(("Map", result["tile_url"]))
+        if "thumb_url" in result:
+            maps.append(("NDVI Vegetation Health", result["thumb_url"], result["class_areas_km2"]))
         for panel in result.get("classify", {}).get("panels", []):
-            maps.append((panel["title"], panel["thumb_url"]))
+            maps.append((panel["title"], panel["thumb_url"], None))
         pdf_bytes = build_report(
             module_name="NDVI Vegetation Health",
             district=result["district"],

@@ -83,7 +83,7 @@ def compute_no2(district_name: str, start_date: str, end_date: str, n_classes: i
             ee.Reducer.percentile([90]), sharedInputs=True
         ),
         geometry=aoi,
-        scale=3500,
+        scale=1000,
         maxPixels=1e9,
         tileScale=4,
     ).getInfo()
@@ -100,19 +100,14 @@ def compute_no2(district_name: str, start_date: str, end_date: str, n_classes: i
         band = f"m{i}"
         start_m = ee.Date.fromYMD(y, m, 1)
         end_m = start_m.advance(1, "month")
-        month_collection = s5p.filterDate(start_m, end_m)
-        img = ee.Image(
-            ee.Algorithms.If(
-                month_collection.size().gt(0),
-                month_collection.mean().rename(band),
-                ee.Image.constant(0).rename(band).updateMask(ee.Image.constant(0)),
-            )
-        )
+        month_collection = s5p.filterDate(start_m, end_m).select(["tropospheric_NO2_column_number_density"])
+        dummy = ee.Image.constant(0).rename(["tropospheric_NO2_column_number_density"]).updateMask(0)
+        img = ee.ImageCollection.fromImages([dummy, month_collection.mean()]).mean().rename([band])
         month_images.append(img)
 
     monthly_img = ee.Image.cat(month_images)
     monthly_dict = monthly_img.reduceRegion(
-        reducer=ee.Reducer.mean(), geometry=aoi, scale=3500, maxPixels=1e9, tileScale=4
+        reducer=ee.Reducer.mean(), geometry=aoi, scale=1000, maxPixels=1e9, tileScale=4
     ).getInfo()
     time_series = [
         {
@@ -126,7 +121,7 @@ def compute_no2(district_name: str, start_date: str, end_date: str, n_classes: i
     classify = quantile_classify(
         layers=[{"name": "NO2_umol_m2", "image": composite, "title": "NO₂ Column (µmol/m²)"}],
         aoi=aoi,
-        scale=3500,
+        scale=1000,
         n_classes=n_classes,
     )
 

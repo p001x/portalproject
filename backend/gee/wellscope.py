@@ -85,39 +85,73 @@ def _normalize_weights(custom: dict | None) -> dict:
     total = sum(raw.values())
     return {k: v / total for k, v in raw.items()}
 
-def get_factor_images(aoi):
+def get_factor_images(aoi, dynamic_scale):
+    from gee.classify_utils import get_jenks_breaks
+
+    def apply_jenks(img, name, reverse=False, n=5):
+        hist = img.reduceRegion(
+            reducer=ee.Reducer.autoHistogram(),
+            geometry=aoi,
+            scale=dynamic_scale,
+            maxPixels=1e9
+        ).getInfo()
+        
+        band_name = list(hist.keys())[0] if hist else None
+        if not hist or not band_name or not hist[band_name]:
+            return ee.Image(3).toFloat()
+            
+        bps = get_jenks_breaks(hist[band_name], n)
+        bps = list(sorted(set(bps)))
+        
+        if len(bps) < 2: return ee.Image(3).toFloat()
+            
+        values = [5, 4, 3, 2, 1] if reverse else [1, 2, 3, 4, 5]
+        
+        result = ee.Image(values[-1])
+        for i in range(len(bps) - 1, -1, -1):
+            result = result.where(img.lt(bps[i]), values[min(i, 4)])
+        return result.updateMask(img.mask()).toFloat()
+
     # 1. Rainfall
     rain = ee.Image("WORLDCLIM/V1/BIO").select('bio12').clip(aoi)
-    rain_score = _reclassify(rain, [900, 1000, 1100, 1200], [1, 2, 3, 4, 5])
+    rain_score = apply_jenks(rain, 'bio12')
 
     # 2. Lithology
-    try:
-        lith_score = ee.Image(3).toFloat().clip(aoi) 
-    except Exception:
-        lith_score = ee.Image(3).toFloat().clip(aoi)
+    # Using the local asset 'litodoloy' instead of the deprecated ALOS_lithology
+    lith = ee.Image("projects/ee-petersonyang87/assets/litodoloy").clip(aoi)
+    
+    # Remap the local 1-10 classes into groundwater potential scores (1-5)
+    # Defaulting unmapped values to 3
+    lith_score = lith.remap(
+        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 
+        [3, 4, 5, 2, 1, 3, 4, 2, 5, 1], 
+        3
+    ).toFloat().clip(aoi)
 
     # 3. Slope
     dem = ee.ImageCollection("COPERNICUS/DEM/GLO30").select('DEM').mosaic().clip(aoi)
     slope = ee.Terrain.slope(dem)
-    slope_score = _reclassify(slope, [5, 10, 15, 25], [5, 4, 3, 2, 1])
+    slope_score = apply_jenks(slope, 'slope', reverse=True)
 
     # 4. TWI
     flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1').clip(aoi)
     slope_rad = slope.multiply(3.14159 / 180.0)
     tan_slope = slope_rad.tan().max(0.001)
-    twi = flow_acc.add(1).divide(tan_slope).log()
-    twi_score = _reclassify(twi, [2, 4, 6, 8], [1, 2, 3, 4, 5])
+    twi = flow_acc.add(1).divide(tan_slope).log().rename("twi")
+    twi_score = apply_jenks(twi, 'twi')
 
-    # 5. Drainage Density
+    # 5. Drainage Density (Distance to streams)
     streams = flow_acc.gt(100)
-    dist_to_stream = streams.fastDistanceTransform(256).multiply(30).clip(aoi)
-    drainage_score = _reclassify(dist_to_stream, [100, 300, 600, 1000], [1, 2, 3, 4, 5])
+    # fastDistanceTransform targets 0. We invert streams so 0 = stream. (463m is approx 15 arcsec)
+    dist_to_stream = streams.Not().fastDistanceTransform(256).multiply(463).clip(aoi).rename("dist_stream")
+    drainage_score = apply_jenks(dist_to_stream, 'dist_stream', reverse=True)
 
     # 6. Distance to Surface Water
     gsw = ee.Image("JRC/GSW1_4/GlobalSurfaceWater").select('occurrence')
     water_mask = gsw.gt(0).unmask(0).clip(aoi)
-    dist_water = water_mask.fastDistanceTransform(256).multiply(30).clip(aoi)
-    dist_water_score = _reclassify(dist_water, [250, 500, 1000, 2000], [5, 4, 3, 2, 1])
+    # Invert water_mask so 0 = water
+    dist_water = water_mask.Not().fastDistanceTransform(256).multiply(30).clip(aoi).rename("dist_water")
+    dist_water_score = apply_jenks(dist_water, 'dist_water', reverse=True)
 
     # 7. LULC
     lulc = ee.ImageCollection("ESA/WorldCover/v200").first().select('Map').clip(aoi)
@@ -148,11 +182,22 @@ def compute_wellscope(aoi_config: dict, custom_weights: dict = None) -> dict:
 
     from gee.aoi_utils import get_aoi_geometry
     aoi = get_aoi_geometry(aoi_config)
+    # Calculate dynamic scale based on geometry size (sq km)
+    area_sqkm = aoi.area().divide(1e6).getInfo()
+    if area_sqkm > 10000:
+        dynamic_scale = 500   # Entire Country (High memory footprint)
+    elif area_sqkm > 2000:
+        dynamic_scale = 250   # Province
+    elif area_sqkm > 500:
+        dynamic_scale = 100   # Large District
+    else:
+        dynamic_scale = 30    # Sector or small polygon
+
 
     weights = _normalize_weights(custom_weights)
     ahp_data = compute_ahp_data({k: v * 100 for k, v in weights.items()})
 
-    score_images = get_factor_images(aoi)
+    score_images = get_factor_images(aoi, dynamic_scale)
     rain_score = score_images["rainfall"]
     lith_score = score_images["lithology"]
     slope_score = score_images["slope"]
@@ -174,14 +219,38 @@ def compute_wellscope(aoi_config: dict, custom_weights: dict = None) -> dict:
 
     suitability_100 = suitability.subtract(1).divide(4).multiply(100).rename("GWP")
     
-    bands_img = ee.Image(1) \
-        .where(suitability_100.gte(20).multiply(suitability_100.lt(40)), 2) \
-        .where(suitability_100.gte(40).multiply(suitability_100.lt(60)), 3) \
-        .where(suitability_100.gte(60).multiply(suitability_100.lt(80)), 4) \
-        .where(suitability_100.gte(80), 5) \
-        .rename("Band")
+    from gee.classify_utils import get_jenks_breaks
+    hist = suitability_100.reduceRegion(
+        reducer=ee.Reducer.autoHistogram(),
+        geometry=aoi,
+        scale=dynamic_scale,
+        maxPixels=1e9
+    ).getInfo()
+    
+    bands_img = ee.Image(3)
+    labels = ["Class 1 (Very Low)", "Class 2 (Low)", "Class 3 (Moderate)", "Class 4 (High)", "Class 5 (Very High)"]
+    
+    if hist and "GWP" in hist and hist["GWP"]:
+        bps = get_jenks_breaks(hist["GWP"], 5)
+        bps = list(sorted(set(bps)))
+        if len(bps) >= 2:
+            values = [1, 2, 3, 4, 5]
+            bands_img = ee.Image(values[-1])
+            for i in range(len(bps) - 1, -1, -1):
+                bands_img = bands_img.where(suitability_100.lt(bps[i]), values[min(i, 4)])
+            
+            # Form labels with breaks
+            labels = []
+            prev = 0
+            for i, bp in enumerate(bps):
+                labels.append(f"Class {i+1} ({prev:.1f}-{bp:.1f})")
+                prev = bp
+            labels.append(f"Class {len(bps)+1} ({prev:.1f}+)")
+            while len(labels) < 5: labels.append("N/A")
+            labels = labels[:5]
 
-    labels = ["Very Low (0-19)", "Low (20-39)", "Moderate (40-59)", "High (60-79)", "Very High (80-100)"]
+    bands_img = bands_img.updateMask(suitability_100.mask()).toFloat().rename("Band")
+
     area_img = ee.Image.cat(
         [bands_img.eq(i+1).multiply(ee.Image.pixelArea()).rename(f"c{i}") for i in range(5)]
     )
@@ -191,18 +260,16 @@ def compute_wellscope(aoi_config: dict, custom_weights: dict = None) -> dict:
             lambda: suitability_100.reduceRegion(
                 reducer=ee.Reducer.mean().combine(ee.Reducer.min(), sharedInputs=True).combine(ee.Reducer.max(), sharedInputs=True),
                 geometry=aoi,
-                scale=100,
-                maxPixels=1e7,
-                bestEffort=True
+                scale=dynamic_scale,
+                maxPixels=1e10
             ).getInfo()
         )
         f_area = executor.submit(
             lambda: area_img.reduceRegion(
                 reducer=ee.Reducer.sum(),
                 geometry=aoi,
-                scale=100,
-                maxPixels=1e7,
-                bestEffort=True
+                scale=dynamic_scale,
+                maxPixels=1e10
             ).getInfo()
         )
         f_bounds = executor.submit(
@@ -222,9 +289,9 @@ def compute_wellscope(aoi_config: dict, custom_weights: dict = None) -> dict:
         for i in range(5)
     }
 
-    map_id = suitability_100.getMapId(_SUITABILITY_VIS)
-    thumb_url = suitability_100.getThumbURL({
-        **_SUITABILITY_VIS,
+    map_id = bands_img.getMapId(_SCORE_VIS)
+    thumb_url = bands_img.getThumbURL({
+        **_SCORE_VIS,
         "region": aoi.bounds(),
         "dimensions": 512,
         "format": "png"
@@ -257,7 +324,17 @@ def export_factor_map(aoi_config: dict, factor_key: str, palette: list = None) -
     from gee.aoi_utils import get_aoi_geometry
     aoi = get_aoi_geometry(aoi_config)
     
-    score_images = get_factor_images(aoi)
+    area_sqkm = aoi.area().divide(1e6).getInfo()
+    if area_sqkm > 10000:
+        dynamic_scale = 500
+    elif area_sqkm > 2000:
+        dynamic_scale = 250
+    elif area_sqkm > 500:
+        dynamic_scale = 100
+    else:
+        dynamic_scale = 30
+        
+    score_images = get_factor_images(aoi, dynamic_scale)
     if factor_key not in score_images:
         raise ValueError(f"Invalid factor key: {factor_key}")
         

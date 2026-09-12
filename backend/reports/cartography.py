@@ -164,47 +164,46 @@ def _cached_cartography(
     is_categorical = bool(class_areas)
     orig_pal: list[str] | None = None
 
-    # 2. Palette recolour (only when the user actually picked a custom theme)
-    if override_palette:
-        if is_categorical:
+    # 2. Palette resolution
+    orig_pal = _KNOWN_PALETTES.get(title)
+    if orig_pal is None:
+        title_lower = title.lower()
+        if "flood" in title_lower:
+            orig_pal = _KNOWN_PALETTES["Flood_Susceptibility"]
+        elif "lst" in title_lower or "temperature" in title_lower or "heat" in title_lower:
+            if is_categorical and len(class_areas) == 6:
+                orig_pal = ["#08306b", "#313695", "#74add1", "#fee090", "#f46d43", "#a50026"]
+            else:
+                orig_pal = ["#313695", "#74add1", "#fee090", "#f46d43", "#a50026"]
+        elif "ndvi" in title_lower or "vegetation" in title_lower:
+            if is_categorical and len(class_areas) == 5:
+                orig_pal = ["#d73027", "#fc8d59", "#fee08b", "#91cf60", "#1a9850"]
+            else:
+                orig_pal = ["#4575b4", "#d73027", "#fc8d59", "#fee08b", "#91cf60", "#1a9850"]
+        elif "dvi" in title_lower or "drought" in title_lower:
+            orig_pal = ["#1a9850", "#d9ef8b", "#fee08b", "#f46d43", "#a50026"]
+        elif "no2" in title_lower or "air quality" in title_lower:
+            orig_pal = ["#000004", "#3b0f70", "#8c2981", "#de4968", "#fe9f6d", "#fcfdbf"]
+        elif "precipitation" in title_lower or "rain" in title_lower:
+            orig_pal = ["#f7fbff", "#c6dbef", "#6baed6", "#2171b5", "#08306b"]
+        elif "lsi" in title_lower or "landslide" in title_lower:
+            orig_pal = ["#1a9850", "#91cf60", "#fee08b", "#fc8d59", "#d73027"]
+        elif "ndbi" in title_lower:
+            orig_pal = ["#1a9850", "#d9ef8b", "#fee08b", "#f46d43", "#a50026"]
+        elif "slope" in title_lower or "terrain" in title_lower:
+            orig_pal = ["#1a9850", "#91cf60", "#fee08b", "#fc8d59", "#d73027"]
+        elif is_categorical:
             try:
                 from gee.classify_utils import class_palette
                 orig_pal = class_palette(len(class_areas))
             except Exception:
                 orig_pal = None
         else:
-            orig_pal = _KNOWN_PALETTES.get(title)
-            if orig_pal is None:
-                title_lower = title.lower()
-                if "flood" in title_lower:
-                    orig_pal = _KNOWN_PALETTES["Flood_Susceptibility"]
-                elif "lst" in title_lower or "temperature" in title_lower or "heat" in title_lower:
-                    orig_pal = ["#313695", "#74add1", "#fee090", "#f46d43", "#a50026"]
-                elif "ndvi" in title_lower or "vegetation" in title_lower:
-                    orig_pal = ["#d73027", "#fc8d59", "#fee08b", "#91cf60", "#1a9850"]
-                elif "dvi" in title_lower or "drought" in title_lower:
-                    orig_pal = ["#1a9850", "#d9ef8b", "#fee08b", "#f46d43", "#a50026"]
-                elif "no2" in title_lower or "air quality" in title_lower:
-                    orig_pal = ["#000004", "#3b0f70", "#8c2981", "#de4968", "#fe9f6d", "#fcfdbf"]
-                elif "lsi" in title_lower or "landslide" in title_lower:
-                    orig_pal = ["#1a9850", "#91cf60", "#fee08b", "#fc8d59", "#d73027"]
-                elif "ndbi" in title_lower:
-                    orig_pal = ["#1a9850", "#d9ef8b", "#fee08b", "#f46d43", "#a50026"]
-                elif "slope" in title_lower or "terrain" in title_lower:
-                    orig_pal = ["#1a9850", "#91cf60", "#fee08b", "#fc8d59", "#d73027"]
-                else:
-                    orig_pal = ["#000000", "#ffffff"]
+            orig_pal = ["#000000", "#ffffff"]
 
-
-        if orig_pal and len(orig_pal) > 0:
-            img_array = recolor_continuous(img_array, orig_pal, override_palette)
-    else:
-        if is_categorical:
-            try:
-                from gee.classify_utils import class_palette
-                orig_pal = class_palette(len(class_areas))
-            except Exception:
-                orig_pal = None
+    # 3. Palette recolour (only when the user actually picked a custom theme)
+    if override_palette and orig_pal and len(orig_pal) > 0:
+        img_array = recolor_continuous(img_array, orig_pal, override_palette)
 
     # 3. Get geographic extent from static table
     extent  = bbox  # [xmin, xmax, ymin, ymax]
@@ -362,8 +361,7 @@ def enhance_map_cartography(
     Supports PNG, JPG, and TIF formats matching the user template style.
     """
     bbox_json = json.dumps(bbox) if bbox else ""
-    # Use sort_keys=True for class_areas to ensure stable cache keys!
-    class_areas_json = json.dumps(class_areas, sort_keys=True) if class_areas else ""
+    class_areas_json = json.dumps(class_areas) if class_areas else ""
     override_palette_json = json.dumps(override_palette) if override_palette else ""
 
     cached_bytes = _cached_cartography(

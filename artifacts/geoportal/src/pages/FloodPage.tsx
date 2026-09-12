@@ -10,7 +10,7 @@ import {
   ResponsiveContainer,
   Cell,
 } from "recharts";
-import { Loader2, Waves, FileText, AlertTriangle } from "lucide-react";
+import { Loader2, Waves, FileText, AlertTriangle , Play} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
@@ -27,6 +27,12 @@ import { api, FloodResult , AOIConfig} from "@/lib/api";
 import { DistrictMap } from "@/components/DistrictMap";
 import { ReportDownloadButton } from "@/components/ReportDownloadButton";
 import { MapExportControls } from "@/components/MapExportControls";
+
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/components/ui/resizable";
 
 const DISTRICTS = [
   "Bugesera","Burera","Gakenke","Gasabo","Gatsibo","Gicumbi","Gisagara",
@@ -138,9 +144,10 @@ export function FloodPage() {
   const totalWeight = Object.values(weights).reduce((a, b) => a + b, 0);
 
   return (
-    <div className="flex h-full">
+    <ResizablePanelGroup direction="horizontal" className="h-full items-stretch">
       {/* ── Controls sidebar ─────────────────────────────────────── */}
-      <aside className="w-80 shrink-0 border-r bg-card flex flex-col gap-5 p-5 overflow-y-auto">
+      <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
+        <aside className="h-full border-r bg-card flex flex-col gap-5 p-5 overflow-y-auto">
         <div className="flex items-center gap-2 text-primary font-semibold text-lg">
           <Waves className="w-5 h-5" />
           Flood Susceptibility
@@ -236,11 +243,33 @@ export function FloodPage() {
       </aside>
 
       {/* ── Main content area ──────────────────────────────────────── */}
-      <main className="flex-1 flex flex-col min-w-0 bg-muted/30">
-        {!data && !isPending && !error && (
-          <div className="flex-1 flex items-center justify-center text-muted-foreground flex-col gap-3">
-            <Waves className="w-12 h-12 opacity-20" />
-            <p>Select parameters and run the analysis.</p>
+      </ResizablePanel>
+      
+      <ResizableHandle withHandle />
+      
+      <ResizablePanel defaultSize={75}>
+        <main className="h-full flex flex-col min-w-0 bg-muted/30">
+        {!data && !error && !isPending && (
+          <div className="h-full relative bg-muted/20">
+            <DistrictMap aoi={aoi} basemap="satellite" />
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-4">
+              <div className="bg-background/80 backdrop-blur-md p-6 rounded-2xl shadow-xl border border-primary/20 text-center max-w-sm pointer-events-none transition-all hover:scale-105 duration-300">
+                <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4 text-primary shadow-inner">
+                  <Waves className="w-8 h-8" />
+                </div>
+                <h3 className="text-xl font-bold mb-2 text-foreground">Flood</h3>
+                <p className="text-sm text-muted-foreground mb-6">
+                  Select a district and parameters from the sidebar, then run the analysis to visualize results here.
+                </p>
+                <Button 
+                  onClick={() => runAnalysis ? runAnalysis() : mutate()} 
+                  className="w-full gap-2 rounded-xl shadow-md hover:shadow-lg transition-all"
+                >
+                  <Play className="w-4 h-4 fill-current" />
+                  Run Analysis
+                </Button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -494,6 +523,7 @@ export function FloodPage() {
           </Tabs>
         )}
       </main>
-    </div>
+      </ResizablePanel>
+    </ResizablePanelGroup>
   );
 }

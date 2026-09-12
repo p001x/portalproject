@@ -1,6 +1,7 @@
 import { useState } from "react";
+
 import { useMutation } from "@tanstack/react-query";
-import { Loader2, Droplet, FileText, Info } from "lucide-react";
+import { Loader2, Droplet, FileText, Info , Play} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -173,8 +174,28 @@ export function IrrigationPage() {
                       legend={DEFICIT_LEGEND}
                     />
                   ) : (
-                     <div className="flex-1 flex items-center justify-center"><Loader2 className="w-8 h-8 animate-spin text-muted-foreground" /></div>
-                  )}
+          <div className="h-full relative bg-muted/20 border rounded-lg overflow-hidden">
+            <DistrictMap aoi={aoi} basemap="satellite" />
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-4 z-[1000]">
+              <div className="bg-background/80 backdrop-blur-md p-6 rounded-2xl shadow-xl border border-primary/20 text-center max-w-sm pointer-events-none transition-all hover:scale-105 duration-300">
+                <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4 text-primary shadow-inner">
+                  <Droplet className="w-8 h-8" />
+                </div>
+                <h3 className="text-xl font-bold mb-2 text-foreground">Irrigation</h3>
+                <p className="text-sm text-muted-foreground mb-6">
+                  Select a district and parameters from the sidebar, then run the analysis to visualize results here.
+                </p>
+                <Button 
+                  onClick={() => typeof runAnalysis === 'function' ? runAnalysis() : mutate()} 
+                  className="w-full gap-2 rounded-xl shadow-md hover:shadow-lg transition-all"
+                >
+                  <Play className="w-4 h-4 fill-current" />
+                  Run Analysis
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
                 </div>
               </TabsContent>
 

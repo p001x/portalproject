@@ -41,9 +41,9 @@ export function StudyAreaSelector({ value, onChange }: StudyAreaSelectorProps) {
   });
 
   const { data: rwandaHierarchy, isLoading: loadingRwanda } = useQuery({
-    queryKey: ["rwanda", "hierarchy"],
-    queryFn: () => api.getRwandaHierarchy(),
-    enabled: value.country === "Rwanda" || value.type === "rwanda",
+    queryKey: ["rwanda", "full-hierarchy"],
+    queryFn: () => api.getRwandaFullHierarchy(),
+    enabled: value.country === "Rwanda" || value.type === "rwanda" || value.type === "rwanda-micro",
   });
 
   const handleCountryChange = (c: string) => {
@@ -94,9 +94,45 @@ export function StudyAreaSelector({ value, onChange }: StudyAreaSelectorProps) {
     }
   };
 
+  const handleCellChange = (cell: string) => {
+    if (cell === "none") {
+      onChange({ type: "rwanda", country: value.country, province: (value as any).province, district: value.district, sector: (value as any).sector, name: (value as any).sector });
+    } else {
+      onChange({ type: "rwanda", country: value.country, province: (value as any).province, district: value.district, sector: (value as any).sector, cell: cell, name: cell });
+    }
+  };
+
+  const handleVillageChange = (village: string) => {
+    if (village === "none") {
+      onChange({ type: "rwanda", country: value.country, province: (value as any).province, district: value.district, sector: (value as any).sector, cell: (value as any).cell, name: (value as any).cell });
+    } else {
+      onChange({ type: "rwanda", country: value.country, province: (value as any).province, district: value.district, sector: (value as any).sector, cell: (value as any).cell, village: village, name: village });
+    }
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 1) {
+      alert("Please upload only one zip file at a time.");
+      e.target.value = '';
+      return;
+    }
+    
     const file = e.target.files?.[0];
     if (!file) return;
+
+    if (!file.name.toLowerCase().endsWith('.zip')) {
+      alert("Invalid file format. Please upload a .zip file.");
+      e.target.value = '';
+      return;
+    }
+
+    // Limit file size to prevent overload (50MB)
+    if (file.size > 50 * 1024 * 1024) {
+      alert("File is too large. Maximum size is 50MB.");
+      e.target.value = '';
+      return;
+    }
+
     try {
       setUploading(true);
       const res = await api.uploadShapefile(file);
@@ -110,6 +146,7 @@ export function StudyAreaSelector({ value, onChange }: StudyAreaSelectorProps) {
       alert("Failed to upload shapefile.");
     } finally {
       setUploading(false);
+      e.target.value = '';
     }
   };
 
@@ -223,8 +260,42 @@ export function StudyAreaSelector({ value, onChange }: StudyAreaSelectorProps) {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">-- All of {value.district} --</SelectItem>
-                      {(rwandaHierarchy[(value as any).province]?.[value.district] || []).map((s: string) => (
+                      {Object.keys(rwandaHierarchy[(value as any).province]?.[value.district] || {}).map((s: string) => (
                         <SelectItem key={s} value={s}>{s}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              {(value as any).sector && (value as any).sector !== "none" && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Cell (Optional)</Label>
+                  <Select value={(value as any).cell || "none"} onValueChange={handleCellChange}>
+                    <SelectTrigger className="w-full h-8 text-xs">
+                      <SelectValue placeholder="Select Cell..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">-- All of {(value as any).sector} --</SelectItem>
+                      {Object.keys(rwandaHierarchy[(value as any).province]?.[value.district]?.[(value as any).sector] || {}).map((c: string) => (
+                        <SelectItem key={c} value={c}>{c}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              {(value as any).cell && (value as any).cell !== "none" && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Village (Optional)</Label>
+                  <Select value={(value as any).village || "none"} onValueChange={handleVillageChange}>
+                    <SelectTrigger className="w-full h-8 text-xs">
+                      <SelectValue placeholder="Select Village..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">-- All of {(value as any).cell} --</SelectItem>
+                      {(rwandaHierarchy[(value as any).province]?.[value.district]?.[(value as any).sector]?.[(value as any).cell] || []).map((v: string) => (
+                        <SelectItem key={v} value={v}>{v}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>

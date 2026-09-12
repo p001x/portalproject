@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Search,
@@ -25,15 +25,37 @@ import {
   Square,
   Trash2,
   Code2,
+  Globe2,
+  MapPin,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { api } from "@/lib/api";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { MapContainer, TileLayer, ImageOverlay, GeoJSON, Rectangle as LeafletRectangle, useMap } from "react-leaflet";
+import "leaflet/dist/leaflet.css";
+import * as turf from "@turf/turf";
+import { api, BASE } from "@/lib/api";
 import { useHarvesterStore, HarvesterItem } from "@/lib/harvesterStore";
 import { DatasetColabDialog } from "@/components/DatasetColabDialog";
+
+function HarvesterMapBoundsController({ bbox }: { bbox?: number[] | null }) {
+  const map = useMap();
+  useEffect(() => {
+    if (bbox && bbox.length === 4) {
+      const bounds: [[number, number], [number, number]] = [
+        [bbox[1], bbox[0]],
+        [bbox[3], bbox[2]],
+      ];
+      try {
+        map.fitBounds(bounds, { padding: [40, 40] });
+      } catch (e) {}
+    }
+  }, [bbox, map]);
+  return null;
+}
 
 interface DatasetHarvesterProps {
   onPreviewRaster?: (url: string, name?: string) => void;
@@ -52,6 +74,14 @@ export function DatasetHarvester({
   const qc = useQueryClient();
 
   const [selectedColabDataset, setSelectedColabDataset] = useState<any | null>(null);
+
+  // Embedded Map Preview Modal State
+  const [modalPreviewItem, setModalPreviewItem] = useState<HarvesterItem | null>(null);
+  const [modalLoading, setModalLoading] = useState(false);
+  const [modalGeoJSON, setModalGeoJSON] = useState<any | null>(null);
+  const [modalImage, setModalImage] = useState<{ url: string; bounds: [[number, number], [number, number]] } | null>(null);
+  const [modalRasterUrl, setModalRasterUrl] = useState<string | null>(null);
+  const [modalBbox, setModalBbox] = useState<number[] | null>(null);
 
   const {
     inputUrl,
@@ -146,7 +176,7 @@ export function DatasetHarvester({
       if (!taskId) {
         // Fallback for immediate response (e.g. if the backend changes)
         qc.invalidateQueries({ queryKey: ["datasets"] });
-        setSavedItemIds((prev) => ({ ...prev, [item.id]: "fallback_id" }));
+        setSavedItemIds((prev) => ({ ...prev, [item.id]: res.dataset_id || "fallback_id" }));
         setSavingProgressIds((prev) => ({ ...prev, [item.id]: 100 }));
         toast({ title: "Saved to Portal! 🌐", description: res.message });
         setTimeout(() => {
@@ -285,37 +315,91 @@ export function DatasetHarvester({
 
   // ── Direct Map Preview ────────────────────────────────────────────────────
   const handlePreview = async (item: HarvesterItem) => {
-    if (item.category === "raster") {
-      if (onPreviewRaster) {
-        onPreviewRaster(item.url, item.name);
-        toast({
-          title: "Streaming COG/GeoTIFF Map Overlay 🗺️",
-          description: `Loaded '${item.name}' natively onto Leaflet.`,
-        });
-      }
-    } else if (item.category === "vector") {
+    const datasetId = savedItemIds[item.id] || geeTasks[item.id]?.dataset_id;
+
+    // 1. Delegate to parent page callbacks if supplied (e.g. Sample Digitizer)
+    if (onPreviewRaster && datasetId && item.category === "raster") {
+      onPreviewRaster(datasetId, item.name);
+      toast({
+        title: "Streaming Raster Map Overlay 🗺️",
+        description: `Loaded '${item.name}' natively onto Leaflet.`,
+      });
+      return;
+    }
+    if (onPreviewGeoJSON && datasetId && item.category !== "raster") {
       try {
-        const resp = await fetch(item.url);
-        const geojson = await resp.json();
-        if (onPreviewGeoJSON) {
-          onPreviewGeoJSON(geojson);
+        const resp = await api.datasets.preview(datasetId, "admin");
+        if (resp.type === "geojson" || resp.features || resp.type === "FeatureCollection") {
+          onPreviewGeoJSON(resp.geojson || resp);
           toast({
             title: "Vector Features Rendered! 📍",
-            description: `Loaded GeoJSON '${item.name}' with ${geojson.features?.length || 1} feature(s).`,
+            description: `Loaded GeoJSON '${item.name}' onto map.`,
+          });
+          return;
+        }
+      } catch (e) {}
+    }
+
+    // 2. Otherwise open built-in interactive Map Preview Modal
+    setModalPreviewItem(item);
+    setModalGeoJSON(null);
+    setModalImage(null);
+    setModalRasterUrl(null);
+    setModalBbox(null);
+    setModalLoading(true);
+
+    try {
+      if (datasetId) {
+        const resp = await api.datasets.preview(datasetId, "admin");
+        
+        if (resp.bbox && resp.bbox.length === 4) {
+          setModalBbox(resp.bbox);
+        } else if (resp.bounds && Array.isArray(resp.bounds) && resp.bounds.length === 2) {
+          const [[s, w], [n, e]] = resp.bounds;
+          setModalBbox([w, s, e, n]);
+        }
+
+        if (resp.type === "FeatureCollection" || resp.features || resp.type === "Feature") {
+          setModalGeoJSON(resp);
+        } else if (resp.geojson) {
+          setModalGeoJSON(resp.geojson);
+        } else if (resp.type === "image" && resp.data && resp.bounds) {
+          setModalImage({ url: resp.data, bounds: resp.bounds });
+        } else if (item.category === "raster" || resp.type === "url") {
+          setModalRasterUrl(`https://geoportal-api-ygzi.onrender.com/api/native/imagery/tiles/{z}/{x}/{y}?url=${encodeURIComponent(datasetId)}`);
+        }
+      } else {
+        // Preview direct from URL before saving if available
+        if (item.format === "geojson" || item.url.toLowerCase().endsWith(".geojson")) {
+          const r = await fetch(item.url);
+          const gj = await r.json();
+          setModalGeoJSON(gj);
+          try {
+            setModalBbox(turf.bbox(gj));
+          } catch (e) {}
+        } else if (item.category === "raster" || item.format === "tif" || item.format === "cog") {
+          setModalRasterUrl(`https://geoportal-api-ygzi.onrender.com/api/native/imagery/tiles/{z}/{x}/{y}?url=${encodeURIComponent(item.url)}`);
+          fetch(`https://geoportal-api-ygzi.onrender.com/api/native/imagery/bounds?url=${encodeURIComponent(item.url)}`)
+            .then((r) => r.json())
+            .then((b) => {
+              if (b.bbox) setModalBbox(b.bbox);
+            })
+            .catch(() => {});
+        } else {
+          toast({
+            title: "Preview Information",
+            description: "Click 'Save to Portal' first to parse archive into full spatial layers.",
           });
         }
-      } catch (err: any) {
-        toast({
-          variant: "destructive",
-          title: "Vector Preview Failed",
-          description: err.message,
-        });
       }
-    } else {
+    } catch (err: any) {
       toast({
-        title: "Format Preview",
-        description: `This is an archive (${item.format}). Use 'Direct Download' or 'Save to Portal'.`,
+        variant: "destructive",
+        title: "Preview Error",
+        description: err.message || "Save dataset to portal first to view full map layer.",
       });
+    } finally {
+      setModalLoading(false);
     }
   };
 
@@ -435,12 +519,17 @@ export function DatasetHarvester({
           {/* Summary & Filters Bar */}
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-muted/40 p-3 rounded-lg">
             <div className="space-y-0.5">
-              <div className="text-xs font-semibold flex items-center gap-2">
-                <span>Discovered:</span>
-                <span className="text-indigo-400">{scanResult.title}</span>
+              <div className="flex items-center gap-2">
+                <Globe2 className="w-5 h-5 text-indigo-400" />
+                <span className="text-indigo-400 font-semibold">{scanResult.title}</span>
                 <Badge variant="secondary" className="text-[10px] font-mono">
                   {scanResult.count} dataset(s)
                 </Badge>
+                {scanResult.source_type && (
+                  <Badge variant="outline" className="text-[10px] font-mono uppercase bg-indigo-500/10 text-indigo-400 border-indigo-500/20">
+                    {scanResult.source_type.replace('_', ' ')}
+                  </Badge>
+                )}
               </div>
               <p className="text-[11px] text-muted-foreground truncate max-w-md font-mono">{scanResult.url}</p>
             </div>
@@ -662,16 +751,16 @@ export function DatasetHarvester({
                         Download
                       </a>
 
-                      {/* 2. Instant Map Preview */}
-                      {(item.category === "raster" || item.category === "vector") && (
+                      {/* 2. Instant Map Preview (Always available for spatial datasets) */}
+                      {(item.category === "raster" || item.category === "vector" || item.category === "archive" || savedItemIds[item.id] || geeTasks[item.id]?.dataset_id) && (
                         <Button
                           variant="outline"
                           size="sm"
                           onClick={() => handlePreview(item)}
-                          className="h-7 px-2.5 text-xs gap-1.5 border-amber-500/30 text-amber-500 hover:bg-amber-500/10"
-                          title="Stream and view on Leaflet Map immediately"
+                          className="h-7 px-2.5 text-xs gap-1.5 border-amber-500/40 text-amber-400 hover:bg-amber-500/10 hover:text-amber-300 transition-colors"
+                          title="Preview dataset on interactive map"
                         >
-                          <Eye className="w-3 h-3" />
+                          <Eye className="w-3 h-3 text-amber-400" />
                           Preview on Map
                         </Button>
                       )}
@@ -785,6 +874,65 @@ export function DatasetHarvester({
           </div>
         </div>
       )}
+
+      {/* Embedded Map Preview Modal */}
+      <Dialog open={!!modalPreviewItem} onOpenChange={(open) => !open && setModalPreviewItem(null)}>
+        <DialogContent className="max-w-4xl w-full p-0 overflow-hidden bg-background border-border shadow-2xl">
+          <DialogHeader className="p-4 pb-2 border-b border-border/40">
+            <DialogTitle className="flex items-center gap-2 text-base font-bold">
+              <Eye className="w-4 h-4 text-amber-400" />
+              <span>Map Preview: {modalPreviewItem?.name}</span>
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Live spatial footprint and data layer preview.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="h-[480px] w-full relative bg-muted/20">
+            {modalLoading && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-background/70 backdrop-blur-sm z-[1000] gap-2">
+                <Loader2 className="w-7 h-7 animate-spin text-primary" />
+                <span className="text-xs font-medium text-foreground">Rendering spatial layer onto map...</span>
+              </div>
+            )}
+            
+            <MapContainer center={[-1.94, 29.87]} zoom={8} className="w-full h-full z-0">
+              <TileLayer
+                url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                attribution="Tiles &copy; Esri"
+              />
+              
+              {modalBbox && <HarvesterMapBoundsController bbox={modalBbox} />}
+
+              {modalGeoJSON && (
+                <GeoJSON
+                  key={modalPreviewItem?.id + JSON.stringify(modalGeoJSON).substring(0, 40)}
+                  data={modalGeoJSON}
+                  style={{ color: "#00E5FF", fillColor: "#00E5FF", weight: 2.5, fillOpacity: 0.25 }}
+                />
+              )}
+
+              {modalImage && (
+                <ImageOverlay url={modalImage.url} bounds={modalImage.bounds} opacity={0.85} />
+              )}
+
+              {modalRasterUrl && (
+                <TileLayer url={modalRasterUrl} maxNativeZoom={19} maxZoom={22} zIndex={10} />
+              )}
+
+              {!modalGeoJSON && !modalImage && !modalRasterUrl && modalBbox && modalBbox.length === 4 && (
+                <LeafletRectangle
+                  bounds={[
+                    [modalBbox[1], modalBbox[0]],
+                    [modalBbox[3], modalBbox[2]],
+                  ]}
+                  pathOptions={{ color: "#ec4899", fillColor: "#ec4899", fillOpacity: 0.15, weight: 2, dashArray: "5, 5" }}
+                />
+              )}
+            </MapContainer>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Google Colab & Earth Engine Dialog */}
       <DatasetColabDialog

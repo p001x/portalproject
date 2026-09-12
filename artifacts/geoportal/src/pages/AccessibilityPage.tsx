@@ -21,6 +21,12 @@ import { ReportDownloadButton } from "@/components/ReportDownloadButton";
 import { MapExportControls } from "@/components/MapExportControls";
 import { StudyAreaSelector } from "@/components/StudyAreaSelector";
 
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/components/ui/resizable";
+
 const ACCESSIBILITY_COLORS = ["#5C3A21", "#B98D4F", "#E8C285", "#F3E58C"];
 const ACCESSIBILITY_LABELS = ["Very High (0-15m)", "High (15-30m)", "Low (30-45m)", "Very Low (45-60m)"];
 
@@ -101,9 +107,10 @@ export function AccessibilityPage() {
   })();
 
   return (
-    <div className="flex h-full">
+    <ResizablePanelGroup direction="horizontal" className="h-full items-stretch">
       {/* ── Controls sidebar ─────────────────────────────────────── */}
-      <aside className="w-64 shrink-0 border-r bg-card flex flex-col gap-5 p-5 overflow-y-auto">
+      <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
+        <aside className="h-full border-r bg-card flex flex-col gap-5 p-5 overflow-y-auto">
         <div className="flex items-center gap-2 text-primary font-semibold text-lg">
           <Navigation className="w-5 h-5" />
           Accessibility
@@ -170,11 +177,32 @@ export function AccessibilityPage() {
       </aside>
 
       {/* ── Results ──────────────────────────────────────────────── */}
-      <main className="flex-1 overflow-y-auto p-6">
+      </ResizablePanel>
+      
+      <ResizableHandle withHandle />
+      
+      <ResizablePanel defaultSize={75}>
+        <main className="h-full overflow-y-auto p-6">
         {!anyData && !isPending && (
-          <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
-            Select an area and amenities, then click{" "}
-            <strong className="mx-1">Analyze Accessibility</strong>.
+          <div className="h-full rounded-lg overflow-hidden border relative">
+            <DistrictMap 
+              center={[-1.94, 29.87]} 
+              zoom={8} 
+              tileUrl="" 
+              basemap="satellite" 
+            />
+            
+            <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center bg-background/10 backdrop-blur-[1px] z-[1000]">
+              <div className="bg-card/90 backdrop-blur-md p-6 rounded-2xl border shadow-2xl max-w-sm text-center pointer-events-none transition-transform hover:scale-105 duration-300">
+                <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-primary/10 flex items-center justify-center border shadow-inner">
+                  <Navigation className="w-8 h-8 text-primary" />
+                </div>
+                <h3 className="text-xl font-extrabold mb-2 text-foreground tracking-tight">Accessibility</h3>
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  Configure parameters in the sidebar and click <strong>Run Analysis</strong> to process the satellite data.
+                </p>
+              </div>
+            </div>
           </div>
         )}
 
@@ -413,6 +441,7 @@ export function AccessibilityPage() {
           </Tabs>
         )}
       </main>
-    </div>
+      </ResizablePanel>
+    </ResizablePanelGroup>
   );
 }

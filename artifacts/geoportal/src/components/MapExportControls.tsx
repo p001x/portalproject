@@ -37,6 +37,9 @@ export function MapExportControls({ tileUrl, thumbUrl, district, title, classAre
   const [mode, setMode] = useState<"static" | "canva">("static");
   const [selectedPalette, setSelectedPalette] = useState("default");
   const [customColors, setCustomColors] = useState<string[]>([]);
+  const [colorStyle, setColorStyle] = useState<"classified" | "continuous">(
+    classAreas ? "classified" : "continuous"
+  );
 
   // Toggles for static elements
   const [showFrame, setShowFrame] = useState(true);
@@ -101,7 +104,7 @@ export function MapExportControls({ tileUrl, thumbUrl, district, title, classAre
           district,
           title,
           url: targetUrl,
-          class_areas: classAreas,
+          class_areas: colorStyle === "continuous" ? null : classAreas,
           override_palette: resolvedPalette,
           show_frame: mode === "canva" ? false : showFrame,
           show_grid: mode === "canva" ? false : showGrid,
@@ -157,6 +160,7 @@ export function MapExportControls({ tileUrl, thumbUrl, district, title, classAre
     thumbUrl,
     tileUrl,
     classAreas,
+    colorStyle,
     resolvedPalette,
     showFrame,
     showGrid,
@@ -169,34 +173,29 @@ export function MapExportControls({ tileUrl, thumbUrl, district, title, classAre
   ]);
 
   const handleDownload = async () => {
-    // If the user wants a RAW TIF and the module provided a raw data download URL, use it directly!
-    if (exportFormat === "TIF" && downloadUrl) {
-      window.open(downloadUrl, "_blank");
-      return;
-    }
 
     const targetUrl = thumbUrl || tileUrl;
     if (!targetUrl) return;
 
     try {
-      const res = await fetch(`${BASE}/static-map-download`, {
+      const res = await fetch(`${BASE}/static-map`, {
         method: "POST",
         headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
+          "Content-Type": "application/json",
           ...(localStorage.getItem("spetro_token") ? { "Authorization": `Bearer ${localStorage.getItem("spetro_token")}` } : {})
         },
-        body: new URLSearchParams({
+        body: JSON.stringify({
           district,
           title,
           url: targetUrl,
-          ...(classAreas ? { class_areas_json: classAreas } : {}),
-          ...(resolvedPalette ? { override_palette_json: resolvedPalette } : {}),
-          show_frame: String(showFrame),
-          show_grid: String(showGrid),
-          show_legend: String(showLegend),
-          show_scale: String(showScale),
-          show_compass: String(showCompass),
-          size_multiplier: String(sizeMultiplier),
+          class_areas: colorStyle === "continuous" ? null : classAreas,
+          override_palette: resolvedPalette,
+          show_frame: showFrame,
+          show_grid: showGrid,
+          show_legend: showLegend,
+          show_scale: showScale,
+          show_compass: showCompass,
+          size_multiplier: parseFloat(sizeMultiplier),
           output_format: exportFormat
         })
       });
@@ -210,7 +209,9 @@ export function MapExportControls({ tileUrl, thumbUrl, district, title, classAre
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `Map_Export_${district}_${exportFormat}.${exportFormat.toLowerCase()}`;
+      const safeTitle = title.replace(/[^a-zA-Z0-9]/g, "_");
+      const safeDistrict = district.replace(/ /g, "_");
+      a.download = `${safeTitle}_${safeDistrict}.${exportFormat.toLowerCase()}`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -313,7 +314,7 @@ export function MapExportControls({ tileUrl, thumbUrl, district, title, classAre
             title={title}
             thumbUrl={previewBlobUrl || thumbUrl || tileUrl}
             district={district}
-            classAreas={classAreas}
+            classAreas={colorStyle === "continuous" ? undefined : classAreas}
             palette={resolvedPalette || customColors}
           />
         </div>
@@ -367,6 +368,22 @@ export function MapExportControls({ tileUrl, thumbUrl, district, title, classAre
                 <Palette className="w-4 h-4 text-primary" />
                 Color Palette Customization
               </Label>
+              
+              {classAreas && (
+                <div className="flex items-center justify-between bg-muted/40 p-2.5 rounded border">
+                  <span className="text-xs font-medium">Map Style</span>
+                  <Select value={colorStyle} onValueChange={(val) => setColorStyle(val as any)}>
+                    <SelectTrigger className="w-[150px] h-7 text-xs bg-background">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="classified">Classified (Breaks)</SelectItem>
+                      <SelectItem value="continuous">Continuous Gradient</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
               <Select value={selectedPalette} onValueChange={setSelectedPalette}>
                 <SelectTrigger className="w-full bg-background">
                   <SelectValue />
@@ -391,9 +408,9 @@ export function MapExportControls({ tileUrl, thumbUrl, district, title, classAre
 
               {selectedPalette === "custom" && (
                 <div className="p-3 border rounded-lg bg-muted/40 flex flex-col gap-2.5">
-                  <span className="text-xs font-medium text-muted-foreground">Customize Class Colors:</span>
+                  <span className="text-xs font-medium text-muted-foreground">Customize Colors:</span>
                   <div className="flex flex-wrap gap-2.5">
-                    {(classAreas ? Object.keys(classAreas) : Array.from({ length: classCount }).map((_, i) => `Class ${i + 1}`)).map((cls, i) => (
+                    {(colorStyle === "classified" && classAreas ? Object.keys(classAreas) : Array.from({ length: classCount }).map((_, i) => `Color ${i + 1}`)).map((cls, i) => (
                       <div key={i} className="flex items-center gap-1.5 bg-background p-1 rounded border">
                         <input
                           type="color"

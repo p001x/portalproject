@@ -958,13 +958,20 @@ def get_dataset_preview(record: dict[str, Any], file_bytes: Optional[bytes] = No
     if is_url and raw_url:
         from storage.link_resolver import resolve_link_url
         url = resolve_link_url(raw_url)
+    elif file_bytes is None and not is_url and record.get("storage_key"):
+        file_bytes = download_dataset_bytes(record["storage_key"])
 
     if file_type in ["geojson", "shapefile"]:
         import geopandas as gpd
         import json
         
         if file_type == "shapefile":
-            if file_bytes is None and is_url:
+            if file_bytes is None and is_url and url:
+                import requests
+                resp = requests.get(url, timeout=60)
+                resp.raise_for_status()
+                file_bytes = resp.content
+            elif file_bytes is None and not is_url:
                 file_bytes = download_dataset_bytes(record["storage_key"])
                 
             with tempfile.TemporaryDirectory() as tmpdir:
