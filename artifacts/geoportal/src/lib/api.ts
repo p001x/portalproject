@@ -497,6 +497,34 @@ async function post<T>(path: string, body: unknown, opts?: { withGeeAuth?: boole
   return data;
 }
 
+async function downloadExternalLayer(url: string): Promise<string> {
+  const res = await fetch(url);
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail || `Failed to download external layer. Status: ${res.status}`);
+  }
+
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
+
+// ── AI ──────────────────────────────────────────────────────────────────────
+export async function fetchAITakeaways(pdfUrl: string, title: string): Promise<string[]> {
+  const res = await fetch(`${BASE}/ai/takeaways`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pdfUrl, title })
+  });
+  
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.detail || `AI generation failed (Status ${res.status})`);
+  }
+  
+  const data = await res.json();
+  return data.takeaways;
+}
+
 async function put<T>(path: string, body: unknown, opts?: { withGeeAuth?: boolean }): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   const appToken = localStorage.getItem("spetro_token");
@@ -743,6 +771,23 @@ export const api = {
         throw new Error(parseApiError(err, res.statusText));
       }
       return res.json();
+    },
+    fetchBookFromUrl: async (data: { url: string; title: string; author?: string; description?: string; pages?: number }): Promise<{ ok: boolean, book: any }> => {
+      return post<{ ok: boolean, book: any }>("/academy/books/fetch-from-url", data);
+    },
+    getCourses: () => get<{ courses: any[] }>("/academy/courses"),
+    createCourse: (data: any) => post<{ ok: boolean, course: any }>("/academy/courses", data),
+    updateCourse: (id: string, data: any) => put<{ ok: boolean, course: any }>(`/academy/courses/${id}`, data),
+    deleteCourse: async (id: string) => {
+      const headers: Record<string, string> = {};
+      const appToken = localStorage.getItem("spetro_token");
+      if (appToken) headers["Authorization"] = `Bearer ${appToken}`;
+      const res = await fetch(`${BASE}/academy/courses/${id}`, { method: "DELETE", headers });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(parseApiError(err, res.statusText));
+      }
+      return res.json() as Promise<{ ok: boolean }>;
     }
   },
   habitat: {

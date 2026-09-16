@@ -21,8 +21,14 @@ def load_books() -> list[dict[str, Any]]:
         return []
 
 def save_books(records: list[dict[str, Any]]) -> None:
-    client = _get_client()
-    client.upload_from_text(BOOKS_METADATA_KEY, json.dumps(records, indent=2))
+    try:
+        client = _get_client()
+        client.upload_from_text(BOOKS_METADATA_KEY, json.dumps(records, indent=2))
+    except Exception as e:
+        import logging
+        logging.error(f"Error saving books to HF, writing local fallback: {e}")
+        with open("local_books_metadata.json", "w") as f:
+            json.dump(records, f, indent=2)
 
 def add_book_record(record: dict[str, Any]) -> None:
     records = load_books()

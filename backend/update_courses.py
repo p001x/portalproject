@@ -1,0 +1,99 @@
+import json
+import os
+from storage.courses_storage import COURSES_METADATA_KEY
+from storage.dataset_storage import _get_client
+
+LOCAL_FALLBACK_FILE = os.path.join(os.path.dirname(__file__), "storage", "local_courses_metadata.json")
+
+DEFAULT_COURSES = [
+    {
+        "id": "c1",
+        "title": "QGIS Full Course for Beginners",
+        "description": "Master GIS Mapping & Analysis for Free! Perfect for complete beginners.",
+        "detailedDescription": "This comprehensive tutorial covers the entire GIS workflow, including data installation, vector and raster layers, symbology, spatial analysis, and even web map creation. You'll learn how to master geoprocessing tools (like clip, intersect, and dissolve), heatmaps, and 3D visualization.",
+        "videos": [
+            {"id": "v1_1", "title": "1. Introduction to QGIS", "youtubeId": "W2XUxxu-D-c", "duration": "15m"},
+            {"id": "v1_2", "title": "2. Working with Vector Data", "youtubeId": "W2XUxxu-D-c", "duration": "30m"},
+            {"id": "v1_3", "title": "3. Map Layouts & Exporting", "youtubeId": "W2XUxxu-D-c", "duration": "30m"}
+        ],
+        "duration": "1h 15m",
+        "level": "Beginner",
+        "completed": False
+    },
+    {
+        "id": "c2",
+        "title": "Google Earth Engine Python API",
+        "description": "Learn to use Google Earth Engine with Python in Jupyter Notebooks.",
+        "detailedDescription": "Get started with the Earth Engine Python API. This course covers authentication, initialization, displaying maps with folium or geemap, loading image collections, reducing over regions, and exporting your results. Ideal for data scientists moving into geospatial.",
+        "videos": [
+            {"id": "v2_1", "title": "Part 1: Setup and Authentication", "youtubeId": "zXk-lD5L0s0", "duration": "20m"},
+            {"id": "v2_2", "title": "Part 2: Image Collections", "youtubeId": "zXk-lD5L0s0", "duration": "25m"}
+        ],
+        "duration": "45m",
+        "level": "Intermediate",
+        "completed": False
+    },
+    {
+        "id": "c3",
+        "title": "PostGIS & Spatial SQL Crash Course",
+        "description": "Manage and query spatial databases like a pro using PostGIS.",
+        "detailedDescription": "A crash course into Spatial SQL. You will learn how to set up PostgreSQL with the PostGIS extension, load shapefiles into your database, and write advanced spatial queries (ST_Intersects, ST_Buffer, ST_Distance) to analyze massive geospatial datasets.",
+        "videos": [
+            {"id": "v3_1", "title": "Installation and Setup", "youtubeId": "s_J-k9Tq9qA", "duration": "10m"},
+            {"id": "v3_2", "title": "Basic Spatial Queries", "youtubeId": "s_J-k9Tq9qA", "duration": "25m"},
+            {"id": "v3_3", "title": "Advanced Spatial Joins", "youtubeId": "s_J-k9Tq9qA", "duration": "20m"}
+        ],
+        "duration": "55m",
+        "level": "Advanced",
+        "completed": False
+    },
+    {
+        "id": "c4",
+        "title": "Web Mapping with Leaflet & GeoJSON",
+        "description": "Build interactive web maps from scratch using Leaflet.js.",
+        "detailedDescription": "Take your maps to the web! This module teaches you the fundamentals of Leaflet, loading GeoJSON data, creating interactive popups, dynamic styling based on attributes, and deploying your web map application.",
+        "videos": [
+            {"id": "v4_1", "title": "Leaflet Basics", "youtubeId": "wVnimcQsuwk", "duration": "15m"},
+            {"id": "v4_2", "title": "GeoJSON and Styling", "youtubeId": "wVnimcQsuwk", "duration": "15m"}
+        ],
+        "duration": "30m",
+        "level": "Beginner",
+        "completed": False
+    }
+]
+
+def load_courses():
+    client = _get_client()
+    try:
+        if client.exists(COURSES_METADATA_KEY):
+            raw = client.download_as_text(COURSES_METADATA_KEY)
+            return json.loads(raw)
+    except Exception:
+        pass
+        
+    try:
+        if os.path.exists(LOCAL_FALLBACK_FILE):
+            with open(LOCAL_FALLBACK_FILE, 'r') as f:
+                return json.load(f)
+    except Exception:
+        pass
+        
+    return DEFAULT_COURSES
+
+def save_courses(records):
+    client = _get_client()
+    data_str = json.dumps(records, indent=2)
+    try:
+        client.upload_from_text(COURSES_METADATA_KEY, data_str)
+    except Exception:
+        pass
+    
+    try:
+        with open(LOCAL_FALLBACK_FILE, 'w') as f:
+            f.write(data_str)
+    except Exception:
+        pass
+
+# Initialize defaults if not exists, or replace existing for the new schema
+save_courses(DEFAULT_COURSES)
+print("Updated courses successfully.")

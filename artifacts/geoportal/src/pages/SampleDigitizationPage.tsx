@@ -42,6 +42,7 @@ import {
   BarChart3,
   SkipBack,
   SkipForward,
+  ChevronUp,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -110,6 +111,38 @@ export function SampleDigitizationPage() {
   const [drawMode, setDrawMode] = useState<"point" | "polyline" | "polygon" | "rectangle" | "circle" | "pan">("point");
   const [pendingFeature, setPendingFeature] = useState<{ layer: any; type: string } | null>(null);
   const editGroupRef = useRef<any>(null);
+  const [isDrawToolFolded, setIsDrawToolFolded] = useState(() => {
+    try {
+      const saved = localStorage.getItem("geoportal_drawToolFolded");
+      return saved !== null ? JSON.parse(saved) : false;
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    localStorage.setItem("geoportal_drawToolFolded", JSON.stringify(isDrawToolFolded));
+  }, [isDrawToolFolded]);
+
+  const [isMapLayerFolded, setIsMapLayerFolded] = useState(() => {
+    try {
+      const saved = localStorage.getItem("geoportal_mapLayerFolded");
+      return saved !== null ? JSON.parse(saved) : false;
+    } catch { return false; }
+  });
+  useEffect(() => {
+    localStorage.setItem("geoportal_mapLayerFolded", JSON.stringify(isMapLayerFolded));
+  }, [isMapLayerFolded]);
+
+  const [isRightPanelsFolded, setIsRightPanelsFolded] = useState(() => {
+    try {
+      const saved = localStorage.getItem("geoportal_rightPanelsFolded");
+      return saved !== null ? JSON.parse(saved) : false;
+    } catch { return false; }
+  });
+  useEffect(() => {
+    localStorage.setItem("geoportal_rightPanelsFolded", JSON.stringify(isRightPanelsFolded));
+  }, [isRightPanelsFolded]);
 
   // Study Area State
   const [studyArea, setStudyArea] = useState<any>(null); // GeoJSON
@@ -1054,6 +1087,9 @@ export function SampleDigitizationPage() {
             <TabsTrigger value="map" className="gap-1.5 data-[state=active]:bg-emerald-500 data-[state=active]:text-white transition-all">
               <Edit className="w-4 h-4" /> Map &amp; Digitizer
             </TabsTrigger>
+            <TabsTrigger value="samples" className="gap-1.5 data-[state=active]:bg-emerald-500 data-[state=active]:text-white transition-all">
+              <Layers className="w-4 h-4" /> Samples Directory
+            </TabsTrigger>
             <TabsTrigger value="classify" className="gap-1.5 data-[state=active]:bg-emerald-500 data-[state=active]:text-white transition-all">
               <Cpu className="w-4 h-4" /> Supervised Classification
             </TabsTrigger>
@@ -1298,75 +1334,102 @@ export function SampleDigitizationPage() {
             </Accordion>
           </div>
           
-          <div className="flex-1 relative bg-muted/10 overflow-hidden flex flex-col">
-            {/* Overlay toolbars inside map area */}
+          {/* Right Main Panel: Map and Table stacked vertically */}
+          <div className="flex-1 flex flex-col h-full overflow-hidden">
+            <div className="flex-1 relative bg-muted/10 overflow-hidden flex flex-col">
+              {/* Overlay toolbars inside map area */}
             {/* Left Overlay toolbars */}
             <div className="absolute top-4 left-4 right-[24rem] z-[1000] flex flex-col gap-2 pointer-events-none">
                 <div className="pointer-events-auto w-full flex flex-col gap-2 max-w-2xl">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-card p-2 rounded-lg border">
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground mr-1">Draw Tool:</Label>
+              <div className="flex flex-wrap items-center gap-4 bg-card p-2 rounded-lg border shadow-sm transition-all duration-200">
+                {isDrawToolFolded ? (
                   <button
                     type="button"
+                    onClick={() => setIsDrawToolFolded(false)}
+                    className="flex items-center gap-2 hover:bg-muted p-1 rounded-md transition-colors w-full sm:w-auto"
+                    title="Unfold tools"
+                  >
+                    <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground cursor-pointer">Draw Tool</Label>
+                    <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                  </button>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setIsDrawToolFolded(true)}
+                        className="hover:bg-muted p-1 mr-1 rounded-md transition-colors"
+                        title="Fold toolbar"
+                      >
+                        <ChevronUp className="w-4 h-4 text-muted-foreground" />
+                      </button>
+                      <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground mr-1 hidden sm:inline-block whitespace-nowrap">Draw Tool:</Label>
+                  <button
+                    type="button"
+                    title="Point"
                     onClick={() => { setDrawMode("point"); autoStartDrawMode("point", isEditing); }}
-                    className={`text-xs px-2.5 py-1 rounded-md font-medium transition-colors flex items-center gap-1.5 ${
-                      drawMode === "point" ? "bg-primary text-primary-foreground shadow-sm font-bold" : "bg-muted/50 hover:bg-muted text-muted-foreground"
+                    className={`p-1.5 rounded-md transition-colors flex items-center justify-center ${
+                      drawMode === "point" ? "bg-primary text-primary-foreground shadow-sm" : "bg-muted/50 hover:bg-muted text-muted-foreground"
                     }`}
                   >
-                    <MapPin className="w-3.5 h-3.5" /> Point
+                    <MapPin className="w-4 h-4" />
                   </button>
                   <button
                     type="button"
+                    title="Polyline"
                     onClick={() => { setDrawMode("polyline"); autoStartDrawMode("polyline", isEditing); }}
-                    className={`text-xs px-2.5 py-1 rounded-md font-medium transition-colors flex items-center gap-1.5 ${
-                      drawMode === "polyline" ? "bg-primary text-primary-foreground shadow-sm font-bold" : "bg-muted/50 hover:bg-muted text-muted-foreground"
+                    className={`p-1.5 rounded-md transition-colors flex items-center justify-center ${
+                      drawMode === "polyline" ? "bg-primary text-primary-foreground shadow-sm" : "bg-muted/50 hover:bg-muted text-muted-foreground"
                     }`}
                   >
-                    <Activity className="w-3.5 h-3.5" /> Polyline
+                    <Activity className="w-4 h-4" />
                   </button>
                   <button
                     type="button"
+                    title="Polygon"
                     onClick={() => { setDrawMode("polygon"); autoStartDrawMode("polygon", isEditing); }}
-                    className={`text-xs px-2.5 py-1 rounded-md font-medium transition-colors flex items-center gap-1.5 ${
-                      drawMode === "polygon" ? "bg-primary text-primary-foreground shadow-sm font-bold" : "bg-muted/50 hover:bg-muted text-muted-foreground"
+                    className={`p-1.5 rounded-md transition-colors flex items-center justify-center ${
+                      drawMode === "polygon" ? "bg-primary text-primary-foreground shadow-sm" : "bg-muted/50 hover:bg-muted text-muted-foreground"
                     }`}
                   >
-                    <Layers className="w-3.5 h-3.5" /> Polygon
+                    <Layers className="w-4 h-4" />
                   </button>
                   <button
                     type="button"
+                    title="Pan"
                     onClick={() => { 
                       cancelDrawMode(); 
                       setDrawMode("pan"); 
                     }}
-                    className={`text-xs px-2.5 py-1 rounded-md font-medium transition-colors flex items-center gap-1.5 ${
-                      drawMode === "pan" ? "bg-primary text-primary-foreground shadow-sm font-bold" : "bg-muted/50 hover:bg-muted text-muted-foreground"
+                    className={`p-1.5 rounded-md transition-colors flex items-center justify-center ${
+                      drawMode === "pan" ? "bg-primary text-primary-foreground shadow-sm" : "bg-muted/50 hover:bg-muted text-muted-foreground"
                     }`}
                   >
-                    <span className="text-sm">🖐️</span> Pan
+                    <span className="w-4 h-4 text-center leading-none">🖐️</span>
                   </button>
                   <button
                     type="button"
+                    title="Rectangle"
                     onClick={() => { setDrawMode("rectangle"); autoStartDrawMode("rectangle", isEditing); }}
-                    className={`text-xs px-2.5 py-1 rounded-md font-medium transition-colors flex items-center gap-1.5 ${
-                      drawMode === "rectangle" ? "bg-primary text-primary-foreground shadow-sm font-bold" : "bg-muted/50 hover:bg-muted text-muted-foreground"
+                    className={`p-1.5 rounded-md transition-colors flex items-center justify-center ${
+                      drawMode === "rectangle" ? "bg-primary text-primary-foreground shadow-sm" : "bg-muted/50 hover:bg-muted text-muted-foreground"
                     }`}
                   >
-                    <Square className="w-3.5 h-3.5" /> Rectangle
+                    <Square className="w-4 h-4" />
                   </button>
                   <button
                     type="button"
+                    title="Circle"
                     onClick={() => { setDrawMode("circle"); autoStartDrawMode("circle", isEditing); }}
-                    className={`text-xs px-2.5 py-1 rounded-md font-medium transition-colors flex items-center gap-1.5 ${
-                      drawMode === "circle" ? "bg-primary text-primary-foreground shadow-sm font-bold" : "bg-muted/50 hover:bg-muted text-muted-foreground"
+                    className={`p-1.5 rounded-md transition-colors flex items-center justify-center ${
+                      drawMode === "circle" ? "bg-primary text-primary-foreground shadow-sm" : "bg-muted/50 hover:bg-muted text-muted-foreground"
                     }`}
                   >
-                    <Circle className="w-3.5 h-3.5" /> Circle
+                    <Circle className="w-4 h-4" />
                   </button>
-
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   {!isEditing ? (
                     <Button
                       size="sm"
@@ -1418,14 +1481,37 @@ export function SampleDigitizationPage() {
                      {uploadBusy ? 'Uploading...' : 'Add Data'}
                   </Button>
                 </div>
+                </>
+              )}
               </div>
 
               {/* Map Layer Visibility & Spatial Bias Evaluation Controls */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-muted/40 p-2 rounded-lg border text-xs">
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold text-muted-foreground flex items-center gap-1">
-                    <Target className="w-3.5 h-3.5 text-emerald-500" /> Map Layer Visibility:
-                  </span>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-muted/40 p-2 rounded-lg border text-xs transition-all duration-200">
+                {isMapLayerFolded ? (
+                  <button
+                    type="button"
+                    onClick={() => setIsMapLayerFolded(false)}
+                    className="flex items-center gap-2 hover:bg-muted p-1 rounded-md transition-colors w-full sm:w-auto"
+                    title="Unfold tools"
+                  >
+                    <Target className="w-3.5 h-3.5 text-emerald-500" />
+                    <span className="font-semibold text-muted-foreground cursor-pointer uppercase tracking-wider text-[10px]">Layers</span>
+                    <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                  </button>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsMapLayerFolded(true)}
+                        className="hover:bg-muted p-1 rounded-md transition-colors mr-1"
+                        title="Fold toolbar"
+                      >
+                        <ChevronUp className="w-4 h-4 text-muted-foreground" />
+                      </button>
+                      <span className="font-semibold text-muted-foreground flex items-center gap-1">
+                        <Target className="w-3.5 h-3.5 text-emerald-500" /> Map Layer Visibility:
+                      </span>
                   <button
                     type="button"
                     onClick={() => setShowAllSamples(!showAllSamples)}
@@ -1457,6 +1543,8 @@ export function SampleDigitizationPage() {
                     {showCoverageBuffers ? "1km Bias Rings (Active)" : "Evaluate Sampling Bias (1km Rings)"}
                   </button>
                 </div>
+                </>
+              )}
               </div>
 
               {/* Active Classification Overlay Banner */}
@@ -1579,8 +1667,31 @@ export function SampleDigitizationPage() {
                 </div>
             </div>
             {/* Right Overlay toolbars */}
-            <div className="absolute top-4 right-4 z-[1000] flex flex-col gap-2 pointer-events-none w-80">
-                <div className="pointer-events-auto w-full flex flex-col gap-2">
+            <div className="absolute top-4 right-4 z-[1000] flex flex-col gap-2 pointer-events-none w-80 items-end">
+                <div className="pointer-events-auto w-full flex flex-col gap-2 items-end">
+                  {isRightPanelsFolded ? (
+                    <button
+                      type="button"
+                      onClick={() => setIsRightPanelsFolded(false)}
+                      className="flex items-center gap-2 bg-card border shadow-sm hover:bg-muted p-1.5 rounded-md transition-colors w-auto"
+                      title="Unfold right panels"
+                    >
+                      <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground cursor-pointer">Panels</span>
+                      <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                    </button>
+                  ) : (
+                    <>
+                      <div className="w-full flex justify-end mb-[-4px]">
+                        <button
+                          type="button"
+                          onClick={() => setIsRightPanelsFolded(true)}
+                          className="bg-card border shadow-sm hover:bg-muted p-1 rounded-md transition-colors pointer-events-auto"
+                          title="Fold right panels"
+                        >
+                          <ChevronUp className="w-4 h-4 text-muted-foreground" />
+                        </button>
+                      </div>
+                      <div className="w-full flex flex-col gap-2">
               {/* ──────────────────────────────────────────────────────────────
                    TIMELAPSE IMAGERY PANEL
               ────────────────────────────────────────────────────────────── */}
@@ -1840,6 +1951,9 @@ export function SampleDigitizationPage() {
                 )}
               </div>
 
+                      </div>
+                    </>
+                  )}
                 </div>
             </div>
 <div className="h-full w-full absolute inset-0 z-0 bg-muted/10">
@@ -2010,9 +2124,13 @@ export function SampleDigitizationPage() {
                 </MapContainer>
             </div>
           </div>
+          </div>
+        </TabsContent>
 
+        {/* 1b. SAMPLES DIRECTORY TAB */}
+        <TabsContent value="samples" className="h-full overflow-y-auto p-4 space-y-4">
           {/* GROUPED & SORTED TRAINING SAMPLES DIRECTORY */}
-          <div className="space-y-4 pt-2">
+          <div className="space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-card p-3.5 rounded-lg border">
               <div className="flex items-center gap-2">
                 <Layers className="w-5 h-5 text-emerald-500" />

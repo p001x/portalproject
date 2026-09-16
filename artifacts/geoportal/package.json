@@ -44,6 +44,7 @@
     "@tailwindcss/typography": "^0.5.15",
     "@tailwindcss/vite": "catalog:",
     "@tanstack/react-query": "catalog:",
+    "@types/canvas-confetti": "^1.6.4",
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
@@ -82,6 +83,7 @@
     "@types/shpjs": "^3.4.7",
     "georaster": "^1.6.0",
     "georaster-layer-for-leaflet": "^4.1.2",
+    "canvas-confetti": "^1.9.2",
     "html-to-image": "^1.11.13",
     "jspdf": "^2.5.1",
     "leaflet": "^1.9.4",
@@ -90,6 +92,8 @@
     "react-leaflet-draw": "^0.21.0",
     "react-rnd": "^10.5.3",
     "react-zoom-pan-pinch": "^4.0.3",
-    "shpjs": "^6.2.0"
+    "shpjs": "^6.2.0",
+    "react-pdf": "^9.1.1",
+    "@types/react-pdf": "^7.0.0"
   }
 }

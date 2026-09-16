@@ -42,6 +42,7 @@ import { AcademyPage } from "@/pages/AcademyPage";
 import { BlogPage } from "@/pages/BlogPage";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { NotificationProvider, useNotifications } from "@/hooks/use-notifications";
+import { GEEAuthGate } from "@/components/GEEAuthGate";
 import { GEEProjectConfig } from "@/components/GEEProjectConfig";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -555,11 +556,13 @@ function Router() {
         <Route path="/rare-data" component={RareDataPage} />
         <Route path="/harvester" component={DataHarvesterPage} />
         <Route path="/samples">
-          <div className="h-full flex flex-col">
-            <div className="flex-1 overflow-hidden">
-              <SampleDigitizationPage />
+          <GEEAuthGate>
+            <div className="h-full flex flex-col">
+              <div className="flex-1 overflow-hidden">
+                <SampleDigitizationPage />
+              </div>
             </div>
-          </div>
+          </GEEAuthGate>
         </Route>
         <Route path="/community" component={CommunityPage} />
         <Route path="/dashboard" component={DashboardPage} />

@@ -10,6 +10,11 @@ from flask import Flask, request, jsonify, Response, send_file
 from flask_cors import CORS
 from pydantic import BaseModel, Field, ValidationError
 
+import requests
+import pypdf
+from google import genai
+from google.genai import types
+
 from gee.auth import initialize_gee, authenticate_individual, verify_individual_session, logout_individual
 from gee.ndvi import RWANDA_DISTRICTS, compute_ndvi
 from gee.lst import compute_lst
@@ -1906,6 +1911,86 @@ def flask_harvester_get_task(task_id: str):
     if not task:
         return jsonify({"detail": "Task not found"}), 404
     return jsonify(asdict(task))
+
+
+@app.route("/api/ai/takeaways", methods=["POST"])
+def generate_ai_takeaways():
+    data = request.get_json(force=True, silent=True) or {}
+    pdf_url = data.get("pdfUrl")
+    title = data.get("title", "this document")
+    
+    if not pdf_url:
+        return jsonify({"detail": "PDF URL is required"}), 400
+
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return jsonify({"detail": "Gemini API key is not configured. Please add GEMINI_API_KEY to your backend .env file."}), 500
+
+    try:
+        # 1. Download the PDF
+        response = requests.get(pdf_url, stream=True, timeout=15)
+        response.raise_for_status()
+        
+        # 2. Extract Text (limit to first 50 pages to save context/time)
+        pdf_bytes = io.BytesIO(response.content)
+        reader = pypdf.PdfReader(pdf_bytes)
+        
+        extracted_text = ""
+        max_pages = min(50, len(reader.pages))
+        for i in range(max_pages):
+            page = reader.pages[i]
+            extracted_text += page.extract_text() + "\n\n"
+            
+        if not extracted_text.strip():
+            return jsonify({"detail": "Could not extract text from the PDF."}), 400
+
+        # 3. Call Gemini
+        client = genai.Client(api_key=api_key)
+        
+        prompt = f"""
+You are an expert Geospatial Data Scientist and Educational Analyst.
+Read the following text extracted from a geospatial document titled '{title}'.
+
+Your task is to provide the absolute best, most insightful analysis of this text by extracting exactly 3 key takeaways. Do not just summarize the text superficially. Instead, provide deep critical insights, methodological takeaways, or key practical implications that a professional would find highly valuable.
+
+Return the response as a JSON array of exactly 3 strings. 
+Do not include markdown formatting or the ```json block, just the raw JSON array.
+Each string should be a concise but powerful bullet point (2-3 sentences max).
+
+Extracted Text:
+{extracted_text[:40000]}
+"""
+        result = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.3,
+            )
+        )
+        
+        # 4. Parse Response
+        try:
+            # Clean potential markdown block if the model ignores the instruction
+            raw_text = result.text.strip()
+            if raw_text.startswith("```json"):
+                raw_text = raw_text[7:]
+            if raw_text.startswith("```"):
+                raw_text = raw_text[3:]
+            if raw_text.endswith("```"):
+                raw_text = raw_text[:-3]
+            
+            takeaways = json.loads(raw_text.strip())
+            if not isinstance(takeaways, list) or len(takeaways) < 1:
+                raise ValueError("AI did not return a list")
+                
+            return jsonify({"takeaways": takeaways[:3]})
+        except json.JSONDecodeError:
+            logger.error(f"Failed to parse AI response as JSON: {result.text}")
+            return jsonify({"detail": "Failed to parse the AI response.", "raw": result.text}), 500
+            
+    except Exception as exc:
+        logger.exception("Error generating AI takeaways")
+        return jsonify({"detail": str(exc)}), 500
 
 
 if __name__ == "__main__":

@@ -450,6 +450,7 @@ def notify_new_course_endpoint(req: NewCourseNotification, background_tasks: Bac
 # ── Academy ──────────────────────────────────────────────────────────────────
 
 from storage.books_storage import load_books, process_and_store_book_upload, delete_book, get_book_bytes, update_book
+from storage.courses_storage import load_courses, create_course, update_course, delete_course
 
 @app.get("/api/academy/books", tags=["academy"])
 def api_get_books():
@@ -508,7 +509,7 @@ def api_update_book(book_id: str, req: BookUpdateRequest, user: dict = Depends(g
 @app.get("/api/academy/books/{book_id}/download", tags=["academy"])
 def api_download_book(book_id: str):
     records = load_books()
-    target = next((r for r in records if r["id"] == book_id), None)
+    target = next((r for r in records if str(r.get("id")) == str(book_id)), None)
     if not target:
         raise HTTPException(404, "Book not found")
         
@@ -517,10 +518,137 @@ def api_download_book(book_id: str):
         return Response(
             file_bytes,
             media_type="application/pdf",
-            headers={"Content-Disposition": f"inline;filename={target['original_filename']}"}
+            headers={"Content-Disposition": f'inline; filename="{target["original_filename"]}"'}
         )
     except Exception as e:
         raise HTTPException(500, str(e))
+
+class FetchBookRequest(BaseModel):
+    url: str
+    title: str
+    author: Optional[str] = "Unknown"
+    description: Optional[str] = ""
+    pages: Optional[int] = 0
+
+@app.post("/api/academy/books/fetch-from-url", tags=["academy"])
+def api_fetch_book_from_url(req: FetchBookRequest, user: dict = Depends(get_current_user)):
+    if user.get("role") != "admin":
+        raise HTTPException(403, "Not authorized to upload books")
+    import requests
+    try:
+        headers = {"User-Agent": "Mozilla/5.0"}
+        url = req.url
+        if "drive.google.com/file/d/" in url:
+            import re
+            match = re.search(r"/d/([a-zA-Z0-9_-]+)", url)
+            if match:
+                url = f"https://drive.google.com/uc?export=download&id={match.group(1)}"
+        
+        resp = requests.get(url, headers=headers, timeout=30)
+        resp.raise_for_status()
+        
+        filename = req.url.split("/")[-1]
+        if not filename.endswith(".pdf") and not ".pdf?" in filename:
+            filename += ".pdf"
+            
+        file_bytes = resp.content
+        if not file_bytes.startswith(b'%PDF-'):
+            raise HTTPException(400, "The provided URL did not return a valid PDF file. Please ensure it is a direct download link.")
+
+        record = process_and_store_book_upload(
+            filename=filename,
+            file_bytes=file_bytes,
+            title=req.title,
+            author=req.author,
+            description=req.description,
+            pages=req.pages
+        )
+        return {"ok": True, "book": record}
+    except Exception as e:
+        raise HTTPException(500, f"Failed to fetch book from URL: {str(e)}")
+
+@app.get("/api/academy/courses", tags=["academy"])
+def api_get_courses():
+    return {"courses": load_courses()}
+
+class CreateCourseRequest(BaseModel):
+    title: str
+    description: str
+    detailedDescription: str
+    videos: Optional[list] = None
+    youtubeId: Optional[str] = None
+    duration: Optional[str] = "New"
+    level: Optional[str] = "Beginner"
+
+@app.post("/api/academy/courses", tags=["academy"])
+def api_create_course(req: CreateCourseRequest, user: dict = Depends(get_current_user)):
+    if user.get("role") != "admin":
+        raise HTTPException(403, "Not authorized")
+    
+    videos = req.videos
+    if not videos and req.youtubeId:
+        videos = [{
+            "id": "v1",
+            "title": req.title,
+            "youtubeId": req.youtubeId,
+            "duration": req.duration or "15m"
+        }]
+    elif not videos:
+        videos = []
+
+    record = create_course(
+        title=req.title,
+        description=req.description,
+        detailed_description=req.detailedDescription,
+        videos=videos,
+        duration=req.duration,
+        level=req.level
+    )
+    return {"ok": True, "course": record}
+
+class UpdateCourseRequest(BaseModel):
+    title: str
+    description: str
+    detailedDescription: str
+    videos: Optional[list] = None
+    youtubeId: Optional[str] = None
+    duration: Optional[str] = None
+    level: Optional[str] = None
+
+@app.put("/api/academy/courses/{course_id}", tags=["academy"])
+def api_update_course(course_id: str, req: UpdateCourseRequest, user: dict = Depends(get_current_user)):
+    if user.get("role") != "admin":
+        raise HTTPException(403, "Not authorized")
+        
+    videos = req.videos
+    if videos is None and req.youtubeId:
+        videos = [{
+            "id": "v1",
+            "title": req.title,
+            "youtubeId": req.youtubeId,
+            "duration": req.duration or "15m"
+        }]
+
+    updated = update_course(
+        course_id=course_id,
+        title=req.title,
+        description=req.description,
+        detailed_description=req.detailedDescription,
+        videos=videos,
+        duration=req.duration,
+        level=req.level
+    )
+    if updated:
+        return {"ok": True, "course": updated}
+    raise HTTPException(404, "Course not found")
+
+@app.delete("/api/academy/courses/{course_id}", tags=["academy"])
+def api_delete_course(course_id: str, user: dict = Depends(get_current_user)):
+    if user.get("role") != "admin":
+        raise HTTPException(403, "Not authorized")
+    if delete_course(course_id):
+        return {"ok": True}
+    raise HTTPException(404, "Course not found")
 
 # ── Meta ─────────────────────────────────────────────────────────────────────
 
