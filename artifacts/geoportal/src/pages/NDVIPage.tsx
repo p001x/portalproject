@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useMutation } from "@tanstack/react-query";
 import {
   BarChart,
@@ -9,7 +9,7 @@ import {
   ResponsiveContainer,
   Cell,
 } from "recharts";
-import { Loader2, Play, Leaf, FileText } from "lucide-react";
+import { Loader2, Play, Leaf, FileText, Tag, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
@@ -42,7 +42,41 @@ const DISTRICTS = [
   "Custom Study Area",
 ];
 
-const CLASS_COLORS = ["#d73027","#fc8d59","#fee08b","#91cf60","#1a9850"];
+const CLASS_COLORS = ["#4575b4", "#d73027", "#fc8d59", "#fee08b", "#91cf60", "#1a9850"];
+
+const DEFAULT_PRESETS: Record<number, string[]> = {
+  1: ["Uniform / Full Area"],
+  2: ["Low", "High"],
+  3: ["Low", "Moderate", "High"],
+  4: ["Low", "Moderate", "High", "Very High"],
+  5: ["Very Low", "Low", "Moderate", "High", "Very High"],
+  6: ["Very Low", "Low", "Moderate", "High", "Very High", "Extreme"],
+  7: ["Extremely Low", "Very Low", "Low", "Moderate", "High", "Very High", "Extreme"],
+  8: ["Extremely Low", "Very Low", "Low", "Moderately Low", "Moderately High", "High", "Very High", "Extreme"],
+  9: ["Extremely Low", "Very Low", "Low", "Moderately Low", "Moderate", "Moderately High", "High", "Very High", "Extreme"],
+  10: ["Extremely Low", "Very Low", "Low", "Moderately Low", "Moderate", "Moderately High", "High", "Very High", "Extremely High", "Extreme"],
+};
+
+function getDefaultLabels(n: number): string[] {
+  if (DEFAULT_PRESETS[n]) return [...DEFAULT_PRESETS[n]];
+  return Array.from({ length: n }, (_, i) => `Class ${i + 1}`);
+}
+
+const VEG_HEALTH_PRESETS: Record<number, string[]> = {
+  3: ["Sparse / Stressed", "Moderate Canopy", "Dense Healthy"],
+  4: ["Water / Bare", "Sparse Veg", "Moderate Canopy", "Dense Forest"],
+  5: ["Water / Bare Soil", "Sparse / Stressed", "Moderate Vegetation", "Dense Canopy", "Lush Forest"],
+  6: ["Water / Non-Veg", "Bare / Soil", "Sparse Grassland", "Open Canopy", "Dense Canopy", "Lush Forest"],
+  10: ["Water / Shadow", "Barren Land", "Urban / Built-up", "Degraded / Stressed", "Sparse Grassland", "Moderate Shrubland", "Open Canopy / Crops", "Dense Canopy", "Vigorous Veg", "Dense Healthy Forest"],
+};
+
+const LAND_COVER_PRESETS: Record<number, string[]> = {
+  3: ["Water / Bare", "Agriculture", "Forest"],
+  4: ["Water", "Bare / Built", "Agriculture", "Forest"],
+  5: ["Water", "Built-up", "Grassland", "Cropland", "Forest"],
+  6: ["Water", "Bare Soil", "Built-up", "Grassland", "Cropland", "Dense Forest"],
+  10: ["Deep Water", "Shallow Water", "Bare Soil", "Urban / Built-up", "Sparse Grassland", "Pasture", "Rainfed Cropland", "Irrigated Crops", "Secondary Forest", "Primary Dense Forest"],
+};
 
 function today() {
   return new Date().toISOString().slice(0, 10);
@@ -58,21 +92,100 @@ export function NDVIPage() {
   const [startDate, setStartDate] = useState(sixMonthsAgo());
   const [endDate, setEndDate] = useState(today());
   const [nClasses, setNClasses] = useState(5);
+  const [method, setMethod] = useState("natural_breaks");
+  const [layerMode, setLayerMode] = useState<"classified" | "continuous">("classified");
+  const [customClassNames, setCustomClassNames] = useState<string[]>(() => getDefaultLabels(5));
+
+  // Sync custom labels length when nClasses changes
+  useEffect(() => {
+    setCustomClassNames(prev => {
+      const def = getDefaultLabels(nClasses);
+      return Array.from({ length: nClasses }, (_, i) => prev[i] || def[i]);
+    });
+  }, [nClasses]);
 
   const { mutate, data, isPending, error } = useMutation<NDVIResult, Error>({
     mutationFn: () =>
-      api.ndvi({ aoi,
-        start_date: startDate, end_date: endDate, n_classes: nClasses }),
+      api.ndvi({ 
+        aoi,
+        start_date: startDate, 
+        end_date: endDate, 
+        n_classes: nClasses, 
+        method,
+        custom_labels: customClassNames,
+      }),
+    onSuccess: (res) => {
+      if (method === "continuous") {
+        setLayerMode("continuous");
+      } else {
+        setLayerMode("classified");
+      }
+    }
   });
 
-
   const palette = (n: number) => {
-    const full = ["#1a9850","#66bd63","#a6d96a","#d9ef8b","#ffffbf",
-                  "#fee08b","#fdae61","#f46d43","#d73027","#a50026"];
-    if (n === 1) return [full[4]];
-    const step = (full.length - 1) / (n - 1);
-    return Array.from({ length: n }, (_, i) => full[Math.round(i * step)]);
+    const stops = [
+      "#a50026", "#d73027", "#f46d43", "#fdae61", "#fee08b",
+      "#ffffbf", "#d9ef8b", "#a6d96a", "#66bd63", "#1a9850"
+    ];
+    if (n <= 1) return ["#1a9850"];
+    if (n === stops.length) return stops;
+    
+    const hexToRgb = (h: string) => {
+      const clean = h.replace("#", "");
+      return [
+        parseInt(clean.substring(0, 2), 16),
+        parseInt(clean.substring(2, 4), 16),
+        parseInt(clean.substring(4, 6), 16),
+      ];
+    };
+    
+    const rgbToHex = (r: number, g: number, b: number) =>
+      "#" + [r, g, b].map(x => Math.max(0, Math.min(255, Math.round(x))).toString(16).padStart(2, "0")).join("");
+
+    const rgbStops = stops.map(hexToRgb);
+    return Array.from({ length: n }, (_, i) => {
+      const t = (i / (n - 1)) * (rgbStops.length - 1);
+      const idx = Math.floor(t);
+      const frac = t - idx;
+      if (idx >= rgbStops.length - 1) return stops[stops.length - 1];
+      const c1 = rgbStops[idx];
+      const c2 = rgbStops[idx + 1];
+      return rgbToHex(
+        c1[0] + (c2[0] - c1[0]) * frac,
+        c1[1] + (c2[1] - c1[1]) * frac,
+        c1[2] + (c2[2] - c1[2]) * frac
+      );
+    });
   };
+
+  const isContinuous = method === "continuous";
+  const rawAreas = (!isContinuous && data?.classify?.panels?.[0]?.areas)
+    ? data.classify.panels[0].areas
+    : (data?.class_areas_km2 || {});
+
+  const activeAreas = useMemo(() => {
+    const entries = Object.entries(rawAreas);
+    if (entries.length === 0 || isContinuous) return rawAreas;
+    
+    const mapped: Record<string, number> = {};
+    entries.forEach(([origKey, val], idx) => {
+      const match = origKey.match(/(\s*[\(\[].*?[\)\]])/);
+      const suffix = match ? match[1] : "";
+      const customName = customClassNames[idx] || origKey.replace(/ *\([^)]*\)/, '');
+      mapped[`${customName}${suffix}`] = val;
+    });
+    return mapped;
+  }, [rawAreas, customClassNames, isContinuous]);
+    
+  const activeNClasses = data?.classify?.n_classes || nClasses;
+  const activeColors = !isContinuous
+    ? palette(activeNClasses)
+    : CLASS_COLORS;
+
+  const classifiedTileUrl = data?.classify?.panels?.[0]?.tile_url || data?.tile_url;
+  const continuousTileUrl = data?.tile_url;
+  const activeTileUrl = (layerMode === "classified" && !isContinuous) ? classifiedTileUrl : continuousTileUrl;
 
   return (
     <ResizablePanelGroup direction="horizontal" className="h-full items-stretch">
@@ -112,16 +225,126 @@ export function NDVIPage() {
           />
         </div>
 
-        <div className="space-y-2">
-          <Label>Classes: {nClasses}</Label>
-          <Slider
-            min={2}
-            max={10}
-            step={1}
-            value={[nClasses]}
-            onValueChange={([v]) => setNClasses(v)}
-          />
+        <div className="space-y-1">
+          <Label>Classification Method</Label>
+          <Select 
+            value={method} 
+            onValueChange={(val) => {
+              setMethod(val);
+              if (val === "continuous") {
+                setLayerMode("continuous");
+              } else {
+                setLayerMode("classified");
+              }
+            }}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Select Method" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="natural_breaks">Natural Breaks (Jenks)</SelectItem>
+              <SelectItem value="equal_interval">Discrete (Equal Interval)</SelectItem>
+              <SelectItem value="quantiles">Discrete (Quantiles / Equal Area)</SelectItem>
+              <SelectItem value="continuous">Continuous (Smooth Gradient)</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
+
+        {!isContinuous && (
+          <>
+            <div className="space-y-2">
+              <div className="flex justify-between items-center">
+              <Label>Classes: {nClasses}</Label>
+              <span className="text-[11px] text-muted-foreground">{nClasses} intervals</span>
+            </div>
+            <Slider
+              min={1}
+              max={15}
+              step={1}
+              value={[nClasses]}
+              onValueChange={([v]) => setNClasses(v)}
+            />
+          </div>
+
+          <div className="space-y-3 bg-muted/40 border rounded-lg p-3">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs font-semibold flex items-center gap-1.5 text-foreground">
+                <Tag className="w-3.5 h-3.5 text-primary" />
+                Rename Classes ({nClasses})
+              </Label>
+              <button
+                type="button"
+                onClick={() => setCustomClassNames(getDefaultLabels(nClasses))}
+                className="text-[10px] text-muted-foreground hover:text-primary flex items-center gap-1 transition-colors"
+                title="Reset to default names"
+              >
+                <RotateCcw className="w-3 h-3" /> Reset
+              </button>
+            </div>
+
+            {/* Quick Presets */}
+            <div className="flex flex-wrap gap-1">
+              <button
+                type="button"
+                onClick={() => setCustomClassNames(getDefaultLabels(nClasses))}
+                className="text-[10px] px-2 py-0.5 rounded border bg-card hover:bg-muted transition-colors font-medium"
+              >
+                Descriptive
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const preset = VEG_HEALTH_PRESETS[nClasses] || Array.from({ length: nClasses }, (_, i) => `Vegetation ${i+1}`);
+                  setCustomClassNames(Array.from({ length: nClasses }, (_, i) => preset[i] || `Level ${i+1}`));
+                }}
+                className="text-[10px] px-2 py-0.5 rounded border bg-card hover:bg-muted transition-colors font-medium"
+              >
+                Veg Health
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const preset = LAND_COVER_PRESETS[nClasses] || Array.from({ length: nClasses }, (_, i) => `Land Cover ${i+1}`);
+                  setCustomClassNames(Array.from({ length: nClasses }, (_, i) => preset[i] || `Zone ${i+1}`));
+                }}
+                className="text-[10px] px-2 py-0.5 rounded border bg-card hover:bg-muted transition-colors font-medium"
+              >
+                Land Cover
+              </button>
+              <button
+                type="button"
+                onClick={() => setCustomClassNames(Array.from({ length: nClasses }, (_, i) => `Class ${i + 1}`))}
+                className="text-[10px] px-2 py-0.5 rounded border bg-card hover:bg-muted transition-colors font-medium"
+              >
+                Numeric
+              </button>
+            </div>
+
+            {/* Editable Class Names List */}
+            <div className="space-y-1.5 max-h-[200px] overflow-y-auto pr-1">
+              {Array.from({ length: nClasses }).map((_, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <span
+                    className="w-3.5 h-3.5 rounded-xs shrink-0 border border-black/15 shadow-2xs"
+                    style={{ background: activeColors[i % activeColors.length] }}
+                  />
+                  <input
+                    type="text"
+                    value={customClassNames[i] || ""}
+                    placeholder={`Class ${i + 1}`}
+                    onChange={(e) => {
+                      const next = [...customClassNames];
+                      next[i] = e.target.value;
+                      setCustomClassNames(next);
+                    }}
+                    className="flex-1 h-7 text-xs rounded border border-input bg-background px-2 text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+          </>
+        )}
 
         <Button
           className="w-full gap-2"
@@ -183,27 +406,87 @@ export function NDVIPage() {
             </TabsList>
 
             {/* Map */}
-            <TabsContent value="map" className="flex-1 min-h-[500px]">
-              <div className="h-[560px] rounded-lg overflow-hidden border">
-                <DistrictMap center={data.center} tileUrl={data.tile_url} />
-              </div>
-              <div className="mt-3 flex flex-wrap gap-3 text-xs">
-                {[
-                  { color: "#a50026", label: "Very Low" },
-                  { color: "#fc8d59", label: "Low" },
-                  { color: "#fee08b", label: "Moderate" },
-                  { color: "#91cf60", label: "High" },
-                  { color: "#1a9850", label: "Very High" },
-                ].map(({ color, label }) => (
-                  <span key={label} className="flex items-center gap-1.5">
-                    <span
-                      className="w-3 h-3 rounded-sm inline-block"
-                      style={{ background: color }}
-                    />
-                    {label}
+            <TabsContent value="map" className="flex-1 min-h-[500px] flex flex-col">
+              {/* Map Layer Switcher Header */}
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-3 p-2 bg-muted/30 rounded-lg border">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Map Symbology:</span>
+                  <div className="inline-flex items-center rounded-md border bg-background p-0.5 text-xs shadow-2xs">
+                    <button
+                      type="button"
+                      onClick={() => setLayerMode("classified")}
+                      disabled={isContinuous}
+                      className={`px-3 py-1 rounded font-medium transition-all ${
+                        layerMode === "classified" && !isContinuous
+                          ? "bg-primary text-primary-foreground shadow-xs"
+                          : "text-muted-foreground hover:text-foreground disabled:opacity-40"
+                      }`}
+                    >
+                      Classified ({activeNClasses} Classes)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLayerMode("continuous")}
+                      className={`px-3 py-1 rounded font-medium transition-all ${
+                        layerMode === "continuous" || isContinuous
+                          ? "bg-primary text-primary-foreground shadow-xs"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      Continuous Gradient
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span>Method:</span>
+                  <span className="font-semibold text-foreground bg-background px-2 py-0.5 rounded border capitalize">
+                    {method.replace(/_/g, " ")}
                   </span>
-                ))}
+                </div>
               </div>
+
+              <div className="h-[520px] rounded-lg overflow-hidden border relative">
+                <DistrictMap center={data.center} tileUrl={activeTileUrl} />
+              </div>
+
+              {/* Dynamic Legend */}
+              {layerMode === "classified" && !isContinuous ? (
+                <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                  {Object.entries(activeAreas).map(([label, km2], i) => (
+                    <span 
+                      key={label} 
+                      className="inline-flex items-center gap-2 px-2.5 py-1.5 rounded-md border bg-card/80 shadow-2xs hover:bg-card transition-colors"
+                    >
+                      <span
+                        className="w-3.5 h-3.5 rounded-xs inline-block shrink-0 border border-black/15 shadow-2xs"
+                        style={{ background: activeColors[i % activeColors.length] }}
+                      />
+                      <span className="font-medium text-foreground">{label}</span>
+                      <span className="text-muted-foreground font-mono text-[11px]">({km2} km²)</span>
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-3 p-3.5 rounded-lg border bg-card/70 space-y-2 max-w-lg">
+                  <div className="flex justify-between text-xs font-semibold text-muted-foreground">
+                    <span>Water / Bare Soil (-0.2)</span>
+                    <span>Moderate Veg (0.3)</span>
+                    <span>Dense Canopy (0.8+)</span>
+                  </div>
+                  <div 
+                    className="w-full h-3.5 rounded border shadow-inner"
+                    style={{
+                      background: "linear-gradient(to right, #a50026, #d73027, #f46d43, #fdae61, #fee08b, #ffffbf, #d9ef8b, #a6d96a, #66bd63, #1a9850)"
+                    }}
+                  />
+                  <div className="flex justify-between text-[11px] text-muted-foreground font-mono">
+                    <span>Min: {data.stats["Min NDVI"]}</span>
+                    <span>Mean: {data.stats["Mean NDVI"]}</span>
+                    <span>Max: {data.stats["Max NDVI"]}</span>
+                  </div>
+                </div>
+              )}
             </TabsContent>
 
             {/* Statistics */}
@@ -227,21 +510,27 @@ export function NDVIPage() {
               </div>
 
               <div>
-                <h3 className="font-medium mb-3">Vegetation Class Areas</h3>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-medium">Vegetation Class Areas</h3>
+                  <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded border capitalize">
+                    {isContinuous ? "Standard Reference (Continuous)" : `${method.replace(/_/g, " ")} (${activeNClasses} Classes)`}
+                  </span>
+                </div>
                 <ResponsiveContainer width="100%" height={240}>
                   <BarChart
-                    data={Object.entries(data.class_areas_km2).map(([k, v], i) => ({
-                      name: k,
+                    data={Object.entries(activeAreas).map(([k, v], i) => ({
+                      name: k.split(" (")[0],
+                      fullName: k,
                       area: v,
-                      fill: CLASS_COLORS[i % CLASS_COLORS.length],
+                      fill: activeColors[i % activeColors.length],
                     }))}
                   >
                     <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={50} />
                     <YAxis unit=" km²" tick={{ fontSize: 11 }} />
-                    <Tooltip formatter={(v: number) => [`${v} km²`, "Area"]} />
+                    <Tooltip formatter={(v: number, _, item: any) => [`${v} km²`, item.payload.fullName]} />
                     <Bar dataKey="area" radius={[4, 4, 0, 0]}>
-                      {Object.keys(data.class_areas_km2).map((_, i) => (
-                        <Cell key={i} fill={CLASS_COLORS[i % CLASS_COLORS.length]} />
+                      {Object.keys(activeAreas).map((_, i) => (
+                        <Cell key={i} fill={activeColors[i % activeColors.length]} />
                       ))}
                     </Bar>
                   </BarChart>
@@ -250,19 +539,19 @@ export function NDVIPage() {
                 <table className="w-full text-sm mt-4 border rounded-lg overflow-hidden">
                   <thead className="bg-muted">
                     <tr>
-                      <th className="text-left px-3 py-2 font-medium">Class</th>
+                      <th className="text-left px-3 py-2 font-medium">Class / Range</th>
                       <th className="text-right px-3 py-2 font-medium">Area (km²)</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {Object.entries(data.class_areas_km2).map(([cls, km2], i) => (
+                    {Object.entries(activeAreas).map(([cls, km2], i) => (
                       <tr key={cls} className={i % 2 === 0 ? "bg-background" : "bg-muted/30"}>
                         <td className="px-3 py-1.5 flex items-center gap-2">
                           <span
                             className="w-2.5 h-2.5 rounded-sm inline-block shrink-0"
-                            style={{ background: CLASS_COLORS[i % CLASS_COLORS.length] }}
+                            style={{ background: activeColors[i % activeColors.length] }}
                           />
-                          {cls}
+                          <span className="font-medium">{cls}</span>
                         </td>
                         <td className="px-3 py-1.5 text-right tabular-nums">{km2}</td>
                       </tr>
@@ -286,18 +575,11 @@ export function NDVIPage() {
               {/* Legend */}
               <div className="flex flex-wrap gap-2 text-xs">
                 {palette(data.classify.n_classes).map((color, i) => {
-                  const labels: Record<number, string[]> = {
-                    2: ["Low","High"],
-                    3: ["Low","Moderate","High"],
-                    4: ["Low","Moderate","High","Very High"],
-                    5: ["Very Low","Low","Moderate","High","Very High"],
-                    6: ["Very Low","Low","Moderate","High","Very High","Extreme"],
-                  };
-                  const lbl = (labels[data.classify.n_classes] ?? [])[i] ?? `Class ${i + 1}`;
+                  const lbl = customClassNames[i] || getDefaultLabels(data.classify.n_classes)[i] || `Class ${i + 1}`;
                   return (
-                    <span key={i} className="flex items-center gap-1">
-                      <span className="w-3 h-3 rounded-sm" style={{ background: color }} />
-                      {lbl}
+                    <span key={i} className="flex items-center gap-1.5 px-2.5 py-1 rounded border bg-card shadow-2xs">
+                      <span className="w-3 h-3 rounded-xs border border-black/15 shadow-2xs" style={{ background: color }} />
+                      <span className="font-medium">{lbl}</span>
                     </span>
                   );
                 })}
@@ -324,7 +606,7 @@ export function NDVIPage() {
                     />
                     <ResponsiveContainer width="100%" height={160}>
                       <BarChart
-                        data={Object.entries(panel.areas).map(([k, v], i) => ({
+                        data={Object.entries(activeAreas).map(([k, v], i) => ({
                           name: k.split(" (")[0],
                           area: v,
                           fill: palette(data.classify.n_classes)[i],
@@ -354,12 +636,13 @@ export function NDVIPage() {
               </div>
               <div className="bg-card border rounded-lg p-4">
               <MapExportControls
-                tileUrl={data.tile_url}
-                thumbUrl={data.classify?.panels?.[0]?.thumb_url || (data as any).thumb_url}
+                tileUrl={layerMode === "continuous" || isContinuous ? data.tile_url : (data.classify?.panels?.[0]?.tile_url || data.tile_url)}
+                thumbUrl={layerMode === "continuous" || isContinuous ? (data.thumb_url || data.classify?.panels?.[0]?.clean_thumb_url || data.classify?.panels?.[0]?.thumb_url) : (data.classify?.panels?.[0]?.clean_thumb_url || data.classify?.panels?.[0]?.thumb_url || data.thumb_url)}
                 downloadUrl={(data as any).download_url}
                 district={aoi.name || "Custom"}
                 title="NDVI Vegetation Health"
-                classAreas={data.class_areas_km2}
+                classAreas={layerMode === "continuous" || isContinuous ? undefined : activeAreas}
+                bbox={data.bbox}
               /></div>
             </TabsContent>
 
@@ -380,8 +663,8 @@ export function NDVIPage() {
                   district={aoi.name || "Custom"}
                   dateRange={`${data.start_date} to ${data.end_date}`}
                   stats={data.stats as Record<string, number>}
-                  classAreas={data.class_areas_km2}
-                  extraNotes={`NDVI values range from -1 to 1. Values above 0.4 indicate healthy dense vegetation. Analysis covers ${data.district} district from ${data.start_date} to ${data.end_date} using Sentinel-2 SR cloud-masked median composite at 10 m resolution.`}
+                  classAreas={activeAreas}
+                  extraNotes={`NDVI analysis covers ${data.district} district from ${data.start_date} to ${data.end_date} using Sentinel-2 SR cloud-masked median composite at 10 m resolution (Reclassification: ${method.replace(/_/g, " ")} with ${activeNClasses} classes).`}
                   maps={data.classify?.panels?.map((p) => [p.title, p.thumb_url] as [string, string]) ?? []}
                   filename={`NDVI_${data.district}_${data.start_date}.pdf`}
                 />

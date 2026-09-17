@@ -203,10 +203,13 @@ def upload_aoi_shapefile():
 
 # ── Models ─────────────────────────────────────────────────────────
 class NDVIRequest(BaseModel):
-    district: str
+    district: Optional[str] = None
     start_date: str
     end_date: str
     n_classes: int = 5
+    method: Optional[str] = "natural_breaks"
+    aoi: Optional[dict] = None
+    custom_labels: Optional[list[str]] = None
 
 class LSTRequest(BaseModel):
     district: str
@@ -352,7 +355,7 @@ def ndvi_endpoint():
     if req.district not in RWANDA_DISTRICTS:
         return jsonify({"detail": f"Unknown district '{req.district}'."}), 400
     try:
-        res = compute_ndvi(req.district, req.start_date, req.end_date, req.n_classes)
+        res = compute_ndvi(req.district or req.aoi, req.start_date, req.end_date, req.n_classes, method=req.method, custom_labels=req.custom_labels)
         return jsonify(res)
     except Exception as exc:
         logger.exception("NDVI failed")

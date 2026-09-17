@@ -24,15 +24,18 @@ def compute_ndvi(
     start_date: str,
     end_date: str,
     n_classes: int = 5,
+    method: str = "natural_breaks",
+    custom_labels: Optional[list] = None,
 ) -> dict:
     """
     Compute NDVI median composite for a given district and date range.
 
     Returns a dict with tile_url, stats, class_areas_km2, classify, center,
     district, start_date, end_date.  Results are cached for 1 hour per unique
-    (district, start_date, end_date, n_classes) combination.
+    (district, start_date, end_date, n_classes, method, custom_labels) combination.
     """
-    cache_key = (json.dumps(aoi_config, sort_keys=True), start_date, end_date, n_classes)
+    labels_tuple = tuple(custom_labels) if custom_labels else None
+    cache_key = (json.dumps(aoi_config, sort_keys=True), start_date, end_date, n_classes, method, labels_tuple)
 
     with _lock:
         if cache_key in _cache:
@@ -104,6 +107,8 @@ def compute_ndvi(
                 scale=dynamic_scale,
                 n_classes=n_classes,
                 reverse_palette=True,
+                method=method,
+                custom_labels=custom_labels,
             )
         )
 
@@ -154,7 +159,10 @@ def compute_ndvi(
             "Std Dev": round(stats.get("NDVI_stdDev") or 0, 4),
         },
         "class_areas_km2": class_areas,
+        "classified_areas_km2": classify.get("panels", [{}])[0].get("areas", {}),
         "classify": classify,
+        "method": method,
+        "n_classes": n_classes,
         "center": [center_lat, center_lon],
         "district": aoi_config.get("district", aoi_config.get("name", "Custom AOI")),
         "bbox": bounds,

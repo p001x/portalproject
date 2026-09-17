@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Palette, Download, Eye, Layers, Compass, Grid, Scale, Frame, Loader2, Sparkles } from "lucide-react";
+import { Palette, Download, Eye, Layers, Compass, Grid, Scale, Frame, Loader2, Sparkles, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -15,7 +15,7 @@ import { BASE } from "@/lib/api";
 
 const PALETTES = [
   { name: "Default (Module specific)", value: "default", hexes: [] },
-  { name: "Red to Green (NDVI)", value: "rdylgn", hexes: ["#d73027", "#fc8d59", "#fee08b", "#91cf60", "#1a9850"] },
+  { name: "Red to Green (NDVI)", value: "rdylgn", hexes: ["#4575b4", "#d73027", "#fc8d59", "#fee08b", "#91cf60", "#1a9850"] },
   { name: "Blue to Red (LST)", value: "bluered", hexes: ["#313695", "#74add1", "#fee090", "#f46d43", "#a50026"] },
   { name: "Spectral", value: "spectral", hexes: ["#d53e4f", "#fc8d59", "#fee08b", "#e6f598", "#99d594", "#3288bd"] },
   { name: "Viridis", value: "viridis", hexes: ["#440154", "#414487", "#2a788e", "#22a884", "#7ad151", "#fde725"] },
@@ -31,9 +31,10 @@ interface MapExportControlsProps {
   title: string;
   classAreas?: Record<string, number>;
   downloadUrl?: string;
+  bbox?: number[];
 }
 
-export function MapExportControls({ tileUrl, thumbUrl, district, title, classAreas, downloadUrl }: MapExportControlsProps) {
+export function MapExportControls({ tileUrl, thumbUrl, district, title, classAreas, downloadUrl, bbox }: MapExportControlsProps) {
   const [mode, setMode] = useState<"static" | "canva">("static");
   const [selectedPalette, setSelectedPalette] = useState("default");
   const [customColors, setCustomColors] = useState<string[]>([]);
@@ -264,6 +265,26 @@ export function MapExportControls({ tileUrl, thumbUrl, district, title, classAre
                   <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" /> Updating Canva Map Colors...
                 </span>
               )}
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="gap-2"
+                onClick={() => {
+                  sessionStorage.setItem("canvaState", JSON.stringify({
+                    title, 
+                    thumbUrl: previewBlobUrl || thumbUrl || tileUrl, 
+                    tileUrl,
+                    district, 
+                    classAreas, 
+                    palette: resolvedPalette || customColors, 
+                    bbox
+                  }));
+                  window.open("/export-editor", "_blank");
+                }}
+              >
+                <ExternalLink className="w-4 h-4" />
+                Open Full Page
+              </Button>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Select value={selectedPalette} onValueChange={setSelectedPalette}>
@@ -316,6 +337,7 @@ export function MapExportControls({ tileUrl, thumbUrl, district, title, classAre
             district={district}
             classAreas={colorStyle === "continuous" ? undefined : classAreas}
             palette={resolvedPalette || customColors}
+            bbox={bbox}
           />
         </div>
       ) : (

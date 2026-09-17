@@ -122,18 +122,10 @@ export function HomePage() {
           Welcome to the <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-500 to-teal-400">SPETRO</span> Geoportal
         </h2>
         
-        <p className="text-muted-foreground text-xl md:text-2xl max-w-3xl mb-12 leading-relaxed">
-          Advanced satellite data analysis, seamless sample digitization, and collaborative environmental monitoring in one unified platform.
-        </p>
-
-        {user && (
-          <div className="flex flex-col sm:flex-row justify-center gap-4 mb-20 w-full">
-            <Link href="/platform">
-              <Button size="lg" className="h-14 px-8 text-lg font-bold gap-2 w-full sm:w-auto shadow-xl shadow-emerald-500/20">
-                Access the Platform <ArrowRight className="w-5 h-5" />
-              </Button>
-            </Link>
-          </div>
+        {!user && (
+          <p className="text-muted-foreground text-xl md:text-2xl max-w-3xl mb-12 leading-relaxed">
+            Advanced satellite data analysis, seamless sample digitization, and collaborative environmental monitoring in one unified platform.
+          </p>
         )}
 
 

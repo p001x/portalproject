@@ -59,6 +59,8 @@ export interface NDVIRequest {
   start_date: string;
   end_date: string;
   n_classes: number;
+  method?: string;
+  custom_labels?: string[];
 }
 
 export interface ClassifyPanel {
@@ -67,14 +69,19 @@ export interface ClassifyPanel {
   title: string;
   tile_url: string;
   thumb_url: string;
+  clean_thumb_url?: string;
   areas: Record<string, number>;
   breakpoints: number[];
 }
 
 export interface NDVIResult {
   tile_url: string;
+  thumb_url?: string;
+  download_url?: string;
   stats: Record<string, number>;
   class_areas_km2: Record<string, number>;
+  classified_areas_km2?: Record<string, number>;
+  method?: string;
   classify: {
     panels: ClassifyPanel[];
     n_classes: number;
@@ -584,6 +591,14 @@ export interface StaticMapPayload {
 }
 
 export const api = {
+  analytics: {
+    getSummary: (days?: string) => get<any>(`/analytics/summary${days && days !== 'all' ? '?days=' + days : ''}`),
+    getTimeseries: (days?: string) => get<any[]>(`/analytics/timeseries${days && days !== 'all' ? '?days=' + days : ''}`),
+    getModules: (days?: string) => get<any[]>(`/analytics/modules${days && days !== 'all' ? '?days=' + days : ''}`),
+    getLocations: (days?: string) => get<any[]>(`/analytics/locations${days && days !== 'all' ? '?days=' + days : ''}`),
+    getRawEvents: (limit: number = 50) => get<any[]>(`/analytics/raw?limit=${limit}`)
+  },
+
   async getRegions(country?: string, level1?: string): Promise<{regions: string[]}> {
     let url = "/aoi/regions";
     const p = new URLSearchParams();
@@ -1072,13 +1087,23 @@ export const api = {
   },
 
   community: {
-    getComments: (tag?: string) => get<{ comments: Array<{id: number, author: string, content: string, tag: string, image_url: string, timestamp: string, is_edited: boolean}>, is_frozen: boolean, blocked_users: string[] }>(`/community/comments${tag ? '?tag=' + tag : ''}`),
-    postComment: (body: { author: string, content: string, tag?: string, image_url?: string }) => post<{ status: string, id: number }>("/community/comments", body),
+    getComments: (params?: { tag?: string, search?: string, limit?: number, offset?: number, category?: string }) => {
+      const q = new URLSearchParams();
+      if (params?.tag) q.append('tag', params.tag);
+      if (params?.search) q.append('search', params.search);
+      if (params?.limit) q.append('limit', params.limit.toString());
+      if (params?.offset) q.append('offset', params.offset.toString());
+      if (params?.category) q.append('category', params.category);
+      const qs = q.toString();
+      return get<{ comments: Array<{id: number, author: string, content: string, tag: string, image_url: string, timestamp: string, is_edited: boolean, parent_id: number | null, upvotes: number, upvoted_by: string[], category: string}>, is_frozen: boolean, blocked_users: string[] }>(`/community/comments${qs ? '?' + qs : ''}`);
+    },
+    postComment: (body: { author: string, content: string, tag?: string, image_url?: string, parent_id?: number, category?: string }) => post<{ status: string, id: number }>("/community/comments", body),
     editComment: (id: number, body: { author: string, content: string }) => put<{ status: string }>(`/community/comments/${id}`, body),
     deleteComment: (id: number, author?: string) => fetch(BASE + `/community/comments/${id}${author ? '?author=' + encodeURIComponent(author) : ''}`, { method: "DELETE", headers: { "Authorization": `Bearer ${localStorage.getItem("spetro_token") || ''}` } }).then(r => r.json()),
     setFreeze: (frozen: boolean) => post<{ok: boolean}>("/community/settings/freeze", { frozen }),
     blockUser: (author: string) => post<{ok: boolean}>("/community/users/block", { author }),
     unblockUser: (author: string) => post<{ok: boolean}>("/community/users/unblock", { author }),
+    toggleUpvote: (id: number, author: string) => post<{status: string, is_upvoted: boolean}>(`/community/comments/${id}/toggle-upvote`, { author }),
     uploadImage: async (fd: FormData) => {
       const headers: Record<string, string> = {};
       const appToken = localStorage.getItem("spetro_token");
@@ -1089,7 +1114,11 @@ export const api = {
         throw new Error(e.detail ?? r.statusText);
       }
       return r.json() as Promise<{ url: string }>;
-    }
+    },
+    getProfile: (author: string) => get<{ author: string, bio: string, avatar_url: string }>(`/community/profile/${encodeURIComponent(author)}`),
+    updateProfile: (author: string, body: { bio: string, avatar_url?: string }) => put<{ status: string }>(`/community/profile/${encodeURIComponent(author)}`, body),
+    getNotifications: (author: string) => get<{ notifications: Array<{id: number, sender: string, type: string, comment_id: number, read: boolean, timestamp: string}> }>(`/community/notifications/${encodeURIComponent(author)}`),
+    markNotificationsRead: (author: string) => post<{ status: string }>(`/community/notifications/${encodeURIComponent(author)}/read`, {}),
   },
 
   auth: {

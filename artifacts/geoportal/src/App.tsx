@@ -38,8 +38,10 @@ import { AuthPage } from "@/pages/AuthPage";
 import { ResetPasswordPage } from "@/pages/ResetPasswordPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { AboutPage } from "@/pages/AboutPage";
+import { ContactPage } from "@/pages/ContactPage";
 import { AcademyPage } from "@/pages/AcademyPage";
 import { BlogPage } from "@/pages/BlogPage";
+import { CanvaStandalonePage } from "@/pages/CanvaStandalonePage";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { NotificationProvider, useNotifications } from "@/hooks/use-notifications";
 import { GEEAuthGate } from "@/components/GEEAuthGate";
@@ -48,6 +50,28 @@ import { ThemeProvider } from "@/components/ThemeProvider";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { GeeUsageIndicator } from "@/components/GeeUsageIndicator";
 import { SiteBrand, SiteLogoOnly } from "@/components/SiteBrand";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import {
+  agriWaterModules,
+  riskDisasterModules,
+  urbanEnvModules,
+  coreSpatialModules,
+  analysisModules,
+  rareDataModules,
+  digitizationModules,
+  infrastructureModules,
+  educationModules,
+} from "@/config/modules";
 import {
   Leaf,
   Thermometer,
@@ -58,32 +82,25 @@ import {
   Database,
   Flame,
   Edit,
-  Satellite,
+  Activity,
   Globe2,
-  BarChart3,
-  PenTool,
+  Navigation,
   Droplet,
   Waves,
+  UploadCloud,
+  GraduationCap,
+  BookOpen,
+  Briefcase,
+  Home,
+  Map,
   LayoutDashboard,
-  Navigation,
   MessageSquare,
   ArrowLeft,
   Menu,
   LogOut,
-  Activity,
-  Terminal,
-  Briefcase,
   Settings,
-  UploadCloud,
-  GraduationCap,
-  BookOpen,
-  Bell,
-  Home,
-  Map
+  Bell
 } from "lucide-react";
-
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -101,60 +118,7 @@ const queryClient = new QueryClient({
   },
 });
 
-export const agriWaterModules = [
-  { path: "/ndvi", label: "NDVI", icon: Leaf, description: "Vegetation Health" },
-  { path: "/drought", label: "Drought", icon: Droplet, description: "Agri Drought" },
-  { path: "/irrigation", label: "Irrigation", icon: Droplet, description: "Scheduling Advisor" },
-  { path: "/water-harvesting", label: "Water Harvesting", icon: Droplet, description: "Rainwater Calculator" },
-  { path: "/wellscope", label: "WellScope", icon: Droplet, description: "Borehole Siting" },
-];
 
-export const riskDisasterModules = [
-  { path: "/flood", label: "Flood", icon: Waves, description: "Flood Risk" },
-  { path: "/landslide", label: "Landslide", icon: AlertTriangle, description: "Susceptibility" },
-  { path: "/rusle", label: "RUSLE", icon: Mountain, description: "Soil Erosion" },
-  { path: "/air", label: "Air Pollution", icon: Wind, description: "NO2 Monitoring" },
-];
-
-export const urbanEnvModules = [
-  { path: "/uhi", label: "UHI", icon: Flame, description: "Urban Heat Island" },
-  { path: "/landfill", label: "Landfill", icon: Trash2, description: "Site Suitability" },
-  { path: "/biomass", label: "Biomass Tracker", icon: Flame, description: "Depletion Risk" },
-  { path: "/habitat", label: "Crane Habitat", icon: Leaf, description: "Suitability (AHP)" },
-];
-
-export const coreSpatialModules = [
-  { path: "/change-detection", label: "Change Detection", icon: Activity, description: "NDVI Timelapse" },
-  { path: "/lst", label: "LST", icon: Thermometer, description: "Land Surface Temp" },
-  { path: "/slope", label: "Slope", icon: Mountain, description: "Topography" },
-  { path: "/accessibility", label: "Accessibility", icon: Navigation, description: "Facility Access" },
-];
-
-export const analysisModules = [
-  ...agriWaterModules,
-  ...riskDisasterModules,
-  ...urbanEnvModules,
-  ...coreSpatialModules
-];
-
-export const rareDataModules = [
-  { path: "/rare-data", label: "RARE DATA Hub", icon: Database, description: "Dataset Repository" },
-  { path: "/harvester", label: "Data Harvester", icon: Globe2, description: "Universal Spatial Ingestion" },
-];
-
-export const digitizationModules = [
-  { path: "/samples", label: "Sample Digitizer", icon: Edit, description: "Training Samples" },
-];
-
-export const infrastructureModules = [
-  { path: "/cloud-ingest", label: "Cloud Ingestion", icon: UploadCloud, description: "Direct GEE Upload" },
-  { path: "/services", label: "Premium Services", icon: Briefcase, description: "Consultation & Teaching" },
-];
-
-export const educationModules = [
-  { path: "/academy", label: "Training & Academy", icon: GraduationCap, description: "Courses & Reading" },
-  { path: "/blog", label: "Blog & Case Studies", icon: BookOpen, description: "News & Success Stories" },
-];
 
 type NavItem = typeof analysisModules[0];
 
@@ -446,12 +410,12 @@ function Layout({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth();
 
   useEffect(() => {
-    if (!isLoading && !isAuthenticated && loc !== "/" && loc !== "/platform" && loc !== "/analysis-hub" && loc !== "/about" && loc !== "/auth" && loc !== "/blog" && !loc.startsWith("/reset-password")) {
+    if (!isLoading && !isAuthenticated && loc !== "/" && loc !== "/platform" && loc !== "/analysis-hub" && loc !== "/about" && loc !== "/contact" && loc !== "/auth" && loc !== "/blog" && !loc.startsWith("/reset-password") && loc !== "/export-editor") {
       setLocation("/auth");
     }
   }, [isAuthenticated, isLoading, loc, setLocation]);
 
-  if (loc === "/" || loc === "/platform" || loc === "/analysis-hub" || loc === "/about" || loc === "/auth" || loc === "/blog" || loc.startsWith("/reset-password")) {
+  if (loc === "/" || loc === "/platform" || loc === "/analysis-hub" || loc === "/about" || loc === "/contact" || loc === "/auth" || loc === "/blog" || loc.startsWith("/reset-password") || loc === "/export-editor") {
     return <>{children}</>;
   }
 
@@ -463,7 +427,7 @@ function Layout({ children }: { children: React.ReactNode }) {
     );
   }
 
-  const isFocusedMode = [...analysisModules, ...rareDataModules, ...digitizationModules, ...infrastructureModules, ...educationModules].some(m => m.path === loc);
+  const isFocusedMode = [...analysisModules, ...rareDataModules, ...digitizationModules, ...infrastructureModules, ...educationModules].some(m => m.path === loc) || loc === "/community" || loc === "/dashboard";
   const isAnalysisFocused = analysisModules.some(m => m.path === loc);
 
   return (
@@ -535,6 +499,9 @@ function Router() {
         <Route path="/reset-password" component={ResetPasswordPage} />
         <Route path="/settings" component={SettingsPage} />
         <Route path="/about" component={AboutPage} />
+        <Route path="/contact" component={ContactPage} />
+        <Route path="/analysis" component={AnalysisHubPage} />
+        <Route path="/export-editor" component={CanvaStandalonePage} />
         <Route path="/analysis-hub" component={AnalysisHubPage} />
         <Route path="/ndvi" component={NDVIPage} />
         <Route path="/change-detection" component={ChangeDetectionPage} />

@@ -57,24 +57,6 @@ const HUB_MODULES = [
     path: "/samples",
   },
   {
-    title: "Analytics",
-    description: "View overarching traffic, usage statistics, and platform analytics.",
-    icon: LayoutDashboard,
-    color: "text-purple-600",
-    bgColor: "bg-purple-500/10",
-    borderColor: "border-purple-500/20",
-    path: "/dashboard",
-  },
-  {
-    title: "Community Forum",
-    description: "Discuss findings, share map snapshots, and collaborate with other users.",
-    icon: MessageSquare,
-    color: "text-pink-600",
-    bgColor: "bg-pink-500/10",
-    borderColor: "border-pink-500/20",
-    path: "/community",
-  },
-  {
     title: "Premium Services",
     description: "Book 1-on-1 consultations, corporate training, and custom GIS analysis projects.",
     icon: Briefcase,
@@ -82,15 +64,6 @@ const HUB_MODULES = [
     bgColor: "bg-amber-500/10",
     borderColor: "border-amber-500/20",
     path: "/services",
-  },
-  {
-    title: "Blog & Case Studies",
-    description: "Read how our modules are being used in real-world scenarios and explore immersive StoryMaps.",
-    icon: BookOpen,
-    color: "text-indigo-600",
-    bgColor: "bg-indigo-500/10",
-    borderColor: "border-indigo-500/20",
-    path: "/blog",
   }
 ];
 
@@ -169,22 +142,53 @@ export function PlatformPage() {
         </div>
       </section>
 
-      {/* Global Footer */}
-      <footer className="bg-card border-t border-border mt-auto w-full">
-        <div className="max-w-6xl mx-auto px-8 py-8 flex flex-col md:flex-row justify-between items-center gap-4">
-          <div className="flex items-center gap-2">
-            <SiteLogoOnly size="small" />
-            <span className="text-sm font-medium text-muted-foreground ml-2">
-              &copy; {new Date().getFullYear()} All rights reserved.
-            </span>
+      {/* Global Footer (Esri-style Fat Footer) */}
+      <footer className="bg-card border-t border-border mt-auto w-full py-16 px-6">
+        <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-12">
+          
+          {/* Column 1: Brand & Copyright */}
+          <div className="flex flex-col gap-4 md:col-span-1">
+            <SiteBrand size="normal" hideSubtitleOnMobile={false} />
+            <p className="text-sm text-muted-foreground mt-2">
+              Empowering environmental analysis with advanced geospatial intelligence.
+            </p>
+            <div className="text-xs font-medium text-muted-foreground mt-6">
+              &copy; {new Date().getFullYear()} SPETRO. All rights reserved.
+            </div>
           </div>
-          <div className="flex gap-6 text-sm text-muted-foreground font-medium">
-            <Link href="/about"><a className="hover:text-primary transition-colors cursor-pointer">About Us</a></Link>
-            <a href="#" className="hover:text-primary transition-colors">Privacy Policy</a>
-            <a href="#" className="hover:text-primary transition-colors">Terms of Service</a>
-            <a href="mailto:pierrendorimana16@gmail.com" className="hover:text-primary transition-colors">Email</a>
-            <a href="https://www.linkedin.com/in/ndorimana-pierre-b470bb2a8/" target="_blank" rel="noopener noreferrer" className="hover:text-primary transition-colors">LinkedIn</a>
+
+          {/* Column 2: Platform */}
+          <div className="flex flex-col gap-4">
+            <h4 className="text-sm font-extrabold uppercase tracking-widest text-foreground mb-2">Platform</h4>
+            <a href="/analysis-hub" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-primary font-medium transition-colors">Analysis Hub</a>
+            <a href="/rare-data" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-primary font-medium transition-colors">Rare Data Hub</a>
+            <a href="/harvester" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-primary font-medium transition-colors">Data Harvester</a>
+            <a href="/samples" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-primary font-medium transition-colors">Sample Digitizer</a>
           </div>
+
+          {/* Column 3: Community & Resources */}
+          <div className="flex flex-col gap-4">
+            <h4 className="text-sm font-extrabold uppercase tracking-widest text-foreground mb-2">Community</h4>
+            <a href="/community" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-primary font-medium transition-colors">Community Forum</a>
+            <a href="/blog" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-primary font-medium transition-colors">Blog & Case Studies</a>
+            <a href="/services" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-primary font-medium transition-colors">Premium Services</a>
+          </div>
+
+          {/* Column 4: Company */}
+          <div className="flex flex-col gap-4">
+            <h4 className="text-sm font-extrabold uppercase tracking-widest text-foreground mb-2">Company</h4>
+            <a href="/about" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-primary font-medium transition-colors">About Us</a>
+            <a href="mailto:pierrendorimana16@gmail.com" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-primary font-medium transition-colors">Contact Support</a>
+            <a href="https://www.linkedin.com/in/ndorimana-pierre-b470bb2a8/" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-primary font-medium transition-colors">LinkedIn</a>
+            <a href="#" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-primary font-medium transition-colors">Privacy Policy</a>
+            
+            {user?.role === 'admin' && (
+              <div className="pt-4 border-t border-border mt-2">
+                <a href="/dashboard" target="_blank" rel="noopener noreferrer" className="text-sm text-purple-600 hover:text-purple-700 font-bold transition-colors">Admin: Analytics</a>
+              </div>
+            )}
+          </div>
+          
         </div>
       </footer>
     </div>

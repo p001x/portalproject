@@ -68,9 +68,7 @@ def validate_and_sanitize_text(text: str) -> str:
     # 1. Strip hidden unicode
     text = strip_zero_width(text).strip()
     
-    # 1.5 Strict Alphanumeric + Space only check
-    if not re.match(r'^[a-zA-Z0-9\s]+$', text):
-        raise ValueError("Comments can only contain letters and numbers (no special characters).")
+    # 1.5 Strict Alphanumeric check removed to allow Markdown and punctuation.
     
     # 2. Regex Blocking
     for pattern in DANGEROUS_PATTERNS:

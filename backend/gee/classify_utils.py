@@ -12,22 +12,52 @@ from PIL import Image, ImageDraw
 
 PANEL_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
+def hex_to_rgb(h: str):
+    h = h.lstrip('#')
+    return tuple(int(h[i:i+2], 16) for i in (0, 2, 4))
+
+def rgb_to_hex(rgb):
+    return '#{:02x}{:02x}{:02x}'.format(
+        max(0, min(255, int(round(rgb[0])))),
+        max(0, min(255, int(round(rgb[1])))),
+        max(0, min(255, int(round(rgb[2]))))
+    )
+
 def class_palette(n: int) -> list:
-    """Return n hex colours spanning green → yellow → red."""
-    full = [
+    """Return n hex colours spanning green → yellow → red smoothly for 1 to 15 classes."""
+    stops = [
         "#1a9850", "#66bd63", "#a6d96a", "#d9ef8b", "#ffffbf",
         "#fee08b", "#fdae61", "#f46d43", "#d73027", "#a50026",
     ]
-    n = max(1, min(n, len(full)))
+    n = max(1, min(n, 15))
     if n == 1:
-        return [full[4]]
-    step = (len(full) - 1) / (n - 1)
-    return [full[round(i * step)] for i in range(n)]
+        return ["#1a9850"]
+    if n == len(stops):
+        return stops
+    
+    rgb_stops = [hex_to_rgb(s) for s in stops]
+    result = []
+    for i in range(n):
+        t = i / (n - 1) * (len(rgb_stops) - 1)
+        idx = int(t)
+        frac = t - idx
+        if idx >= len(rgb_stops) - 1:
+            result.append(stops[-1])
+        else:
+            c1 = rgb_stops[idx]
+            c2 = rgb_stops[idx + 1]
+            interp = (
+                c1[0] + (c2[0] - c1[0]) * frac,
+                c1[1] + (c2[1] - c1[1]) * frac,
+                c1[2] + (c2[2] - c1[2]) * frac,
+            )
+            result.append(rgb_to_hex(interp))
+    return result
 
 def class_labels(n: int) -> list:
     """Descriptive labels (low → high) for n classes."""
     presets = {
-        1: ["Uniform"],
+        1: ["Uniform / Full Area"],
         2: ["Low", "High"],
         3: ["Low", "Moderate", "High"],
         4: ["Low", "Moderate", "High", "Very High"],
@@ -38,7 +68,9 @@ def class_labels(n: int) -> list:
         9: ["Extremely Low", "Very Low", "Low", "Moderately Low", "Moderate", "Moderately High", "High", "Very High", "Extreme"],
         10: ["Extremely Low", "Very Low", "Low", "Moderately Low", "Moderate", "Moderately High", "High", "Very High", "Extremely High", "Extreme"],
     }
-    return presets.get(n, [f"Class {i + 1}" for i in range(n)])
+    if n in presets:
+        return presets[n]
+    return [f"Class {i + 1}" for i in range(n)]
 
 def add_legend_to_image(thumb_url: str, labels: list, palette: list) -> str:
     try:
@@ -71,13 +103,15 @@ def add_legend_to_image(thumb_url: str, labels: list, palette: list) -> str:
 
 def get_jenks_breaks(hist, n_classes):
     import random
-    hist = [b for b in hist if b[1] > 0]
+    hist = sorted([b for b in hist if b[1] > 0], key=lambda x: x[0])
     if not hist: return []
-    if len(hist) <= n_classes: return sorted([b[0] for b in hist])
+    if len(hist) <= n_classes: return sorted(list(set([b[0] for b in hist])))
     
-    values = sorted([b[0] for b in hist])
-    centroids = [values[int(i * len(values) / n_classes)] for i in range(n_classes)]
+    values = [b[0] for b in hist]
+    step = len(values) / n_classes
+    centroids = [values[min(int(i * step), len(values) - 1)] for i in range(n_classes)]
     
+    clusters = [[] for _ in range(n_classes)]
     for _ in range(30):
         clusters = [[] for _ in range(n_classes)]
         cluster_sums = [0.0] * n_classes
@@ -110,19 +144,23 @@ def get_jenks_breaks(hist, n_classes):
     return sorted(list(set(breaks)))
 
 def get_equal_interval_breaks(hist, n_classes):
-    hist = [b for b in hist if b[1] > 0]
+    hist = sorted([b for b in hist if b[1] > 0], key=lambda x: x[0])
     if not hist: return []
-    if len(hist) <= n_classes: return sorted([b[0] for b in hist])
+    if len(hist) <= n_classes: return sorted(list(set([b[0] for b in hist])))
     min_val = hist[0][0]
     max_val = hist[-1][0]
+    if max_val <= min_val:
+        return []
     step = (max_val - min_val) / n_classes
-    return [min_val + i * step for i in range(1, n_classes)]
+    return [round(min_val + i * step, 4) for i in range(1, n_classes)]
 
 def get_quantile_breaks(hist, n_classes):
-    hist = [b for b in hist if b[1] > 0]
+    hist = sorted([b for b in hist if b[1] > 0], key=lambda x: x[0])
     if not hist: return []
-    if len(hist) <= n_classes: return sorted([b[0] for b in hist])
+    if len(hist) <= n_classes: return sorted(list(set([b[0] for b in hist])))
     total = sum(b[1] for b in hist)
+    if total <= 0:
+        return []
     target_step = total / n_classes
     breaks = []
     cum = 0
@@ -130,7 +168,7 @@ def get_quantile_breaks(hist, n_classes):
     for val, count in hist:
         cum += count
         while cum >= target and len(breaks) < n_classes - 1:
-            breaks.append(val)
+            breaks.append(round(val, 4))
             target += target_step
     return sorted(list(set(breaks)))
 
@@ -140,7 +178,7 @@ def quantile_classify(layers: list, aoi, scale: int, n_classes: int, reverse_pal
     computed within `aoi`. All breakpoints and all class areas are fetched in exactly 
     two GEE round-trips.
     """
-    n = max(2, min(n_classes, 10))
+    n = max(1, min(n_classes, 15))
     pal  = class_palette(n)
     if reverse_palette:
         pal = pal[::-1]
@@ -157,23 +195,29 @@ def quantile_classify(layers: list, aoi, scale: int, n_classes: int, reverse_pal
         reducer=ee.Reducer.autoHistogram(maxBuckets=100),
         geometry=aoi,
         scale=scale,
-        maxPixels=10000, bestEffort=True,
+        maxPixels=1e9, bestEffort=True,
     ).getInfo()
 
     classified = []
     area_bands = []
     for j, (nm, img) in enumerate(zip(names, images)):
         band_hist = hist_raw.get(nm) or []
-        if method == "equal_interval":
+        if n == 1:
+            bps = []
+        elif method == "equal_interval":
             bps = get_equal_interval_breaks(band_hist, n)
         elif method == "quantiles":
             bps = get_quantile_breaks(band_hist, n)
         else:
             bps = get_jenks_breaks(band_hist, n)
+        
         # Pad or truncate bps to exactly n-1 elements
-        while len(bps) < n - 1:
-            bps.append(bps[-1] + 0.001 if bps else 1.0)
-        bps = bps[:n-1]
+        if n > 1:
+            while len(bps) < n - 1:
+                bps.append(bps[-1] + 0.001 if bps else 1.0)
+            bps = bps[:n-1]
+        else:
+            bps = []
         
         cls = ee.Image(1)
         for i, bp in enumerate(bps):
@@ -187,7 +231,7 @@ def quantile_classify(layers: list, aoi, scale: int, n_classes: int, reverse_pal
 
     area_img  = ee.Image.cat(area_bands)
     area_raw  = area_img.reduceRegion(
-        reducer=ee.Reducer.sum(), geometry=aoi, scale=scale, maxPixels=10000, bestEffort=True
+        reducer=ee.Reducer.sum(), geometry=aoi, scale=scale, maxPixels=1e10, bestEffort=True
     ).getInfo()
 
     panels = [None] * len(names)
@@ -198,7 +242,7 @@ def quantile_classify(layers: list, aoi, scale: int, n_classes: int, reverse_pal
         tile_url  = cls.getMapId(vis)["tile_fetcher"].url_format
         print(f"[{nm}] getMapId done")
         thumb_url = cls.getThumbURL({
-            **vis, "region": aoi.bounds(), "dimensions": 512, "format": "png",
+            **vis, "region": aoi.bounds(), "dimensions": 1024, "format": "png",
         })
         print(f"[{nm}] getThumbURL done")
         try:
@@ -233,6 +277,7 @@ def quantile_classify(layers: list, aoi, scale: int, n_classes: int, reverse_pal
             "title":       title,
             "tile_url":    tile_url,
             "thumb_url":   thumb_url_with_legend,
+            "clean_thumb_url": thumb_url,
             "download_url": download_url,
             "areas":       areas,
             "breakpoints": bps,

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Users, Eye, Globe2, Loader2, LayoutDashboard, MapPin, Lock, Activity } from "lucide-react";
 import { toast } from "sonner";
+import { api } from "@/lib/api";
 
 export function DashboardPage() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
@@ -32,35 +33,33 @@ export function DashboardPage() {
     }
   };
 
-  const daysQuery = days === "all" ? "" : `?days=${days}`;
-
   const { data: summary, isLoading: loadingSummary } = useQuery({
     queryKey: ['analytics_summary', days],
-    queryFn: async () => (await fetch(`https://geoportal-api-ygzi.onrender.com/api/analytics/summary${daysQuery}`)).json(),
+    queryFn: () => api.analytics.getSummary(days),
     enabled: isAuthenticated
   });
 
   const { data: timeseries, isLoading: loadingTimeseries } = useQuery({
     queryKey: ['analytics_timeseries', days],
-    queryFn: async () => (await fetch(`https://geoportal-api-ygzi.onrender.com/api/analytics/timeseries${daysQuery}`)).json(),
+    queryFn: () => api.analytics.getTimeseries(days),
     enabled: isAuthenticated
   });
 
   const { data: modules, isLoading: loadingModules } = useQuery({
     queryKey: ['analytics_modules', days],
-    queryFn: async () => (await fetch(`https://geoportal-api-ygzi.onrender.com/api/analytics/modules${daysQuery}`)).json(),
+    queryFn: () => api.analytics.getModules(days),
     enabled: isAuthenticated
   });
 
   const { data: locations, isLoading: loadingLocations } = useQuery({
     queryKey: ['analytics_locations', days],
-    queryFn: async () => (await fetch(`https://geoportal-api-ygzi.onrender.com/api/analytics/locations${daysQuery}`)).json(),
+    queryFn: () => api.analytics.getLocations(days),
     enabled: isAuthenticated
   });
 
   const { data: rawEvents, isLoading: loadingRaw } = useQuery({
     queryKey: ['analytics_raw'],
-    queryFn: async () => (await fetch(`https://geoportal-api-ygzi.onrender.com/api/analytics/raw?limit=50`)).json(),
+    queryFn: () => api.analytics.getRawEvents(50),
     enabled: isAuthenticated,
     refetchInterval: 10000 // auto refresh every 10s
   });

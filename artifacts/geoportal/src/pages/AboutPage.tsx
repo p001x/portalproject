@@ -1,10 +1,10 @@
 import { Link } from "wouter";
-import { ArrowLeft, Globe, Map, Zap, Target, BookOpen, Shield, Users, Mail, Linkedin, Leaf } from "lucide-react";
+import { ArrowLeft, Globe, Map, Zap, Target, BookOpen, Shield, Users, Mail, Linkedin, Leaf, Eye, BarChart } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
 export function AboutPage() {
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="min-h-screen bg-background flex flex-col font-sans">
       {/* Header */}
       <header className="bg-card/80 backdrop-blur-md border-b border-border sticky top-0 z-50 px-6 py-4 flex items-center justify-between shadow-sm">
         <div className="flex items-center gap-4">
@@ -25,114 +25,115 @@ export function AboutPage() {
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 w-full pb-16">
+      <main className="flex-1 w-full pb-20">
         {/* Hero Section */}
-        <section className="relative overflow-hidden bg-gradient-to-br from-emerald-900/10 via-background to-blue-900/10 pt-20 pb-24 px-6">
-          <div className="max-w-4xl mx-auto text-center space-y-6 animate-in fade-in slide-in-from-bottom-8 duration-700">
-
-            <h1 className="text-5xl md:text-6xl font-extrabold tracking-tight text-foreground leading-tight">
-              Transform Earth Data into <br /> <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-500 to-blue-500">Business Advantage</span>
+        <section className="relative overflow-hidden bg-muted/30 pt-24 pb-20 px-6 border-b">
+          <div className="max-w-4xl mx-auto text-center space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
+            <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-foreground leading-tight">
+              About <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-500 to-blue-600">SPETRO</span>
             </h1>
             <p className="text-xl text-muted-foreground max-w-2xl mx-auto leading-relaxed">
-              SPETRO delivers scalable, high-resolution satellite analytics to help corporations, governments, and NGOs mitigate risk, drive ROI, and accelerate sustainable growth.
+              We are a dedicated team of geospatial engineers and data scientists transforming complex Earth observation data into clear, actionable intelligence for a sustainable future.
             </p>
-            <div className="pt-6 flex justify-center gap-4">
-              <Link href="/auth">
-                <button className="bg-emerald-600 hover:bg-emerald-700 text-white px-8 py-3 rounded-lg font-bold transition-all shadow-lg shadow-emerald-500/25">
-                  Start Free Trial
-                </button>
-              </Link>
-              <button className="bg-transparent border-2 border-border hover:bg-muted text-foreground px-8 py-3 rounded-lg font-bold transition-all">
-                Request Demo
-              </button>
-            </div>
           </div>
         </section>
 
-        {/* Business Value Proposition */}
-        <section className="max-w-6xl mx-auto px-6 py-20">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
-            <div className="space-y-6 animate-in fade-in slide-in-from-left-8 duration-700">
-              <h2 className="text-3xl font-bold">Unlocking Strategic Value</h2>
-              <p className="text-lg text-muted-foreground leading-relaxed">
-                Stop guessing and start knowing. SPETRO bridges the gap between complex Earth Engine algorithms and actionable commercial insights. We help you make data-driven decisions at scale.
+        {/* Mission & Vision */}
+        <section className="max-w-5xl mx-auto px-6 py-20">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+            <div className="bg-card border p-8 rounded-2xl shadow-sm hover:shadow-md transition-shadow">
+              <div className="w-12 h-12 bg-emerald-500/10 text-emerald-600 rounded-xl flex items-center justify-center mb-6">
+                <Target className="w-6 h-6" />
+              </div>
+              <h2 className="text-2xl font-bold mb-4">Our Mission</h2>
+              <p className="text-muted-foreground leading-relaxed">
+                To bridge the critical gap between advanced remote sensing algorithms and commercial decision-making. We strive to provide high-resolution, scalable spatial analytics that help organizations mitigate risks and optimize operations.
               </p>
-              <ul className="space-y-4 pt-4">
-                <li className="flex items-start gap-3">
-                  <div className="p-1.5 bg-emerald-500/20 text-emerald-600 rounded-lg shrink-0 mt-0.5">
-                    <Target className="w-4 h-4" />
-                  </div>
-                  <span className="text-foreground font-medium">Risk Mitigation: Anticipate supply chain disruptions and climate-related hazards before they impact your bottom line.</span>
-                </li>
-                <li className="flex items-start gap-3">
-                  <div className="p-1.5 bg-blue-500/20 text-blue-600 rounded-lg shrink-0 mt-0.5">
-                    <Zap className="w-4 h-4" />
-                  </div>
-                  <span className="text-foreground font-medium">Operational Efficiency: Automate large-scale monitoring of global assets without the need for manual surveys.</span>
-                </li>
-                <li className="flex items-start gap-3">
-                  <div className="p-1.5 bg-purple-500/20 text-purple-600 rounded-lg shrink-0 mt-0.5">
-                    <Shield className="w-4 h-4" />
-                  </div>
-                  <span className="text-foreground font-medium">ESG Compliance: Track sustainability metrics, verify carbon credits, and report with absolute confidence.</span>
-                </li>
-              </ul>
+            </div>
+            <div className="bg-card border p-8 rounded-2xl shadow-sm hover:shadow-md transition-shadow">
+              <div className="w-12 h-12 bg-blue-500/10 text-blue-600 rounded-xl flex items-center justify-center mb-6">
+                <Eye className="w-6 h-6" />
+              </div>
+              <h2 className="text-2xl font-bold mb-4">Our Vision</h2>
+              <p className="text-muted-foreground leading-relaxed">
+                A world where real-time environmental data is accessible and comprehensible for every industry leader. We envision a future driven by data-backed sustainability, reducing our collective ecological footprint through smart insights.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        {/* Core Values / What we do */}
+        <section className="bg-muted/20 py-20 border-y">
+          <div className="max-w-5xl mx-auto px-6 text-center space-y-12">
+            <div>
+              <h2 className="text-3xl font-bold">Unlocking Strategic Value</h2>
+              <p className="text-lg text-muted-foreground mt-4 max-w-2xl mx-auto">
+                We focus on three core pillars to ensure our spatial analytics drive meaningful impact for our clients.
+              </p>
             </div>
             
-            <div className="grid grid-cols-2 gap-4 animate-in fade-in slide-in-from-right-8 duration-700">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-8 text-left">
               <div className="space-y-4">
-                <div className="bg-card border p-6 rounded-2xl shadow-sm hover:shadow-md transition-shadow">
-                  <Leaf className="w-8 h-8 text-emerald-500 mb-4" />
-                  <h3 className="font-bold text-lg mb-2">Agriculture</h3>
-                  <p className="text-sm text-muted-foreground">Maximize crop yields, monitor soil health, and verify regenerative farming practices.</p>
+                <div className="p-3 bg-emerald-500/10 text-emerald-600 rounded-lg inline-block">
+                  <Shield className="w-6 h-6" />
                 </div>
-                <div className="bg-card border p-6 rounded-2xl shadow-sm hover:shadow-md transition-shadow">
-                  <Map className="w-8 h-8 text-amber-500 mb-4" />
-                  <h3 className="font-bold text-lg mb-2">Infrastructure</h3>
-                  <p className="text-sm text-muted-foreground">Optimize site selection, track construction progress, and monitor structural displacement.</p>
-                </div>
+                <h3 className="font-bold text-lg">Risk Mitigation</h3>
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  Anticipate supply chain disruptions, monitor climate-related hazards, and assess vulnerabilities before they impact your bottom line.
+                </p>
               </div>
-              <div className="space-y-4 pt-8">
-                <div className="bg-card border p-6 rounded-2xl shadow-sm hover:shadow-md transition-shadow">
-                  <Shield className="w-8 h-8 text-blue-500 mb-4" />
-                  <h3 className="font-bold text-lg mb-2">Insurance</h3>
-                  <p className="text-sm text-muted-foreground">Automate claims processing with real-time flood, drought, and landslide damage assessment.</p>
+              <div className="space-y-4">
+                <div className="p-3 bg-blue-500/10 text-blue-600 rounded-lg inline-block">
+                  <BarChart className="w-6 h-6" />
                 </div>
-                <div className="bg-card border p-6 rounded-2xl shadow-sm hover:shadow-md transition-shadow">
-                  <Globe className="w-8 h-8 text-purple-500 mb-4" />
-                  <h3 className="font-bold text-lg mb-2">Urban Planning</h3>
-                  <p className="text-sm text-muted-foreground">Drive smart city initiatives with detailed heat island and surface permeability analysis.</p>
+                <h3 className="font-bold text-lg">Operational Efficiency</h3>
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  Automate the large-scale monitoring of global assets, removing the need for manual, costly, and time-consuming physical surveys.
+                </p>
+              </div>
+              <div className="space-y-4">
+                <div className="p-3 bg-purple-500/10 text-purple-600 rounded-lg inline-block">
+                  <Leaf className="w-6 h-6" />
                 </div>
+                <h3 className="font-bold text-lg">ESG Compliance</h3>
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  Track vital sustainability metrics, verify carbon credits, and report environmental impacts to stakeholders with absolute confidence.
+                </p>
               </div>
             </div>
           </div>
         </section>
 
-        {/* Developer Info / CTA */}
-        <section className="bg-muted/30 py-20 border-y">
-          <div className="max-w-4xl mx-auto px-6 text-center space-y-8">
-            <h2 className="text-3xl font-bold">Ready to Elevate Your Operations?</h2>
-            <p className="text-lg text-muted-foreground">
-              Join industry leaders who trust SPETRO Geoportal for their most critical spatial intelligence needs. Engineered for scale and precision.
-            </p>
-            
-            <div className="inline-flex flex-col md:flex-row items-center gap-6 p-8 bg-card border rounded-3xl shadow-xl mt-8">
+        {/* Leadership Team */}
+        <section className="max-w-4xl mx-auto px-6 py-20">
+          <div className="text-center space-y-12">
+            <div>
+              <h2 className="text-3xl font-bold">Our Leadership</h2>
+              <p className="text-lg text-muted-foreground mt-4">
+                The experts driving innovation behind the SPETRO platform.
+              </p>
+            </div>
+
+            <div className="flex flex-col items-center p-8 bg-card border rounded-3xl shadow-sm hover:shadow-md transition-all max-w-2xl mx-auto">
               <img 
                 src="https://api.dicebear.com/7.x/avataaars/svg?seed=Pierre" 
                 alt="Ndorimana Pierre" 
-                className="w-24 h-24 rounded-full bg-slate-200 border-4 border-background shadow-md"
+                className="w-32 h-32 rounded-full bg-slate-200 border-4 border-background shadow-md mb-6"
               />
-              <div className="text-left">
-                <h3 className="text-2xl font-bold">Talk to our Experts</h3>
-                <p className="text-emerald-600 font-medium mb-4">Ndorimana Pierre - Lead GIS Architect</p>
-                <div className="flex gap-4">
-                  <a href="mailto:pierrendorimana16@gmail.com" className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
+              <div className="text-center">
+                <h3 className="text-2xl font-bold">Ndorimana Pierre</h3>
+                <p className="text-emerald-600 font-medium mb-6">Lead GIS Architect & Founder</p>
+                <p className="text-muted-foreground text-sm max-w-lg mb-8 leading-relaxed">
+                  With deep expertise in cloud computing and remote sensing, Pierre architected the SPETRO Geoportal to democratize Earth observation data. He specializes in deploying scalable Google Earth Engine algorithms for enterprise applications.
+                </p>
+                <div className="flex justify-center gap-6">
+                  <a href="mailto:pierrendorimana16@gmail.com" className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors bg-muted/50 px-4 py-2 rounded-full">
                     <Mail className="w-4 h-4" />
-                    <span>Contact Sales</span>
+                    <span>Contact Pierre</span>
                   </a>
-                  <a href="https://www.linkedin.com/in/ndorimana-pierre-b470bb2a8/" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
+                  <a href="https://www.linkedin.com/in/ndorimana-pierre-b470bb2a8/" target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors bg-muted/50 px-4 py-2 rounded-full">
                     <Linkedin className="w-4 h-4" />
-                    <span>Connect on LinkedIn</span>
+                    <span>LinkedIn</span>
                   </a>
                 </div>
               </div>

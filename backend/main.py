@@ -765,7 +765,9 @@ class NDVIRequest(BaseModel):
     district: Optional[str] = Field(None, examples=["Gasabo"])
     start_date: str = Field(..., examples=["2024-01-01"])
     end_date: str = Field(..., examples=["2024-06-30"])
-    n_classes: int = Field(5, ge=2, le=10)
+    n_classes: int = Field(5, ge=1, le=15)
+    method: Optional[str] = Field("natural_breaks", description="Classification method: natural_breaks, quantiles, equal_interval")
+    custom_labels: Optional[list[str]] = Field(None, description="Custom class names/labels")
 
 
 class ChangeDetectionRequest(BaseModel):
@@ -1303,7 +1305,7 @@ def flood_endpoint(req: FloodRequest, user: dict = Depends(get_current_user)):
 def ndvi_endpoint(req: NDVIRequest, user: dict = Depends(get_current_user)):
     _require_gee()
     try:
-        return compute_ndvi(req.aoi, req.start_date, req.end_date, req.n_classes)
+        return compute_ndvi(req.aoi, req.start_date, req.end_date, req.n_classes, method=req.method, custom_labels=req.custom_labels)
     except Exception as exc:
         logger.exception("NDVI failed for %s", req.district)
         raise HTTPException(500, str(exc)) from exc
@@ -2780,19 +2782,43 @@ import security_middleware
 from fastapi.staticfiles import StaticFiles
 
 from pydantic import BaseModel, Field
-from typing import Optional
-from fastapi import UploadFile, File
+from typing import Optional, List
+from fastapi import UploadFile, File, WebSocket, WebSocketDisconnect
+import json
+
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: dict):
+        for connection in self.active_connections:
+            try:
+                await connection.send_text(json.dumps(message))
+            except Exception:
+                pass
+
+manager = ConnectionManager()
 
 class CommentCreateRequest(BaseModel):
     author: str = Field(..., min_length=2, max_length=50)
     content: str = Field(..., min_length=1, max_length=5000)
     tag: Optional[str] = None
     image_url: Optional[str] = None
+    parent_id: Optional[int] = None
+    category: Optional[str] = "General"
 
 @app.get("/api/community/comments", tags=["community"])
-def api_get_comments(tag: Optional[str] = None):
+def api_get_comments(tag: Optional[str] = None, search: Optional[str] = None, limit: int = 100, offset: int = 0, category: Optional[str] = None):
     return {
-        "comments": community_db.get_comments(tag_filter=tag),
+        "comments": community_db.get_comments(tag_filter=tag, search=search, limit=limit, offset=offset, category=category),
         "is_frozen": community_db.is_forum_frozen(),
         "blocked_users": community_db.get_blocked_users()
     }
@@ -2819,8 +2845,8 @@ def api_post_comment(req: CommentCreateRequest, request: Request):
     
     for key in [author_key, ip_key]:
         last_time = _COMMUNITY_RATE_LIMITS.get(key, 0)
-        if current_time - last_time < 120:
-            raise HTTPException(status_code=429, detail="Rate limit exceeded. You can only send 1 message every 2 minutes.")
+        if current_time - last_time < 10:
+            raise HTTPException(status_code=429, detail="Rate limit exceeded. You can only send 1 message every 10 seconds.")
             
     try:
         safe_content = security_middleware.validate_and_sanitize_text(req.content)
@@ -2836,9 +2862,33 @@ def api_post_comment(req: CommentCreateRequest, request: Request):
         author=safe_author,
         content=safe_content,
         tag=req.tag,
-        image_url=req.image_url
+        image_url=req.image_url,
+        parent_id=req.parent_id,
+        category=req.category
     )
+    
+    # Fire and forget async broadcast (we can just run it using asyncio or BackgroundTasks)
+    import asyncio
+    asyncio.create_task(manager.broadcast({"type": "new_comment", "id": comment_id, "category": req.category}))
+    
     return {"status": "success", "id": comment_id}
+
+class ToggleUpvoteRequest(BaseModel):
+    author: str
+
+@app.post("/api/community/comments/{comment_id}/toggle-upvote", tags=["community"])
+def api_toggle_upvote(comment_id: int, req: ToggleUpvoteRequest):
+    if community_db.is_forum_frozen():
+        raise HTTPException(403, "The community forum is currently frozen.")
+    if community_db.is_user_blocked(req.author):
+        raise HTTPException(403, "You have been blocked from the community forum.")
+        
+    is_upvoted = community_db.toggle_upvote(comment_id, req.author)
+    
+    import asyncio
+    asyncio.create_task(manager.broadcast({"type": "upvote", "id": comment_id}))
+    
+    return {"status": "success", "is_upvoted": is_upvoted}
 
 class CommentUpdateRequest(BaseModel):
     author: str
@@ -2950,6 +3000,42 @@ try:
 except Exception as e:
     import logging
     logging.getLogger(__name__).warning(f"Failed to mount static uploads (aiofiles missing?): {e}")
+
+# --- User Profiles ---
+class ProfileUpdateRequest(BaseModel):
+    bio: str
+    avatar_url: Optional[str] = None
+
+@app.get("/api/community/profile/{author}", tags=["community"])
+def api_get_profile(author: str):
+    return community_db.get_user_profile(author)
+
+@app.put("/api/community/profile/{author}", tags=["community"])
+def api_update_profile(author: str, req: ProfileUpdateRequest):
+    community_db.update_user_profile(author, req.bio, req.avatar_url)
+    return {"status": "success"}
+
+# --- Notifications ---
+@app.get("/api/community/notifications/{author}", tags=["community"])
+def api_get_notifications(author: str):
+    return {"notifications": community_db.get_notifications(author)}
+
+@app.post("/api/community/notifications/{author}/read", tags=["community"])
+def api_mark_notifications_read(author: str):
+    community_db.mark_notifications_read(author)
+    return {"status": "success"}
+
+# --- WebSocket ---
+@app.websocket("/api/community/ws")
+async def websocket_community_endpoint(websocket: WebSocket):
+    await manager.connect(websocket)
+    try:
+        while True:
+            # We don't expect messages from client, but keep connection open
+            data = await websocket.receive_text()
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+
 
 class IngestRasterModel(BaseModel):
     source_url: str

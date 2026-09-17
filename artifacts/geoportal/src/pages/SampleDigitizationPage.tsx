@@ -464,7 +464,12 @@ export function SampleDigitizationPage() {
     classes: string[];
     colors: Record<string, string>;
     areas: Record<string, number>;
-    accuracy?: { overall_accuracy?: number; kappa?: number };
+    accuracy?: { 
+      overall_accuracy?: number; 
+      kappa?: number; 
+      producers_accuracy?: Record<string, number>;
+      users_accuracy?: Record<string, number>;
+    };
   } | null>(null);
 
   // Import / Ingest state
@@ -2321,7 +2326,7 @@ export function SampleDigitizationPage() {
         </TabsContent>
 
         {/* 2. SUPERVISED CLASSIFICATION TAB */}
-        <TabsContent value="classify" className="space-y-6">
+        <TabsContent value="classify" className="h-full overflow-y-auto p-4 space-y-6">
           <div className="border rounded-lg p-5 bg-card space-y-4">
             <div className="flex items-center justify-between">
               <div className="space-y-1">
@@ -2556,13 +2561,103 @@ export function SampleDigitizationPage() {
                     </div>
                   </div>
                 </div>
+
+                {classifyResult.accuracy && classifyResult.accuracy.matrix && classifyResult.accuracy.matrix_labels && (
+                  <div className="border rounded-lg p-6 bg-background space-y-6 mt-4 overflow-x-auto">
+                    <h4 className="text-center font-bold text-base">Table 1: Accuracy Assessment of Supervised Classification</h4>
+                    
+                    <div className="min-w-[600px]">
+                      <table className="w-full border-collapse border border-gray-400 text-sm">
+                        <thead>
+                          <tr>
+                            <th className="border border-gray-400 p-2" colSpan={2} rowSpan={2}></th>
+                            <th className="border border-gray-400 p-2 text-center bg-gray-100" colSpan={classifyResult.accuracy.matrix_labels.length}>Ground Reference Test Information</th>
+                            <th className="border border-gray-400 p-2 text-center" rowSpan={2}>Row Total</th>
+                          </tr>
+                          <tr>
+                            {classifyResult.accuracy.matrix_labels.map((label, i) => (
+                              <th key={`col-${i}`} className="border border-gray-400 p-2 font-semibold text-center">{label}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {classifyResult.accuracy.matrix[0].map((_, colIndex) => classifyResult.accuracy.matrix!.map(row => row[colIndex])).map((row, i) => {
+                            const rowTotal = row.reduce((a, b) => a + b, 0);
+                            return (
+                              <tr key={`row-${i}`}>
+                                {i === 0 && (
+                                  <th className="border border-gray-400 p-2 font-semibold bg-gray-100 text-center relative" rowSpan={classifyResult.accuracy.matrix!.length}>
+                                    <div style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}>Classification</div>
+                                  </th>
+                                )}
+                                <th className="border border-gray-400 p-2 font-semibold text-left">{classifyResult.accuracy.matrix_labels![i]}</th>
+                                {row.map((val, j) => {
+                                  const isDiagonal = i === j;
+                                  return (
+                                    <td key={`cell-${i}-${j}`} className={`border border-gray-400 p-2 text-center ${isDiagonal ? 'border-2 border-black font-bold bg-green-50/50' : ''}`}>
+                                      {val}
+                                    </td>
+                                  );
+                                })}
+                                <td className="border border-gray-400 p-2 text-center font-medium bg-gray-50">{rowTotal}</td>
+                              </tr>
+                            );
+                          })}
+                          <tr>
+                            <th className="border border-gray-400 p-2 italic font-semibold text-left" colSpan={2}>Column Total</th>
+                            {classifyResult.accuracy.matrix_labels.map((_, j) => {
+                              const colTotal = classifyResult.accuracy.matrix!.map(row => row[j]).reduce((acc, val) => acc + val, 0);
+                              return (
+                                <td key={`coltot-${j}`} className="border border-gray-400 p-2 text-center font-medium bg-gray-50">{colTotal}</td>
+                              );
+                            })}
+                            <td className="border border-gray-400 p-2 text-center font-bold bg-gray-100">
+                              {classifyResult.accuracy.matrix.reduce((acc, row) => acc + row.reduce((a, b) => a + b, 0), 0)}
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+
+                      <div className="mt-8 grid grid-cols-2 gap-8 text-sm">
+                        <div>
+                          <p className="font-semibold mb-6">Overall Classification Accuracy: {((classifyResult.accuracy.overall_accuracy || 0) * 100).toFixed(0)}%</p>
+                          <p className="font-semibold underline mb-2">Producer's Accuracy (Omission Error)</p>
+                          <ul className="space-y-1">
+                            {classifyResult.classes.map(cls => {
+                              const pa = classifyResult.accuracy?.producers_accuracy?.[cls] || 0;
+                              return (
+                                <li key={`pa-${cls}`}>
+                                  {cls}: {(pa * 100).toFixed(0)}%
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </div>
+                        <div>
+                          <p className="font-semibold mb-6">Overall Kappa Statistics: {(classifyResult.accuracy.kappa || 0).toFixed(2)}</p>
+                          <p className="font-semibold underline mb-2">User's Accuracy (Commission Error)</p>
+                          <ul className="space-y-1">
+                            {classifyResult.classes.map(cls => {
+                              const ua = classifyResult.accuracy?.users_accuracy?.[cls] || 0;
+                              return (
+                                <li key={`ua-${cls}`}>
+                                  {cls}: {(ua * 100).toFixed(0)}%
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
         </TabsContent>
 
         {/* 3. IMPORT RARE DATA & HARVESTER TAB */}
-        <TabsContent value="import" className="space-y-6">
+        <TabsContent value="import" className="h-full overflow-y-auto p-4 space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Import from RARE DATA */}
             <div className="border rounded-lg p-5 bg-card space-y-4">
@@ -2699,7 +2794,7 @@ export function SampleDigitizationPage() {
         </TabsContent>
 
         {/* 4. GEE ASSET UPLOAD TAB */}
-        <TabsContent value="gee" className="space-y-6">
+        <TabsContent value="gee" className="h-full overflow-y-auto p-4 space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-5xl">
             {/* Card 1: Account & Project Config */}
             <div className="border rounded-lg p-5 bg-card space-y-4 md:col-span-2">
