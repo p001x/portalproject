@@ -11,7 +11,7 @@ from gee.drought import compute_agricultural_drought
 from gee.flood import compute_flood_susceptibility
 from gee.air_pollution import compute_air_pollution
 from gee.habitat import compute_habitat_suitability
-from gee.irrigation import compute_irrigation
+from gee.irrigation import compute_irrigation_map
 from gee.water_harvesting import compute_water_harvesting
 from gee.supervised_classify import compute_classification
 
@@ -56,8 +56,8 @@ def compute_habitat_task(aoi_config, n_classes, rev_lulc, rev_elev, rev_slp, rev
     return compute_habitat_suitability(aoi_config, n_classes, rev_lulc, rev_elev, rev_slp, rev_riv, rev_rd, rev_pop, weights)
 
 @celery_app.task(name='compute_irrigation_task')
-def compute_irrigation_task(aoi_config, start_date, end_date, crop_type):
-    return compute_irrigation(aoi_config, start_date, end_date, crop_type)
+def compute_irrigation_task(aoi_config, start_date, end_date, planting_date, crop_type, n_classes, method, custom_labels):
+    return compute_irrigation_map(aoi_config, start_date, end_date, planting_date, crop_type, n_classes, method, custom_labels)
 
 @celery_app.task(name='compute_water_harvesting_task')
 def compute_water_harvesting_task(aoi_config, year):

@@ -236,56 +236,34 @@ def _build_habitat_images(aoi_config: dict, reverse_flags: dict, custom_weights:
         return result
 
 
-def compute_habitat_map(
-    aoi_config: dict, reverse_flags: dict, custom_weights: dict | None = None
+_cache_unified = TTLCache(maxsize=64, ttl=3600)
+
+def compute_habitat(
+    aoi_config: dict, reverse_flags: dict, n_classes: int = 5, custom_weights: dict | None = None, method: str = "natural_breaks", custom_labels: list = None
 ) -> dict:
     weights = _normalize_weights(custom_weights)
     weights_tuple = tuple(round(weights[k], 6) for k in FACTOR_ORDER)
     rev_tuple = tuple(reverse_flags.get(k, False) for k in FACTOR_ORDER)
-    cache_key = (json.dumps(aoi_config, sort_keys=True), rev_tuple, weights_tuple)
+    cache_key = (json.dumps(aoi_config, sort_keys=True), rev_tuple, n_classes, weights_tuple, method, tuple(custom_labels) if custom_labels else None)
     
     with _lock:
-        if cache_key in _cache_map:
-            return _cache_map[cache_key]
+        if cache_key in _cache_unified:
+            return _cache_unified[cache_key]
 
     aoi, suitability, score_images, raw_images, _ = _build_habitat_images(aoi_config, reverse_flags, custom_weights)
+    scale = get_dynamic_scale(aoi)
+
+    # 1. Map Data
     map_id = suitability.getMapId(_SCORE_VIS)
-    
     factor_maps = {}
     for key, img in score_images.items():
         factor_maps[key] = {
             "tile_url": img.getMapId(_SCORE_VIS)["tile_fetcher"].url_format
         }
-
     centroid = aoi.centroid(maxError=100).coordinates().getInfo()
     bounds = aoi.bounds().getInfo()["coordinates"][0]
 
-    result = {
-        "tile_url": map_id["tile_fetcher"].url_format,
-        "factor_maps": factor_maps,
-        "center": [centroid[1], centroid[0]],
-        "bbox": bounds,
-    }
-
-    with _lock:
-        _cache_map[cache_key] = result
-    return result
-
-
-def compute_habitat_stats(
-    aoi_config: dict, reverse_flags: dict, custom_weights: dict | None = None
-) -> dict:
-    weights = _normalize_weights(custom_weights)
-    weights_tuple = tuple(round(weights[k], 6) for k in FACTOR_ORDER)
-    rev_tuple = tuple(reverse_flags.get(k, False) for k in FACTOR_ORDER)
-    cache_key = (json.dumps(aoi_config, sort_keys=True), rev_tuple, weights_tuple)
-    
-    with _lock:
-        if cache_key in _cache_stats:
-            return _cache_stats[cache_key]
-
-    aoi, suitability, _, _, _ = _build_habitat_images(aoi_config, reverse_flags, custom_weights)
-
+    # 2. Stats Data
     classes = {
         "Very Low Suitability": suitability.lt(2),
         "Low Suitability": suitability.gte(2).And(suitability.lt(3)),
@@ -293,67 +271,21 @@ def compute_habitat_stats(
         "High Suitability": suitability.gte(4).And(suitability.lt(4.5)),
         "Very High Suitability": suitability.gte(4.5)
     }
-    labels = list(classes.keys())
-    area_img = ee.Image.cat([classes[lbl].multiply(ee.Image.pixelArea()).rename(f"c{i}") for i, lbl in enumerate(labels)])
-
+    stat_labels = list(classes.keys())
+    area_img = ee.Image.cat([classes[lbl].multiply(ee.Image.pixelArea()).rename(f"c{i}") for i, lbl in enumerate(stat_labels)])
     area_dict = area_img.reduceRegion(
-        reducer=ee.Reducer.sum(), geometry=aoi, scale=get_dynamic_scale(aoi), maxPixels=1e10
+        reducer=ee.Reducer.sum(), geometry=aoi, scale=scale, maxPixels=1e10
     ).getInfo()
+    class_areas = {lbl: round((area_dict.get(f"c{i}") or 0) / 1e6, 2) for i, lbl in enumerate(stat_labels)}
 
-    class_areas = {lbl: round((area_dict.get(f"c{i}") or 0) / 1e6, 2) for i, lbl in enumerate(labels)}
-
-    result = {
-        "class_areas_km2": class_areas,
-    }
-
-    with _lock:
-        _cache_stats[cache_key] = result
-    return result
-
-
-def compute_habitat_classify(
-    aoi_config: dict, reverse_flags: dict, n_classes: int = 5, custom_weights: dict | None = None, classify_method: str = "natural_breaks"
-) -> dict:
-    weights = _normalize_weights(custom_weights)
-    weights_tuple = tuple(round(weights[k], 6) for k in FACTOR_ORDER)
-    rev_tuple = tuple(reverse_flags.get(k, False) for k in FACTOR_ORDER)
-    cache_key = (json.dumps(aoi_config, sort_keys=True), rev_tuple, n_classes, weights_tuple, classify_method)
-    
-    with _lock:
-        if cache_key in _cache_classify:
-            return _cache_classify[cache_key]
-
-    aoi, suitability, score_images, raw_images, _ = _build_habitat_images(aoi_config, reverse_flags, custom_weights)
-
+    # 3. Classify Data
     classify = quantile_classify(
         layers=[{"name": "suitability", "image": suitability, "title": "Habitat Suitability"}] + 
                [{"name": f"{k}_score", "image": v, "title": FACTOR_META[k]["label"]} for k,v in score_images.items()],
-        aoi=aoi, scale=get_dynamic_scale(aoi), n_classes=n_classes, method=classify_method
+        aoi=aoi, scale=scale, n_classes=n_classes, method=method, custom_labels=custom_labels
     )
 
-    result = {
-        "classify": classify,
-    }
-
-    with _lock:
-        _cache_classify[cache_key] = result
-    return result
-
-
-def compute_habitat_export(
-    aoi_config: dict, reverse_flags: dict, n_classes: int = 5, custom_weights: dict | None = None, classify_method: str = "natural_breaks"
-) -> dict:
-    weights = _normalize_weights(custom_weights)
-    weights_tuple = tuple(round(weights[k], 6) for k in FACTOR_ORDER)
-    rev_tuple = tuple(reverse_flags.get(k, False) for k in FACTOR_ORDER)
-    cache_key = (json.dumps(aoi_config, sort_keys=True), rev_tuple, n_classes, weights_tuple, classify_method)
-    
-    with _lock:
-        if cache_key in _cache_export:
-            return _cache_export[cache_key]
-
-    aoi, suitability, score_images, raw_images, _ = _build_habitat_images(aoi_config, reverse_flags, custom_weights)
-
+    # 4. Export Data
     def safe_url(img, name):
         try:
             return img.getDownloadURL({"scale": 100, "region": aoi.bounds(), "format": "GEO_TIFF"})
@@ -368,34 +300,6 @@ def compute_habitat_export(
         except Exception:
             return None
 
-    from gee.classify_utils import get_jenks_breaks, get_equal_interval_breaks, get_quantile_breaks
-    
-    def _classify_single_image(img, aoi, scale, n_classes, method):
-        hist_raw = img.reduceRegion(
-            reducer=ee.Reducer.autoHistogram(maxBuckets=100),
-            geometry=aoi, scale=scale, maxPixels=10000, bestEffort=True
-        ).getInfo()
-        if not hist_raw:
-            return ee.Image(1).clip(aoi)
-        
-        band_hist = (list(hist_raw.values())[0] or []) if hist_raw and list(hist_raw.values()) else []
-        if method == "equal_interval":
-            bps = get_equal_interval_breaks(band_hist, n_classes)
-        elif method == "quantiles":
-            bps = get_quantile_breaks(band_hist, n_classes)
-        else:
-            bps = get_jenks_breaks(band_hist, n_classes)
-            
-        while len(bps) < n_classes - 1:
-            bps.append(bps[-1] + 0.001 if bps else 1.0)
-        bps = bps[:n_classes-1]
-        
-        cls = ee.Image(1)
-        for i, bp in enumerate(bps):
-            cls = cls.where(img.gt(bp), i + 2)
-        return cls.clip(aoi)
-
-    scale = get_dynamic_scale(aoi)
     final_thumb_url = safe_thumb(suitability, _SCORE_VIS["palette"], n_classes)
     download_url = safe_url(suitability, "Habitat_Suitability")
 
@@ -403,9 +307,8 @@ def compute_habitat_export(
     
     continuous_keys = [k for k in FACTOR_ORDER if k != "landcover"]
     continuous_raw = {k: raw_images[k] for k in continuous_keys}
-    classified_continuous_export, export_breaks = _classify_all_raw_images(continuous_raw, aoi, scale, n_classes, classify_method)
+    classified_continuous_export, export_breaks = _classify_all_raw_images(continuous_raw, aoi, scale, n_classes, method)
 
-    # Replicate polarity map so we know which to invert
     polarity_invert = {
         "wetlands": True, "water": True, "rainfall": False, "buildings": False,
         "irrigated": True, "slope": True, "roads": False, "elevation": True, "temperature": True
@@ -417,9 +320,9 @@ def compute_habitat_export(
         if k == "landcover":
             img_to_export = score_images[k]
             k_n_classes = 5
-            labels = ["Built-up/Bare", "Trees/Shrubs", "Mixed/Other", "Cropland", "Water/Wetlands"]
+            lbls = ["Built-up/Bare", "Trees/Shrubs", "Mixed/Other", "Cropland", "Water/Wetlands"]
             if is_reversed:
-                labels.reverse()
+                lbls.reverse()
         else:
             cls = classified_continuous_export[k]
             bps = export_breaks[k]
@@ -441,17 +344,17 @@ def compute_habitat_export(
             elif k == "elevation": unit = " m"
             elif k == "slope": unit = "°"
             
-            labels = []
+            lbls = []
             for i in range(n_classes):
                 if i == 0:
-                    labels.append(f"< {bps[0]:.1f}{unit}")
+                    lbls.append(f"< {bps[0]:.1f}{unit}")
                 elif i == n_classes - 1:
-                    labels.append(f"> {bps[-1]:.1f}{unit}")
+                    lbls.append(f"> {bps[-1]:.1f}{unit}")
                 else:
-                    labels.append(f"{bps[i-1]:.1f} - {bps[i]:.1f}{unit}")
+                    lbls.append(f"{bps[i-1]:.1f} - {bps[i]:.1f}{unit}")
                     
             if should_invert:
-                labels.reverse()
+                lbls.reverse()
                 
         factors[k] = {
             "label": FACTOR_META[k]["label"],
@@ -460,15 +363,21 @@ def compute_habitat_export(
             "description": FACTOR_META[k]["reversed_desc"] if is_reversed else FACTOR_META[k]["normal_desc"],
             "thumb_url": safe_thumb(img_to_export, class_palette(k_n_classes), k_n_classes),
             "download_url": safe_url(raw_images[k], f"Habitat_{k}_Raw"),
-            "labels": labels
+            "labels": lbls
         }
 
     result = {
+        "tile_url": map_id["tile_fetcher"].url_format,
+        "factor_maps": factor_maps,
+        "center": [centroid[1], centroid[0]],
+        "bbox": bounds,
+        "class_areas_km2": class_areas,
+        "classify": classify,
         "thumb_url": final_thumb_url,
         "download_url": download_url,
         "factors": factors,
     }
 
     with _lock:
-        _cache_export[cache_key] = result
+        _cache_unified[cache_key] = result
     return result

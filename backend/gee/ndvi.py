@@ -2,6 +2,7 @@ import json
 """NDVI computation — no Streamlit dependency. Uses in-memory TTL cache."""
 import ee
 from cachetools import TTLCache
+from typing import Optional
 from threading import Lock
 import concurrent.futures
 from gee.classify_utils import quantile_classify

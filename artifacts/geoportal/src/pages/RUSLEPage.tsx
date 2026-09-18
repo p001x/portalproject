@@ -1,5 +1,17 @@
 import { useState, useEffect } from "react";
+import { Mountain, Loader2, FileText } from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
+import {
+  ResizablePanelGroup,
+  ResizablePanel,
+  ResizableHandle,
+} from "@/components/ui/resizable";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Button } from "@/components/ui/button";
+import { Slider } from "@/components/ui/slider";
+import { StudyAreaSelector } from "@/components/StudyAreaSelector";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   BarChart,
   Bar,
@@ -9,12 +21,6 @@ import {
   ResponsiveContainer,
   Cell,
 } from "recharts";
-import { Loader2, Mountain, FileText } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Slider } from "@/components/ui/slider";
-import { Switch } from "@/components/ui/switch";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select,
   SelectContent,
@@ -22,26 +28,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { api, RUSLEResult , AOIConfig} from "@/lib/api";
+import { api, RUSLEMapResult, RUSLEStatsResult, RUSLEClassifyResult, RUSLEExportResult, AOIConfig} from "@/lib/api";
 import { DistrictMap } from "@/components/DistrictMap";
 import { ReportDownloadButton } from "@/components/ReportDownloadButton";
 import { MapExportControls } from "@/components/MapExportControls";
-import { StudyAreaSelector } from "@/components/StudyAreaSelector";
-
-import {
-  ResizableHandle,
-  ResizablePanel,
-  ResizablePanelGroup,
-} from "@/components/ui/resizable";
-
-const DISTRICTS = [
-  "Bugesera","Burera","Gakenke","Gasabo","Gatsibo","Gicumbi","Gisagara",
-  "Huye","Kamonyi","Karongi","Kayonza","Kicukiro","Kirehe","Muhanga",
-  "Musanze","Ngoma","Ngororero","Nyabihu","Nyagatare","Nyamagabe",
-  "Nyamasheke","Nyanza","Nyarugenge","Nyaruguru","Rubavu","Ruhango",
-  "Rulindo","Rusizi","Rutsiro","Rwamagana",
-  "Custom Study Area",
-];
 
 const YEARS = Array.from({ length: 15 }, (_, i) => 2010 + i);
 
@@ -56,10 +46,44 @@ const FACTOR_LAYERS = [
   { key: "P", label: "P — Support Practice" },
 ];
 
+const DEFAULT_PRESETS: Record<number, string[]> = {
+  1: ["Uniform / Full Area"],
+  2: ["Low", "High"],
+  3: ["Low", "Moderate", "High"],
+  4: ["Low", "Moderate", "High", "Very High"],
+  5: ["Very Low", "Low", "Moderate", "High", "Very High"],
+  6: ["Very Low", "Low", "Moderate", "High", "Very High", "Extreme"],
+  7: ["Extremely Low", "Very Low", "Low", "Moderate", "High", "Very High", "Extreme"],
+  8: ["Extremely Low", "Very Low", "Low", "Moderately Low", "Moderately High", "High", "Very High", "Extreme"],
+  9: ["Extremely Low", "Very Low", "Low", "Moderately Low", "Moderate", "Moderately High", "High", "Very High", "Extreme"],
+  10: ["Extremely Low", "Very Low", "Low", "Moderately Low", "Moderate", "Moderately High", "High", "Very High", "Extremely High", "Extreme"],
+};
+
+function getDefaultLabels(n: number): string[] {
+  if (DEFAULT_PRESETS[n]) return [...DEFAULT_PRESETS[n]];
+  return Array.from({ length: n }, (_, i) => `Class ${i + 1}`);
+}
+
 export function RUSLEPage() {
-  const [aoi, setAoi] = useState<AOIConfig>({ type: "gaul2", country: "Rwanda", name: "Musanze", level1: "North/Amajyaruguru", level2: "Musanze" });
+  const [aoi, setAoi] = useState<AOIConfig>({ type: "rwanda", country: "Rwanda", name: "Rwanda" });
   const [year, setYear] = useState(2023);
   const [nClasses, setNClasses] = useState(5);
+  const [method, setMethod] = useState("natural_breaks");
+  const [customClassNames, setCustomClassNames] = useState<string[]>(() => getDefaultLabels(5));
+  
+  useEffect(() => {
+    setCustomClassNames((prev) => {
+      if (prev.length === nClasses) return prev;
+      const next = getDefaultLabels(nClasses);
+      for (let i = 0; i < Math.min(prev.length, nClasses); i++) {
+        if (!DEFAULT_PRESETS[prev.length]?.includes(prev[i])) {
+          next[i] = prev[i];
+        }
+      }
+      return next;
+    });
+  }, [nClasses]);
+
   const [reverseR, setReverseR] = useState(false);
   const [reverseK, setReverseK] = useState(false);
   const [reverseLs, setReverseLs] = useState(false);
@@ -67,38 +91,70 @@ export function RUSLEPage() {
   const [reverseP, setReverseP] = useState(false);
   const [activeLayer, setActiveLayer] = useState("A");
 
-  const { mutate, data, isPending, error } = useMutation<RUSLEResult, Error>({
-    mutationFn: () =>
-      api.rusle({
-        aoi,
-                year,
-        n_classes: nClasses,
-        reverse_r: reverseR,
-        reverse_k: reverseK,
-        reverse_ls: reverseLs,
-        reverse_c: reverseC,
-        reverse_p: reverseP,
-      }),
+  const getReq = () => ({
+    aoi,
+    year,
+    n_classes: nClasses,
+    method,
+    custom_labels: customClassNames,
+    reverse_r: reverseR,
+    reverse_k: reverseK,
+    reverse_ls: reverseLs,
+    reverse_c: reverseC,
+    reverse_p: reverseP,
   });
 
+  const mapMutation = useMutation({ mutationFn: () => api.rusle.map(getReq()) });
+  const statsMutation = useMutation({ mutationFn: () => api.rusle.stats(getReq()) });
+  const classifyMutation = useMutation({ mutationFn: () => api.rusle.classify(getReq()) });
+  const exportMutation = useMutation({ mutationFn: () => api.rusle.export(getReq()) });
+
+  const handleAnalyze = () => {
+    mapMutation.mutate();
+    statsMutation.mutate();
+    classifyMutation.mutate();
+    exportMutation.mutate();
+  };
+
+  const isPending = mapMutation.isPending || statsMutation.isPending || classifyMutation.isPending || exportMutation.isPending;
+  const error = mapMutation.error || statsMutation.error || classifyMutation.error || exportMutation.error;
+  
+  const mapData = mapMutation.data as any;
+  const statsData = statsMutation.data as any;
+  const classifyData = classifyMutation.data as any;
+  const exportData = exportMutation.data as any;
+  const data = mapData || statsData || classifyData || exportData;
 
   const getActiveTileUrl = () => {
-    if (!data) return "";
-    if (activeLayer === "A") return data.tile_url;
-    return data.factor_maps[activeLayer]?.class_tile_url ?? data.factor_maps[activeLayer]?.tile_url ?? data.tile_url;
+    if (!mapData && !classifyData) return "";
+    if (activeLayer === "risk") return classifyData?.panels?.find((p: any) => p.name === "risk_index")?.tile_url || mapData?.factor_maps?.["risk_index"]?.tile_url;
+    
+    if (activeLayer === "A") {
+      if (method === "continuous") return mapData?.tile_url;
+      return classifyData?.panels?.find((p: any) => p.name === "A")?.tile_url || mapData?.tile_url;
+    }
+    
+    if (method === "continuous") return mapData?.factor_maps?.[activeLayer]?.tile_url;
+    return classifyData?.panels?.find((p: any) => p.name === activeLayer)?.tile_url || mapData?.factor_maps?.[activeLayer]?.tile_url;
   };
 
   const getActiveThumbUrl = () => {
-    if (!data) return undefined;
-    if (activeLayer === "risk") return (data as any).risk_index?.thumb_url;
-    if (activeLayer === "A") return (data as any).factor_maps?.A?.thumb_url;
-    return (data as any).factor_maps?.[activeLayer]?.class_thumb_url ?? (data as any).factor_maps?.[activeLayer]?.thumb_url;
+    if (!mapData && !classifyData) return undefined;
+    if (activeLayer === "risk") return classifyData?.panels?.find((p: any) => p.name === "risk_index")?.thumb_url || mapData?.factor_maps?.["risk_index"]?.thumb_url;
+    
+    if (activeLayer === "A") {
+      if (method === "continuous") return mapData?.thumb_url;
+      return classifyData?.panels?.find((p: any) => p.name === "A")?.thumb_url || mapData?.thumb_url;
+    }
+
+    if (method === "continuous") return mapData?.factor_maps?.[activeLayer]?.thumb_url;
+    return classifyData?.panels?.find((p: any) => p.name === activeLayer)?.thumb_url || mapData?.factor_maps?.[activeLayer]?.thumb_url;
   };
 
   const getActiveDownloadUrl = () => {
-    if (!data) return undefined;
-    if (activeLayer === "risk") return (data as any).risk_index?.download_url;
-    return (data as any).factor_maps?.[activeLayer]?.download_url;
+    if (!exportData) return undefined;
+    if (activeLayer === "risk") return exportData?.risk_index;
+    return exportData?.[activeLayer];
   };
 
   return (
@@ -132,15 +188,36 @@ export function RUSLEPage() {
           </Select>
         </div>
 
-        <div className="space-y-2">
-          <Label>Classes: {nClasses}</Label>
-          <Slider
-            min={2}
-            max={10}
-            step={1}
-            value={[nClasses]}
-            onValueChange={([v]) => setNClasses(v)}
-          />
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center justify-between">
+              Classification Method
+            </Label>
+            <Select value={method} onValueChange={setMethod}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="natural_breaks">Natural Breaks (Jenks)</SelectItem>
+                <SelectItem value="equal_interval">Equal Interval</SelectItem>
+                <SelectItem value="quantile">Quantile</SelectItem>
+                <SelectItem value="continuous">Continuous (Unclassified)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          
+          {method !== "continuous" && (
+            <div className="space-y-2">
+              <Label>Classes: {nClasses}</Label>
+              <Slider
+                min={2}
+                max={10}
+                step={1}
+                value={[nClasses]}
+                onValueChange={([v]) => setNClasses(v)}
+              />
+            </div>
+          )}
         </div>
 
         <div className="space-y-4 pt-2 border-t">
@@ -168,7 +245,7 @@ export function RUSLEPage() {
 
         <Button
           className="w-full gap-2"
-          onClick={() => mutate()}
+          onClick={handleAnalyze}
           disabled={isPending}
         >
           {isPending ? (
@@ -219,11 +296,11 @@ export function RUSLEPage() {
           <Tabs defaultValue="map" className="h-full flex flex-col">
             <TabsList className="mb-4 self-start">
               <TabsTrigger value="map">Map</TabsTrigger>
-              <TabsTrigger value="stats">Statistics</TabsTrigger>
-              <TabsTrigger value="factors">Factor Maps</TabsTrigger>
-              <TabsTrigger value="risk">Risk Index</TabsTrigger>
-              <TabsTrigger value="static-map">Static Maps</TabsTrigger>
-              <TabsTrigger value="report" className="gap-1.5"><FileText className="w-3.5 h-3.5" />Report</TabsTrigger>
+              <TabsTrigger value="stats" disabled={!statsData}>Statistics</TabsTrigger>
+              <TabsTrigger value="factors" disabled={!statsData}>Factor Maps</TabsTrigger>
+              <TabsTrigger value="risk" disabled={!statsData}>Risk Index</TabsTrigger>
+              <TabsTrigger value="static-map" disabled={!statsData}>Static Maps</TabsTrigger>
+              <TabsTrigger value="report" disabled={!statsData} className="gap-1.5"><FileText className="w-3.5 h-3.5" />Report</TabsTrigger>
             </TabsList>
 
             {/* Map */}
@@ -244,7 +321,7 @@ export function RUSLEPage() {
                 ))}
               </div>
               <div className="h-[520px] rounded-lg overflow-hidden border">
-                <DistrictMap center={data.center} tileUrl={getActiveTileUrl()} />
+                <DistrictMap center={mapData?.center} tileUrl={getActiveTileUrl()} />
               </div>
             </TabsContent>
 
@@ -268,206 +345,215 @@ export function RUSLEPage() {
                   ))}
                 </div>
               </div>
-              <MapExportControls
-                tileUrl={getActiveTileUrl()!}
-                thumbUrl={getActiveThumbUrl()}
-                downloadUrl={getActiveDownloadUrl()}
-                district={aoi.name || "Custom"}
-                title={FACTOR_LAYERS.find(l => l.key === activeLayer)?.label || "RUSLE Map"}
-                classAreas={activeLayer === "risk" ? data.risk_index.class_areas_km2 : activeLayer === "A" ? data.n_class_soil_loss_km2 : undefined}
-              />
+              {statsData && (
+                <MapExportControls
+                  tileUrl={getActiveTileUrl()!}
+                  thumbUrl={getActiveThumbUrl()}
+                  downloadUrl={getActiveDownloadUrl()}
+                  district={aoi.name || "Custom"}
+                  title={FACTOR_LAYERS.find(l => l.key === activeLayer)?.label || "RUSLE Map"}
+                  classAreas={activeLayer === "risk" ? statsData.risk_index?.class_areas_km2 : activeLayer === "A" ? statsData.n_class_soil_loss_km2 : undefined}
+                />
+              )}
             </TabsContent>
 
             {/* Statistics */}
             <TabsContent value="stats" className="space-y-6">
-              <div>
-                <h2 className="font-semibold text-lg mb-1">
-                  Statistics — {data.district}
-                </h2>
-                <p className="text-sm text-muted-foreground">Year: {data.year}</p>
-              </div>
-
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                {Object.entries(data.stats).map(([label, val]) => (
-                  <div key={label} className="bg-card border rounded-lg p-4">
-                    <p className="text-xs text-muted-foreground mb-1">{label}</p>
-                    <p className="text-2xl font-bold text-primary">{val}</p>
+              {statsData && (
+                <>
+                  <div>
+                    <h2 className="font-semibold text-lg mb-1">
+                      Statistics — {statsData.district}
+                    </h2>
+                    <p className="text-sm text-muted-foreground">Year: {statsData.year}</p>
                   </div>
-                ))}
-              </div>
 
-              <div>
-                <h3 className="font-medium mb-3">Factor Means</h3>
-                <table className="w-full text-sm border rounded-lg overflow-hidden">
-                  <thead className="bg-muted">
-                    <tr>
-                      <th className="text-left px-3 py-2 font-medium">Factor</th>
-                      <th className="text-right px-3 py-2 font-medium">Mean Value</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {Object.entries(data.factor_means).map(([factor, val], i) => (
-                      <tr key={factor} className={i % 2 === 0 ? "bg-background" : "bg-muted/30"}>
-                        <td className="px-3 py-1.5 font-medium">{factor}</td>
-                        <td className="px-3 py-1.5 text-right tabular-nums">{val}</td>
-                      </tr>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                    {Object.entries(statsData.stats).map(([label, val]: any) => (
+                      <div key={label} className="bg-card border rounded-lg p-4">
+                        <p className="text-xs text-muted-foreground mb-1">{label}</p>
+                        <p className="text-2xl font-bold text-primary">{val}</p>
+                      </div>
                     ))}
-                  </tbody>
-                </table>
-              </div>
+                  </div>
 
-              <div>
-                <h3 className="font-medium mb-3">Fixed 6-Class Soil Loss Areas</h3>
-                <ResponsiveContainer width="100%" height={240}>
-                  <BarChart
-                    data={Object.entries(data.class_areas_km2).map(([k, v], i) => ({
-                      name: k,
-                      area: v,
-                      fill: RUSLE_COLORS[i % RUSLE_COLORS.length],
-                    }))}
-                  >
-                    <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={50} />
-                    <YAxis unit=" km²" tick={{ fontSize: 11 }} />
-                    <Tooltip formatter={(v: number) => [`${v} km²`, "Area"]} />
-                    <Bar dataKey="area" radius={[4, 4, 0, 0]}>
-                      {Object.keys(data.class_areas_km2).map((_, i) => (
-                        <Cell key={i} fill={RUSLE_COLORS[i % RUSLE_COLORS.length]} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+                  <div>
+                    <h3 className="font-medium mb-3">Factor Means</h3>
+                    <table className="w-full text-sm border rounded-lg overflow-hidden">
+                      <thead className="bg-muted">
+                        <tr>
+                          <th className="text-left px-3 py-2 font-medium">Factor</th>
+                          <th className="text-right px-3 py-2 font-medium">Mean Value</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {Object.entries(statsData.factor_means).map(([factor, val]: any, i) => (
+                          <tr key={factor} className={i % 2 === 0 ? "bg-background" : "bg-muted/30"}>
+                            <td className="px-3 py-1.5 font-medium">{factor}</td>
+                            <td className="px-3 py-1.5 text-right tabular-nums">{val}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div>
+                    <h3 className="font-medium mb-3">Class Areas (km²)</h3>
+                    <ResponsiveContainer width="100%" height={240}>
+                      <BarChart
+                        data={Object.entries(statsData.n_class_soil_loss_km2 || statsData.class_areas_km2 || {}).map(([k, v]: any, i) => ({
+                          name: k,
+                          area: v,
+                          fill: RUSLE_COLORS[i % RUSLE_COLORS.length],
+                        }))}
+                      >
+                        <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={50} />
+                        <YAxis unit=" km²" tick={{ fontSize: 11 }} />
+                        <Tooltip formatter={(v: number) => [`${v} km²`, "Area"]} />
+                        <Bar dataKey="area" radius={[4, 4, 0, 0]}>
+                          {Object.keys(statsData.n_class_soil_loss_km2 || statsData.class_areas_km2 || {}).map((_, i) => (
+                            <Cell key={i} fill={RUSLE_COLORS[i % RUSLE_COLORS.length]} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </>
+              )}
             </TabsContent>
 
             {/* Factor Maps */}
             <TabsContent value="factors" className="space-y-6">
-              <div>
-                <h2 className="font-semibold text-lg mb-1">Factor Maps — {data.district}</h2>
-                <p className="text-sm text-muted-foreground">
-                  Individual RUSLE factor layers classified and visualised per district.
-                </p>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                {["R","K","LS","C","P"].map((key) => {
-                  const factor = data.factor_maps[key];
-                  if (!factor) return null;
-                  return (
-                    <div key={key} className="border rounded-lg p-4 space-y-2">
-                      <div className="flex items-center gap-2">
-                        <span className="bg-primary text-primary-foreground font-bold px-2 py-0.5 rounded text-sm">
-                          {key}
-                        </span>
-                        <span className="font-medium">{factor.label}</span>
-                      </div>
-                      {factor.direction_desc && (
-                        <p className="text-xs text-muted-foreground italic">{factor.direction_desc}</p>
-                      )}
-                      {factor.class_thumb_url ? (
-                        <img
-                          src={factor.class_thumb_url}
-                          alt={`${factor.label} classified thumbnail`}
-                          className="w-full rounded border object-cover"
-                        />
-                      ) : factor.thumb_url ? (
-                        <img
-                          src={factor.thumb_url}
-                          alt={`${factor.label} thumbnail`}
-                          className="w-full rounded border object-cover"
-                        />
-                      ) : null}
-                    </div>
-                  );
-                })}
-              </div>
+              {statsData && mapData && (
+                <>
+                  <div>
+                    <h2 className="font-semibold text-lg mb-1">Factor Maps — {statsData.district}</h2>
+                    <p className="text-sm text-muted-foreground">
+                      Individual RUSLE factor layers classified and visualised per district.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                    {["R","K","LS","C","P"].map((key) => {
+                      const factor = classifyData?.panels?.find((p:any) => p.name === key) || mapData?.factor_maps?.[key];
+                      if (!factor) return null;
+                      return (
+                        <div key={key} className="border rounded-lg p-4 space-y-2">
+                          <div className="flex items-center gap-2">
+                            <span className="bg-primary text-primary-foreground font-bold px-2 py-0.5 rounded text-sm">
+                              {key}
+                            </span>
+                            <span className="font-medium">{FACTOR_LAYERS.find(f => f.key === key)?.label || key}</span>
+                          </div>
+                          {factor.thumb_url ? (
+                            <img
+                              src={factor.thumb_url}
+                              alt={`${key} thumbnail`}
+                              className="w-full rounded border object-cover"
+                            />
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
             </TabsContent>
 
             {/* Risk Index */}
             <TabsContent value="risk" className="space-y-6">
-              <div>
-                <h2 className="font-semibold text-lg mb-1">Risk Index — {data.district}</h2>
-                <p className="text-sm text-muted-foreground">
-                  Composite erosion risk index derived from all RUSLE factors.
-                </p>
-              </div>
+              {statsData && classifyData && (
+                <>
+                  <div>
+                    <h2 className="font-semibold text-lg mb-1">Risk Index — {statsData.district}</h2>
+                    <p className="text-sm text-muted-foreground">
+                      Composite erosion risk index derived from all RUSLE factors.
+                    </p>
+                  </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="bg-card border rounded-lg p-4">
-                  <p className="text-xs text-muted-foreground mb-1">Mean Risk Index</p>
-                  <p className="text-2xl font-bold text-primary">{data.risk_index.mean}</p>
-                </div>
-                <div className="bg-card border rounded-lg p-4">
-                  <p className="text-xs text-muted-foreground mb-1">Std Deviation</p>
-                  <p className="text-2xl font-bold text-primary">{data.risk_index.std_dev}</p>
-                </div>
-              </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-card border rounded-lg p-4">
+                      <p className="text-xs text-muted-foreground mb-1">Mean Risk Index</p>
+                      <p className="text-2xl font-bold text-primary">{statsData.risk_index?.mean}</p>
+                    </div>
+                    <div className="bg-card border rounded-lg p-4">
+                      <p className="text-xs text-muted-foreground mb-1">Std Deviation</p>
+                      <p className="text-2xl font-bold text-primary">{statsData.risk_index?.std_dev}</p>
+                    </div>
+                  </div>
 
-              {data.risk_index.thumb_url && (
-                <div className="flex justify-center">
-                  <img
-                    src={data.risk_index.thumb_url}
-                    alt="Risk Index thumbnail"
-                    className="max-w-lg w-full rounded-lg border"
-                  />
-                </div>
+                  {classifyData?.panels?.find((p:any) => p.name === 'risk_index')?.thumb_url && (
+                    <div className="flex justify-center">
+                      <img
+                        src={classifyData.panels.find((p:any) => p.name === 'risk_index').thumb_url}
+                        alt="Risk Index thumbnail"
+                        className="max-w-lg w-full rounded-lg border"
+                      />
+                    </div>
+                  )}
+
+                  <div>
+                    <h3 className="font-medium mb-3">Risk Class Areas</h3>
+                    <ResponsiveContainer width="100%" height={240}>
+                      <BarChart
+                        data={Object.entries(statsData.risk_index?.class_areas_km2 || {}).map(([k, v]: any, i) => ({
+                          name: k,
+                          area: v,
+                          fill: RUSLE_COLORS[i % RUSLE_COLORS.length],
+                        }))}
+                      >
+                        <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={50} />
+                        <YAxis unit=" km²" tick={{ fontSize: 11 }} />
+                        <Tooltip formatter={(v: number) => [`${v} km²`, "Area"]} />
+                        <Bar dataKey="area" radius={[4, 4, 0, 0]}>
+                          {Object.keys(statsData.risk_index?.class_areas_km2 || {}).map((_, i) => (
+                            <Cell key={i} fill={RUSLE_COLORS[i % RUSLE_COLORS.length]} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </>
               )}
-
-              <div>
-                <h3 className="font-medium mb-3">Risk Class Areas</h3>
-                <ResponsiveContainer width="100%" height={240}>
-                  <BarChart
-                    data={Object.entries(data.risk_index.class_areas_km2).map(([k, v], i) => ({
-                      name: k,
-                      area: v,
-                      fill: RUSLE_COLORS[i % RUSLE_COLORS.length],
-                    }))}
-                  >
-                    <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={50} />
-                    <YAxis unit=" km²" tick={{ fontSize: 11 }} />
-                    <Tooltip formatter={(v: number) => [`${v} km²`, "Area"]} />
-                    <Bar dataKey="area" radius={[4, 4, 0, 0]}>
-                      {Object.keys(data.risk_index.class_areas_km2).map((_, i) => (
-                        <Cell key={i} fill={RUSLE_COLORS[i % RUSLE_COLORS.length]} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
             </TabsContent>
 
             {/* ── Report ── */}
             <TabsContent value="report" className="space-y-6">
-              <div>
-                <h2 className="font-semibold text-lg mb-1">PDF Report — {data.district}</h2>
-                <p className="text-sm text-muted-foreground">
-                  Download a full PDF report including soil loss statistics, factor summaries, and risk maps.
-                </p>
-              </div>
-              <div className="bg-card border rounded-lg p-5 space-y-4">
-                <p className="text-sm text-muted-foreground leading-relaxed">
-                  <strong>Contents:</strong> District metadata · Soil loss statistics ·
-                  Factor means (R, K, LS, C, P) · Risk class area table · Maps · Methodology notes.
-                </p>
-                <ReportDownloadButton aoi={aoi}
-                  moduleName="RUSLE Soil Erosion"
-                  district={aoi.name || "Custom"}
-                  dateRange={`Year: ${data.year}`}
-                  stats={{
-                    ...data.stats,
-                    "Mean R": data.factor_means.R,
-                    "Mean K": data.factor_means.K,
-                    "Mean LS": data.factor_means.LS,
-                    "Mean C": data.factor_means.C,
-                    "Mean P": data.factor_means.P,
-                  }}
-                  classAreas={data.class_areas_km2}
-                  extraNotes={`Soil loss is estimated using the Revised Universal Soil Loss Equation (RUSLE). Analysis covers ${data.district} district for the year ${data.year}.`}
-                  maps={[
-                    ["Soil Loss Map", data.tile_url],
-                    ["Erosion Risk Index", data.risk_index.thumb_url]
-                  ]}
-                  filename={`RUSLE_${data.district}_${data.year}.pdf`}
-                />
-              </div>
+              {statsData && mapData && classifyData && (
+                <>
+                  <div>
+                    <h2 className="font-semibold text-lg mb-1">PDF Report — {statsData.district}</h2>
+                    <p className="text-sm text-muted-foreground">
+                      Download a full PDF report including soil loss statistics, factor summaries, and risk maps.
+                    </p>
+                  </div>
+                  <div className="bg-card border rounded-lg p-5 space-y-4">
+                    <p className="text-sm text-muted-foreground leading-relaxed">
+                      <strong>Contents:</strong> District metadata · Soil loss statistics ·
+                      Factor means (R, K, LS, C, P) · Risk class area table · Maps · Methodology notes.
+                    </p>
+                    <ReportDownloadButton aoi={aoi}
+                      moduleName="RUSLE Soil Erosion"
+                      district={aoi.name || "Custom"}
+                      dateRange={`Year: ${statsData.year}`}
+                      stats={{
+                        ...statsData.stats,
+                        "Mean R": statsData.factor_means?.R,
+                        "Mean K": statsData.factor_means?.K,
+                        "Mean LS": statsData.factor_means?.LS,
+                        "Mean C": statsData.factor_means?.C,
+                        "Mean P": statsData.factor_means?.P,
+                      }}
+                      classAreas={statsData.n_class_soil_loss_km2 || statsData.class_areas_km2}
+                      extraNotes={`Soil loss is estimated using the Revised Universal Soil Loss Equation (RUSLE). Analysis covers ${statsData.district} district for the year ${statsData.year}.`}
+                      maps={[
+                        ["Soil Loss Map", classifyData.panels?.find((p:any) => p.name === 'A')?.thumb_url || mapData.thumb_url],
+                        ["Erosion Risk Index", classifyData.panels?.find((p:any) => p.name === 'risk_index')?.thumb_url]
+                      ]}
+                      filename={`RUSLE_${statsData.district}_${statsData.year}.pdf`}
+                    />
+                  </div>
+                </>
+              )}
             </TabsContent>
           </Tabs>
         )}

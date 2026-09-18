@@ -679,9 +679,9 @@ def compute_accessibility_stats(aoi_config: dict, amenities: list[str], dest_ame
     return result
 
 
-def compute_accessibility_classify(aoi_config: dict, amenities: list[str], dest_amenities: list[str] = None, n_classes: int = 4, service_threshold_mins: int = 30) -> dict:
+def compute_accessibility_classify(aoi_config: dict, amenities: list[str], dest_amenities: list[str] = None, n_classes: int = 4, service_threshold_mins: int = 30, method: str = "natural_breaks", custom_labels: list = None) -> dict:
     dest_am = dest_amenities or []
-    cache_key = (json.dumps(aoi_config, sort_keys=True), "-".join(sorted(amenities)), "-".join(sorted(dest_am)), n_classes, service_threshold_mins)
+    cache_key = (json.dumps(aoi_config, sort_keys=True), "-".join(sorted(amenities)), "-".join(sorted(dest_am)), n_classes, service_threshold_mins, method, tuple(custom_labels) if custom_labels else None)
     with _lock:
         if cache_key in _cache_classify:
             return _cache_classify[cache_key]
@@ -693,6 +693,7 @@ def compute_accessibility_classify(aoi_config: dict, amenities: list[str], dest_
             {"name": "TravelTime", "image": travel_time, "title": "Travel Time (seconds)"},
         ],
         aoi=aoi, scale=get_dynamic_scale(aoi), n_classes=n_classes,
+        method=method, custom_labels=custom_labels
     )
 
     result = {

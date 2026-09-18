@@ -1,10 +1,10 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 
 import { useMutation } from "@tanstack/react-query";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
 } from "recharts";
-import { Loader2, Trash2, FileText, Printer , Play} from "lucide-react";
+import { Loader2, Trash2, FileText, Printer , Play, Tag, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
@@ -94,6 +94,20 @@ function normalize(w: Record<FactorKey, number>): Record<FactorKey, number> {
 
 /** North arrow for thumbnail overlays */
 function SmallNorthArrow() {
+
+  const activeAreas = useMemo(() => {
+    const rawAreas = data?.classify?.panels?.[0]?.class_areas || data?.class_areas_km2;
+    if (!rawAreas) return undefined;
+    const mapped: Record<string, number> = {};
+    const keys = Object.keys(rawAreas);
+    keys.forEach((oldKey, i) => {
+      const newKey = customClassNames[i] || oldKey;
+      mapped[newKey] = rawAreas[oldKey];
+    });
+    return mapped;
+  }, [data, customClassNames]);
+
+
   return (
     <svg width="18" height="22" viewBox="0 0 28 36" fill="none">
       <polygon points="14,2 20,18 14,14 8,18" fill="#111" />
@@ -194,6 +208,25 @@ function FactorMapCard({ factorKey, factor, analysisDate }: {
 }
 
 
+
+const DEFAULT_PRESETS: Record<number, string[]> = {
+  1: ["Uniform / Full Area"],
+  2: ["Low", "High"],
+  3: ["Low", "Moderate", "High"],
+  4: ["Low", "Moderate", "High", "Very High"],
+  5: ["Very Low", "Low", "Moderate", "High", "Very High"],
+  6: ["Very Low", "Low", "Moderate", "High", "Very High", "Extreme"],
+  7: ["Extremely Low", "Very Low", "Low", "Moderate", "High", "Very High", "Extreme"],
+  8: ["Extremely Low", "Very Low", "Low", "Moderately Low", "Moderately High", "High", "Very High", "Extreme"],
+  9: ["Extremely Low", "Very Low", "Low", "Moderately Low", "Moderate", "Moderately High", "High", "Very High", "Extreme"],
+  10: ["Extremely Low", "Very Low", "Low", "Moderately Low", "Moderate", "Moderately High", "High", "Very High", "Extremely High", "Extreme"],
+};
+
+function getDefaultLabels(n: number): string[] {
+  if (DEFAULT_PRESETS[n]) return [...DEFAULT_PRESETS[n]];
+  return Array.from({ length: n }, (_, i) => `Class ${i + 1}`);
+}
+
 export function HabitatSuitabilityPage() {
   const [aoi, setAoi] = useState<AOIConfig>({ type: "rwanda", country: "Rwanda", province: "Kigali City", name: "Kigali City" });
   const effectiveDistrictName = aoi.name || "Custom Study Area";
@@ -202,6 +235,21 @@ export function HabitatSuitabilityPage() {
   const [ahpData, setAhpData] = useState<AhpData | null>(null);
   const [reverseFlags, setReverseFlags] = useState<Record<string, boolean>>({});
   const [nClasses, setNClasses] = useState(5);
+  const [method, setMethod] = useState("natural_breaks");
+  const [customClassNames, setCustomClassNames] = useState<string[]>(() => getDefaultLabels(5));
+
+  useEffect(() => {
+    setCustomClassNames((prev) => {
+      if (prev.length === nClasses) return prev;
+      const next = getDefaultLabels(nClasses);
+      for (let i = 0; i < Math.min(prev.length, nClasses); i++) {
+        if (!DEFAULT_PRESETS[prev.length]?.includes(prev[i])) {
+          next[i] = prev[i];
+        }
+      }
+      return next;
+    });
+  }, [nClasses]);
   const [activeTab, setActiveTab] = useState("map");
 
   const getReq = useCallback(() => {
@@ -213,37 +261,33 @@ export function HabitatSuitabilityPage() {
       reverse_flags: reverseFlags,
       n_classes: nClasses,
       custom_weights,
+      method: method,
+      custom_labels: customClassNames,
     };
-  }, [weights, aoi, reverseFlags, nClasses]);
+  }, [weights, aoi, reverseFlags, nClasses, method, customClassNames]);
 
-  const mapMutation = useMutation({
-    mutationFn: async () => api.habitat.map(getReq()),
+  const analysisMutation = useMutation({
+    mutationFn: async () => api.habitat(getReq()),
     onSuccess: () => setActiveTab("map"),
   });
-  const statsMutation = useMutation({ mutationFn: async () => api.habitat.stats(getReq()) });
-  const classifyMutation = useMutation({ mutationFn: async () => api.habitat.classify(getReq()) });
-  const exportMutation = useMutation({ mutationFn: async () => api.habitat.export(getReq()) });
 
   const runAnalysis = () => {
-    mapMutation.mutate();
-    statsMutation.mutate();
-    classifyMutation.mutate();
-    exportMutation.mutate();
+    analysisMutation.mutate();
   };
 
-  const isPending = mapMutation.isPending || statsMutation.isPending || classifyMutation.isPending || exportMutation.isPending;
-  const anyData = mapMutation.data || statsMutation.data || classifyMutation.data || exportMutation.data;
-  const mapData = mapMutation.data;
-  const statsData = statsMutation.data;
-  const classifyData = classifyMutation.data;
-  const exportData = exportMutation.data;
+  const isPending = analysisMutation.isPending;
+  const anyData = analysisMutation.data;
+  const mapData = analysisMutation.data;
+  const statsData = analysisMutation.data;
+  const classifyData = analysisMutation.data;
+  const exportData = analysisMutation.data;
 
   const { mutate: updateAhp } = useMutation({
     mutationFn: async (w: Record<FactorKey, number>) => {
       const norm = normalize(w);
       const custom_weights: Record<string, number> = {};
       Object.entries(norm).forEach(([k, v]) => { custom_weights[k] = v / 100.0; });
-      return api.habitat.ahp(custom_weights);
+      return api.habitatAhp(custom_weights);
     },
     onSuccess: (res) => setAhpData(res),
   });
@@ -286,30 +330,83 @@ export function HabitatSuitabilityPage() {
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* Left Sidebar: Controls */}
         <div className="lg:col-span-1">
-          <div className="bg-card border rounded-lg shadow-sm flex flex-col h-[calc(100vh-140px)] sticky top-20">
+          <div className="bg-card border rounded-lg shadow-sm flex flex-col h-[calc(100vh-160px)] sticky top-20 overflow-hidden">
             <h3 className="font-semibold text-lg flex items-center border-b p-5 shrink-0">
               Configuration
             </h3>
             
-            <ScrollArea className="flex-1 px-5 py-4">
+            <div className="flex-1 overflow-y-auto min-h-0 px-5 py-4">
               <div className="space-y-5">
                 <div className="space-y-3">
               <Label>Study Area</Label>
               <StudyAreaSelector value={aoi} onChange={setAoi} />
             </div>
 
-            <div className="space-y-3">
-              <Label>Suitability Classes (Quantiles)</Label>
-              <Select value={nClasses.toString()} onValueChange={(v) => setNClasses(parseInt(v))}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-muted-foreground">Classification Method</Label>
+              <Select value={method} onValueChange={setMethod}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select Method" />
+                </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="3">3 Classes</SelectItem>
-                  <SelectItem value="4">4 Classes</SelectItem>
-                  <SelectItem value="5">5 Classes</SelectItem>
-                  <SelectItem value="7">7 Classes</SelectItem>
-                  <SelectItem value="10">10 Classes</SelectItem>
+                  <SelectItem value="natural_breaks">Natural Breaks (Jenks)</SelectItem>
+                  <SelectItem value="equal_interval">Discrete (Equal Interval)</SelectItem>
+                  <SelectItem value="quantiles">Discrete (Quantiles / Equal Area)</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex justify-between items-center">
+                <Label>Classes: {nClasses}</Label>
+                <span className="text-[11px] text-muted-foreground">{nClasses} intervals</span>
+              </div>
+              <Slider
+                min={2}
+                max={10}
+                step={1}
+                value={[nClasses]}
+                onValueChange={([v]) => setNClasses(v)}
+              />
+            </div>
+
+            <div className="space-y-3 bg-muted/40 border rounded-lg p-3">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-semibold flex items-center gap-1.5 text-foreground">
+                  <Tag className="w-3.5 h-3.5 text-primary" />
+                  Rename Classes ({nClasses})
+                </Label>
+                <button
+                  type="button"
+                  onClick={() => setCustomClassNames(getDefaultLabels(nClasses))}
+                  className="text-[10px] text-muted-foreground hover:text-primary flex items-center gap-1 transition-colors"
+                  title="Reset to default names"
+                >
+                  <RotateCcw className="w-3 h-3" /> Reset
+                </button>
+              </div>
+
+              <div className="space-y-1.5 max-h-[200px] overflow-y-auto pr-1">
+                {Array.from({ length: nClasses }).map((_, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <span
+                      className="w-3.5 h-3.5 rounded-xs shrink-0 border border-black/15 shadow-2xs"
+                      style={{ background: ["#08306b", "#313695", "#74add1", "#fee090", "#f46d43", "#a50026", "#000000", "#555555", "#999999", "#cccccc"][i % 10] }}
+                    />
+                    <input
+                      type="text"
+                      value={customClassNames[i] || ""}
+                      placeholder={`Class ${i + 1}`}
+                      onChange={(e) => {
+                        const next = [...customClassNames];
+                        next[i] = e.target.value;
+                        setCustomClassNames(next);
+                      }}
+                      className="flex-1 h-7 text-xs rounded border border-input bg-background px-2 text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                    />
+                  </div>
+                ))}
+              </div>
             </div>
 
             <div className="pt-2 border-t space-y-4">
@@ -368,7 +465,7 @@ export function HabitatSuitabilityPage() {
               </div>
               </div>
             </div>
-            </ScrollArea>
+            </div>
 
             <div className="p-5 border-t shrink-0">
               <Button onClick={runAnalysis} disabled={isPending} className="w-full h-11 text-base">
@@ -380,7 +477,7 @@ export function HabitatSuitabilityPage() {
         </div>
 
         {/* Right Content Area */}
-        <div className="lg:col-span-3 flex flex-col h-[calc(100vh-140px)] sticky top-20">
+        <div className="lg:col-span-3 flex flex-col h-[calc(100vh-160px)] sticky top-20">
           {isPending && !anyData ? (
             <div className="h-[600px] border rounded-lg flex flex-col items-center justify-center bg-slate-50/50 text-slate-400">
               <Loader2 className="w-8 h-8 animate-spin mb-4" />
@@ -551,7 +648,9 @@ export function HabitatSuitabilityPage() {
                       downloadUrl={activeLayer === "suitability" ? exportData.download_url : exportData.factors[activeLayer]?.download_url}
                       district={effectiveDistrictName}
                       title={activeLayer === "suitability" ? "Crane Habitat Suitability" : `${FACTOR_LABELS[activeLayer as FactorKey]} Factor`}
-                      classAreas={activeLayer === "suitability" ? (statsData?.class_areas_km2 || {}) : undefined}
+                      classAreas={activeLayer === "suitability" ? (statsData?.class_areas_km2 || {}) : undefined}  bbox={data?.bbox}
+
+
                     />
                   </div>
                 ) : (

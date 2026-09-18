@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useMutation } from "@tanstack/react-query";
 import {
   BarChart,
@@ -9,7 +9,7 @@ import {
   ResponsiveContainer,
   Cell,
 } from "recharts";
-import { Loader2, Thermometer, FileText , Play} from "lucide-react";
+import { Loader2, Thermometer, FileText , Play, Tag, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
@@ -62,17 +62,63 @@ const palette = (n: number) => {
   return Array.from({ length: n }, (_, i) => full[Math.round(i * step)]);
 };
 
+
+const DEFAULT_PRESETS: Record<number, string[]> = {
+  1: ["Uniform / Full Area"],
+  2: ["Low", "High"],
+  3: ["Low", "Moderate", "High"],
+  4: ["Low", "Moderate", "High", "Very High"],
+  5: ["Very Low", "Low", "Moderate", "High", "Very High"],
+  6: ["Very Low", "Low", "Moderate", "High", "Very High", "Extreme"],
+  7: ["Extremely Low", "Very Low", "Low", "Moderate", "High", "Very High", "Extreme"],
+  8: ["Extremely Low", "Very Low", "Low", "Moderately Low", "Moderately High", "High", "Very High", "Extreme"],
+  9: ["Extremely Low", "Very Low", "Low", "Moderately Low", "Moderate", "Moderately High", "High", "Very High", "Extreme"],
+  10: ["Extremely Low", "Very Low", "Low", "Moderately Low", "Moderate", "Moderately High", "High", "Very High", "Extremely High", "Extreme"],
+};
+
+function getDefaultLabels(n: number): string[] {
+  if (DEFAULT_PRESETS[n]) return [...DEFAULT_PRESETS[n]];
+  return Array.from({ length: n }, (_, i) => `Class ${i + 1}`);
+}
+
 export function LSTPage() {
-  const [aoi, setAoi] = useState<AOIConfig>({ type: "gaul2", country: "Rwanda", name: "Musanze", level1: "North/Amajyaruguru", level2: "Musanze" });
+  const [aoi, setAoi] = useState<AOIConfig>({ type: "rwanda", country: "Rwanda", name: "Rwanda" });
   const [startDate, setStartDate] = useState(sixMonthsAgo());
   const [endDate, setEndDate] = useState(today());
   const [nClasses, setNClasses] = useState(5);
+  const [method, setMethod] = useState("natural_breaks");
+  const [customClassNames, setCustomClassNames] = useState<string[]>(() => getDefaultLabels(5));
+
+  useEffect(() => {
+    setCustomClassNames((prev) => {
+      if (prev.length === nClasses) return prev;
+      const next = getDefaultLabels(nClasses);
+      for (let i = 0; i < Math.min(prev.length, nClasses); i++) {
+        if (!DEFAULT_PRESETS[prev.length]?.includes(prev[i])) {
+          next[i] = prev[i];
+        }
+      }
+      return next;
+    });
+  }, [nClasses]);
 
   const { mutate, data, isPending, error } = useMutation<LSTResult, Error>({
     mutationFn: () =>
       api.lst({ aoi,
-        start_date: startDate, end_date: endDate, n_classes: nClasses }),
+        start_date: startDate, end_date: endDate, n_classes: nClasses, method: method, custom_labels: customClassNames }),
   });
+
+  const activeAreas = useMemo(() => {
+    const rawAreas = data?.classify?.panels?.[0]?.class_areas || data?.class_areas_km2;
+    if (!rawAreas) return undefined;
+    const mapped: Record<string, number> = {};
+    const keys = Object.keys(rawAreas);
+    keys.forEach((oldKey, i) => {
+      const newKey = customClassNames[i] || oldKey;
+      mapped[newKey] = rawAreas[oldKey];
+    });
+    return mapped;
+  }, [data, customClassNames]);
 
 
   return (
@@ -225,7 +271,7 @@ export function LSTPage() {
                 <h3 className="font-medium mb-3">Temperature Class Areas</h3>
                 <ResponsiveContainer width="100%" height={240}>
                   <BarChart
-                    data={Object.entries(data.class_areas_km2).map(([k, v], i) => ({
+                    data={Object.entries(activeAreas || {}).map(([k, v], i) => ({
                       name: k,
                       area: v,
                       fill: TEMP_COLORS[i % TEMP_COLORS.length],
@@ -250,7 +296,7 @@ export function LSTPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {Object.entries(data.class_areas_km2).map(([cls, km2], i) => (
+                    {Object.entries(activeAreas || {}).map(([cls, km2], i) => (
                       <tr key={cls} className={i % 2 === 0 ? "bg-background" : "bg-muted/30"}>
                         <td className="px-3 py-1.5 flex items-center gap-2">
                           <span

@@ -58,16 +58,103 @@ def _grid_cells(aoi, grid_size: int):
     return grid_fc.map(lambda f: ee.Feature(ee.Geometry(f.geometry()).intersection(aoi, ee.ErrorMargin(10)), f.toDictionary()))
 
 
-def compute_uhi(aoi_config: dict, start_date: str, end_date: str, grid_size: int = 6, n_classes: int = 5) -> dict:
-    cache_key = (json.dumps(aoi_config, sort_keys=True), start_date, end_date, grid_size, n_classes)
+def _build_uhi_base(aoi_config: dict, start_date: str, end_date: str, grid_size: int):
+    from gee.aoi_utils import get_aoi_geometry
+    aoi = get_aoi_geometry(aoi_config)
+    lst_median_raw, _ = lst_image_and_aoi(aoi_config, start_date, end_date)
+    lst_median = lst_median_raw.select("LST")
+    ndbi_median_raw, _ = ndbi_image_and_aoi(aoi_config, start_date, end_date)
+    ndbi_median = ndbi_median_raw.select("NDBI")
+
+    grid_fc = _grid_cells(aoi, grid_size)
+    combined = lst_median.rename("LST").addBands(ndbi_median.rename("NDBI"))
+    stats_fc = combined.reduceRegions(collection=grid_fc, reducer=ee.Reducer.mean(), scale=get_dynamic_scale(aoi))
+    
+    return aoi, lst_median, ndbi_median, stats_fc
+
+def compute_uhi_map(aoi_config: dict, start_date: str, end_date: str, grid_size: int = 6) -> dict:
+    cache_key = ("uhi_map", json.dumps(aoi_config, sort_keys=True), start_date, end_date, grid_size)
+    with _lock:
+        if cache_key in _cache:
+            return _cache[cache_key]
+            
+    aoi, lst_median, ndbi_median, _ = _build_uhi_base(aoi_config, start_date, end_date, grid_size)
+    bounds = aoi.bounds().getInfo()["coordinates"][0]
+    center = [(bounds[0][1] + bounds[2][1]) / 2, (bounds[0][0] + bounds[2][0]) / 2]
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        f_lst_pct = executor.submit(
+            lambda: lst_median.reduceRegion(reducer=ee.Reducer.percentile([2, 98]), geometry=aoi, scale=get_dynamic_scale(aoi), maxPixels=1e10).getInfo()
+        )
+        f_ndbi_pct = executor.submit(
+            lambda: ndbi_median.reduceRegion(reducer=ee.Reducer.percentile([2, 98]), geometry=aoi, scale=get_dynamic_scale(aoi), maxPixels=1e10).getInfo()
+        )
+        lst_pct = f_lst_pct.result()
+        ndbi_pct = f_ndbi_pct.result()
+
+    lst_vis_cont = {"min": lst_pct.get("LST_p2", 15), "max": lst_pct.get("LST_p98", 40),
+               "palette": ["#313695", "#74add1", "#fee090", "#f46d43", "#a50026"]}
+    ndbi_vis_cont = {"min": ndbi_pct.get("NDBI_p2", -0.3), "max": ndbi_pct.get("NDBI_p98", 0.3),
+                "palette": ["#1a9850", "#d9ef8b", "#fee08b", "#f46d43", "#a50026"]}
+
+    lst_map_id = lst_median.getMapId(lst_vis_cont)
+    ndbi_map_id = ndbi_median.getMapId(ndbi_vis_cont)
+
+    result = {
+        "lst_tile_url": lst_map_id["tile_fetcher"].url_format,
+        "lst_thumb_url": lst_median.getThumbURL({**lst_vis_cont, "region": aoi.bounds(), "dimensions": 800, "format": "png"}),
+        "ndbi_tile_url": ndbi_map_id["tile_fetcher"].url_format,
+        "ndbi_thumb_url": ndbi_median.getThumbURL({**ndbi_vis_cont, "region": aoi.bounds(), "dimensions": 800, "format": "png"}),
+        "center": center,
+        "bbox": bounds,
+        "district": aoi_config.get("district", aoi_config.get("name", "Custom AOI")),
+    }
+    with _lock:
+        _cache[cache_key] = result
+    return result
+
+
+def compute_uhi_stats(aoi_config: dict, start_date: str, end_date: str, grid_size: int = 6) -> dict:
+    cache_key = ("uhi_stats", json.dumps(aoi_config, sort_keys=True), start_date, end_date, grid_size)
     with _lock:
         if cache_key in _cache:
             return _cache[cache_key]
 
-    grid_size = max(3, min(grid_size, 12))
-    n_classes = max(4, min(n_classes, 10))
+    aoi, lst_median, ndbi_median, stats_fc = _build_uhi_base(aoi_config, start_date, end_date, grid_size)
+    features = stats_fc.getInfo()["features"]
+    
+    rows = []
+    for f in features:
+        props = f["properties"]
+        if props.get("LST") is not None and props.get("NDBI") is not None:
+            rows.append({"LST": props.get("LST"), "NDBI": props.get("NDBI")})
+            
+    df = pd.DataFrame(rows)
+    
+    result = {
+        "lst_stats": {"Mean (°C)": round(df["LST"].mean(), 2) if len(df) else None,
+                      "Min (°C)": round(df["LST"].min(), 2) if len(df) else None,
+                      "Max (°C)": round(df["LST"].max(), 2) if len(df) else None},
+        "ndbi_stats": {"Mean": round(df["NDBI"].mean(), 4) if len(df) else None,
+                       "Min": round(df["NDBI"].min(), 4) if len(df) else None,
+                       "Max": round(df["NDBI"].max(), 4) if len(df) else None},
+        "n_cells_with_data": int(len(df)),
+    }
+    with _lock:
+        _cache[cache_key] = result
+    return result
 
-    bivar_labels = [f"Class {i+1}" for i in range(n_classes)]
+def compute_uhi_classify(aoi_config: dict, start_date: str, end_date: str, grid_size: int = 6, n_classes: int = 5, method: str = "natural_breaks", custom_labels: list = None) -> dict:
+    cache_key = ("uhi_classify", json.dumps(aoi_config, sort_keys=True), start_date, end_date, grid_size, n_classes, method, tuple(custom_labels) if custom_labels else None)
+    with _lock:
+        if cache_key in _cache:
+            return _cache[cache_key]
+
+    aoi, lst_median, ndbi_median, stats_fc = _build_uhi_base(aoi_config, start_date, end_date, grid_size)
+    
+    n_classes = max(4, min(n_classes, 10))
+    bivar_labels = custom_labels if custom_labels and len(custom_labels) == n_classes else [f"Class {i+1}" for i in range(n_classes)]
+    
     bivar_colors = {}
     for i, y_lbl in enumerate(bivar_labels):
         for j, x_lbl in enumerate(bivar_labels):
@@ -77,35 +164,8 @@ def compute_uhi(aoi_config: dict, start_date: str, end_date: str, grid_size: int
             c_y1 = [ (1 - wx) * _c_hl[k] + wx * _c_hh[k] for k in range(3) ]
             c = [ int((1 - wy) * c_y0[k] + wy * c_y1[k]) for k in range(3) ]
             bivar_colors[(y_lbl, x_lbl)] = f"#{c[0]:02x}{c[1]:02x}{c[2]:02x}"
-    lst_median_raw, aoi = lst_image_and_aoi(aoi_config, start_date, end_date)
-    lst_median = lst_median_raw.select("LST")
-    ndbi_median_raw, _ = ndbi_image_and_aoi(aoi_config, start_date, end_date)
-    ndbi_median = ndbi_median_raw.select("NDBI")
-
-    grid_fc = _grid_cells(aoi, grid_size)
-    combined = lst_median.rename("LST").addBands(ndbi_median.rename("NDBI"))
-    stats_fc = combined.reduceRegions(collection=grid_fc, reducer=ee.Reducer.mean(), scale=get_dynamic_scale(aoi))
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-        f_lst_pct = executor.submit(
-            lambda: lst_median.reduceRegion(reducer=ee.Reducer.percentile([2, 98]), geometry=aoi, scale=get_dynamic_scale(aoi), maxPixels=1e10).getInfo()
-        )
-        f_ndbi_pct = executor.submit(
-            lambda: ndbi_median.reduceRegion(reducer=ee.Reducer.percentile([2, 98]), geometry=aoi, scale=get_dynamic_scale(aoi), maxPixels=1e10).getInfo()
-        )
-        f_stats = executor.submit(
-            lambda: stats_fc.getInfo()["features"]
-        )
-        f_bounds = executor.submit(
-            lambda: aoi.bounds().getInfo()["coordinates"][0]
-        )
-
-        lst_pct = f_lst_pct.result()
-        ndbi_pct = f_ndbi_pct.result()
-        features = f_stats.result()
-        bounds = f_bounds.result()
-
-    # Removed map ID generation here
+            
+    features = stats_fc.getInfo()["features"]
 
     rows = []
     for f in features:
@@ -151,11 +211,21 @@ def compute_uhi(aoi_config: dict, start_date: str, end_date: str, grid_size: int
                 if cl: breaks.append(max(cl))
             return sorted(list(set(breaks)))
 
-        def classify_jenks(series, labels=bivar_labels):
+        def classify_1d(series, labels=bivar_labels, classification_method=method):
             valid_vals = series.dropna().tolist()
             if len(valid_vals) < len(labels):
                 res = pd.qcut(series, q=len(labels), labels=labels, retbins=True, duplicates="drop")
                 return res[0], res[1].tolist()
+            
+            if classification_method == "quantiles":
+                res = pd.qcut(series, q=len(labels), labels=labels, retbins=True, duplicates="drop")
+                if len(res[1]) - 1 == len(labels):
+                    return res[0], res[1].tolist()
+            elif classification_method == "equal_interval":
+                res = pd.cut(series, bins=len(labels), labels=labels, include_lowest=True, retbins=True)
+                return res[0], res[1].tolist()
+
+            # Default to Natural Breaks (Jenks)
             breaks = get_jenks_breaks_1d(valid_vals, len(labels))
             bins = [-float("inf")] + breaks + [float("inf")]
             bins = sorted(list(set(bins)))
@@ -163,13 +233,12 @@ def compute_uhi(aoi_config: dict, start_date: str, end_date: str, grid_size: int
                 res = pd.cut(series, bins=bins, labels=labels, include_lowest=True, retbins=True)
                 return res[0], res[1].tolist()
             else:
-                # Fallback to qcut if unique values are too few to form distinct clusters
                 res = pd.qcut(series, q=len(labels), labels=labels[:len(bins)-1], retbins=True, duplicates="drop")
                 return res[0], res[1].tolist()
 
         try:
-            has_data["LST_class"], lst_bins = classify_jenks(has_data["LST"])
-            has_data["NDBI_class"], ndbi_bins = classify_jenks(has_data["NDBI"])
+            has_data["LST_class"], lst_bins = classify_1d(has_data["LST"])
+            has_data["NDBI_class"], ndbi_bins = classify_1d(has_data["NDBI"])
         except Exception:
             has_data["LST_class"] = bivar_labels[n_classes // 2]
             has_data["NDBI_class"] = bivar_labels[n_classes // 2]
@@ -188,7 +257,24 @@ def compute_uhi(aoi_config: dict, start_date: str, end_date: str, grid_size: int
         bivariate_png_b64 = _render_bivariate_map(has_data, no_data, aoi, aoi_config, bivar_colors, bivar_labels)
         scatter_png_b64 = _render_scatter(has_data, slope, intercept, r, p, n)
 
-    center = [(bounds[0][1] + bounds[2][1]) / 2, (bounds[0][0] + bounds[2][0]) / 2]
+    result = {
+        "n_cells_total": int(len(df)), "n_cells_with_data": int(len(has_data)), "n_cells_no_data": int(len(no_data)),
+        "regression": regression,
+        "bivariate_png": bivariate_png_b64,
+        "scatter_png": scatter_png_b64,
+        "grid_table": has_data[["grid_id", "LST", "NDBI"]].round(3).to_dict("records") if len(has_data) else [],
+    }
+    with _lock:
+        _cache[cache_key] = result
+    return result
+
+def compute_uhi_export(aoi_config: dict, start_date: str, end_date: str, grid_size: int = 6) -> dict:
+    cache_key = ("uhi_export", json.dumps(aoi_config, sort_keys=True), start_date, end_date, grid_size)
+    with _lock:
+        if cache_key in _cache:
+            return _cache[cache_key]
+
+    aoi, lst_median, ndbi_median, _ = _build_uhi_base(aoi_config, start_date, end_date, grid_size)
 
     def safe_download(img, params):
         try:
@@ -196,72 +282,9 @@ def compute_uhi(aoi_config: dict, start_date: str, end_date: str, grid_size: int
         except Exception:
             return None
 
-    def get_interpolated_palette(hex_colors, n):
-        import matplotlib.colors as mcolors
-        cmap = mcolors.LinearSegmentedColormap.from_list("c", hex_colors)
-        return [mcolors.to_hex(cmap(i / max(1, n - 1))) for i in range(n)]
-
-    def make_discrete_image(img, band, bins):
-        if len(bins) < 2: return img.select(band)
-        expr = ""
-        for i in range(1, len(bins) - 1):
-            expr += f"b('{band}') <= {bins[i]} ? {i} : "
-        expr += str(len(bins) - 1)
-        return img.expression(expr).rename(band).toInt().updateMask(img.select(band).mask()).clip(aoi)
-
-    lst_vis_cont = {"min": lst_pct.get("LST_p2", 15), "max": lst_pct.get("LST_p98", 40),
-               "palette": ["#313695", "#74add1", "#fee090", "#f46d43", "#a50026"]}
-    ndbi_vis_cont = {"min": ndbi_pct.get("NDBI_p2", -0.3), "max": ndbi_pct.get("NDBI_p98", 0.3),
-                "palette": ["#1a9850", "#d9ef8b", "#fee08b", "#f46d43", "#a50026"]}
-
-    lst_map_id_cont = lst_median.getMapId(lst_vis_cont)
-    ndbi_map_id_cont = ndbi_median.getMapId(ndbi_vis_cont)
-
-    if lst_bins and len(lst_bins) > 2:
-        lst_median_render = make_discrete_image(lst_median, "LST", lst_bins)
-        lst_vis = {"min": 1, "max": len(lst_bins) - 1, "palette": get_interpolated_palette(["#313695", "#74add1", "#fee090", "#f46d43", "#a50026"], len(lst_bins) - 1)}
-    else:
-        lst_median_render = lst_median
-        lst_vis = lst_vis_cont
-
-    if ndbi_bins and len(ndbi_bins) > 2:
-        ndbi_median_render = make_discrete_image(ndbi_median, "NDBI", ndbi_bins)
-        ndbi_vis = {"min": 1, "max": len(ndbi_bins) - 1, "palette": get_interpolated_palette(["#1a9850", "#d9ef8b", "#fee08b", "#f46d43", "#a50026"], len(ndbi_bins) - 1)}
-    else:
-        ndbi_median_render = ndbi_median
-        ndbi_vis = ndbi_vis_cont
-
-    def get_qualitative_labels(n):
-        if n == 4: return ["Low", "Medium-Low", "Medium-High", "High"]
-        if n == 5: return ["Low", "Moderate", "Medium", "High", "Very High"]
-        if n == 6: return ["Very Low", "Low", "Moderate", "Medium", "High", "Very High"]
-        if n == 7: return ["Very Low", "Low", "Moderate", "Medium", "Medium-High", "High", "Very High"]
-        return [f"Class {i+1}" for i in range(n)]
-
-    dummy_class_areas = {lbl: 0 for lbl in get_qualitative_labels(n_classes)}
-
     result = {
-        "district": aoi_config.get("district", aoi_config.get("name", "Custom AOI")),
-        "bbox": bounds, "start_date": start_date, "end_date": end_date,
-        "grid_size": grid_size, "center": center,
-        "class_areas_km2": dummy_class_areas,
-        "lst_tile_url": lst_map_id_cont["tile_fetcher"].url_format,
-        "lst_thumb_url": lst_median_render.getThumbURL({**lst_vis, "region": aoi.bounds(), "dimensions": 800, "format": "png"}),
         "lst_download_url": safe_download(lst_median, {"region": aoi.bounds(), "scale": get_dynamic_scale(aoi), "format": "GEO_TIFF", "crs": "EPSG:4326", "maxPixels": 1e10}),
-        "ndbi_tile_url": ndbi_map_id_cont["tile_fetcher"].url_format,
-        "ndbi_thumb_url": ndbi_median_render.getThumbURL({**ndbi_vis, "region": aoi.bounds(), "dimensions": 800, "format": "png"}),
         "ndbi_download_url": safe_download(ndbi_median, {"region": aoi.bounds(), "scale": get_dynamic_scale(aoi), "format": "GEO_TIFF", "crs": "EPSG:4326", "maxPixels": 1e10}),
-        "lst_stats": {"Mean (°C)": round(has_data["LST"].mean(), 2) if len(has_data) else None,
-                      "Min (°C)": round(has_data["LST"].min(), 2) if len(has_data) else None,
-                      "Max (°C)": round(has_data["LST"].max(), 2) if len(has_data) else None},
-        "ndbi_stats": {"Mean": round(has_data["NDBI"].mean(), 4) if len(has_data) else None,
-                       "Min": round(has_data["NDBI"].min(), 4) if len(has_data) else None,
-                       "Max": round(has_data["NDBI"].max(), 4) if len(has_data) else None},
-        "n_cells_total": int(len(df)), "n_cells_with_data": int(len(has_data)), "n_cells_no_data": int(len(no_data)),
-        "regression": regression,
-        "bivariate_png": bivariate_png_b64,
-        "scatter_png": scatter_png_b64,
-        "grid_table": has_data[["grid_id", "LST", "NDBI"]].round(3).to_dict("records") if len(has_data) else [],
     }
     with _lock:
         _cache[cache_key] = result
@@ -316,3 +339,187 @@ def _render_scatter(df: pd.DataFrame, slope, intercept, r, p, n) -> str:
     fig.savefig(buf, format="png", dpi=150, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     return base64.b64encode(buf.getvalue()).decode("ascii")
+
+def compute_uhi(aoi_config: dict, start_date: str, end_date: str, grid_size: int = 6, n_classes: int = 5, method: str = "natural_breaks", custom_labels: list = None) -> dict:
+    cache_key = ("uhi_all", json.dumps(aoi_config, sort_keys=True), start_date, end_date, grid_size, n_classes, method, tuple(custom_labels) if custom_labels else None)
+    with _lock:
+        if cache_key in _cache:
+            return _cache[cache_key]
+
+    # Replicate logic from map, stats, classify, export efficiently
+    aoi, lst_median, ndbi_median, stats_fc = _build_uhi_base(aoi_config, start_date, end_date, grid_size)
+    bounds = aoi.bounds().getInfo()["coordinates"][0]
+    center = [(bounds[0][1] + bounds[2][1]) / 2, (bounds[0][0] + bounds[2][0]) / 2]
+
+    # Map part
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        f_lst_pct = executor.submit(
+            lambda: lst_median.reduceRegion(reducer=ee.Reducer.percentile([2, 98]), geometry=aoi, scale=get_dynamic_scale(aoi), maxPixels=1e10).getInfo()
+        )
+        f_ndbi_pct = executor.submit(
+            lambda: ndbi_median.reduceRegion(reducer=ee.Reducer.percentile([2, 98]), geometry=aoi, scale=get_dynamic_scale(aoi), maxPixels=1e10).getInfo()
+        )
+        lst_pct = f_lst_pct.result()
+        ndbi_pct = f_ndbi_pct.result()
+
+    lst_vis_cont = {"min": lst_pct.get("LST_p2", 15), "max": lst_pct.get("LST_p98", 40),
+               "palette": ["#313695", "#74add1", "#fee090", "#f46d43", "#a50026"]}
+    ndbi_vis_cont = {"min": ndbi_pct.get("NDBI_p2", -0.3), "max": ndbi_pct.get("NDBI_p98", 0.3),
+                "palette": ["#1a9850", "#d9ef8b", "#fee08b", "#f46d43", "#a50026"]}
+
+    lst_map_id = lst_median.getMapId(lst_vis_cont)
+    ndbi_map_id = ndbi_median.getMapId(ndbi_vis_cont)
+    
+    lst_tile_url = lst_map_id["tile_fetcher"].url_format
+    ndbi_tile_url = ndbi_map_id["tile_fetcher"].url_format
+    lst_thumb_url = lst_median.getThumbURL({**lst_vis_cont, "region": aoi.bounds(), "dimensions": 800, "format": "png"})
+    ndbi_thumb_url = ndbi_median.getThumbURL({**ndbi_vis_cont, "region": aoi.bounds(), "dimensions": 800, "format": "png"})
+
+    # Export part
+    def safe_download(img, params):
+        try:
+            return img.getDownloadURL(params)
+        except Exception:
+            return None
+
+    lst_download_url = safe_download(lst_median, {"region": aoi.bounds(), "scale": get_dynamic_scale(aoi), "format": "GEO_TIFF", "crs": "EPSG:4326", "maxPixels": 1e10})
+    ndbi_download_url = safe_download(ndbi_median, {"region": aoi.bounds(), "scale": get_dynamic_scale(aoi), "format": "GEO_TIFF", "crs": "EPSG:4326", "maxPixels": 1e10})
+
+    # Stats and Classify part
+    features = stats_fc.getInfo()["features"]
+    
+    n_classes = max(4, min(n_classes, 10))
+    bivar_labels = custom_labels if custom_labels and len(custom_labels) == n_classes else [f"Class {i+1}" for i in range(n_classes)]
+    
+    bivar_colors = {}
+    for i, y_lbl in enumerate(bivar_labels):
+        for j, x_lbl in enumerate(bivar_labels):
+            wy = i / (n_classes - 1)
+            wx = j / (n_classes - 1)
+            c_y0 = [ (1 - wx) * _c_ll[k] + wx * _c_lh[k] for k in range(3) ]
+            c_y1 = [ (1 - wx) * _c_hl[k] + wx * _c_hh[k] for k in range(3) ]
+            c = [ int((1 - wy) * c_y0[k] + wy * c_y1[k]) for k in range(3) ]
+            bivar_colors[(y_lbl, x_lbl)] = f"#{c[0]:02x}{c[1]:02x}{c[2]:02x}"
+            
+    rows = []
+    for f in features:
+        props = f["properties"]
+        geom = f.get("geometry")
+        if props.get("LST") is not None and props.get("NDBI") is not None:
+            rows.append({"grid_id": props.get("grid_id"), "LST": props.get("LST"), "NDBI": props.get("NDBI"),
+                         "geometry": shapely_shape(geom) if geom and geom.get("coordinates") else None})
+    df = pd.DataFrame(rows)
+    df = df[df["geometry"].apply(lambda g: g is not None and not g.is_empty)] if not df.empty else df
+
+    has_data = df.dropna(subset=["LST", "NDBI"]).copy() if not df.empty else df
+    no_data = df[df["LST"].isna() | df["NDBI"].isna()].copy() if not df.empty else df
+
+    lst_stats = {"Mean (°C)": round(has_data["LST"].mean(), 2) if len(has_data) else None,
+                 "Min (°C)": round(has_data["LST"].min(), 2) if len(has_data) else None,
+                 "Max (°C)": round(has_data["LST"].max(), 2) if len(has_data) else None}
+    ndbi_stats = {"Mean": round(has_data["NDBI"].mean(), 4) if len(has_data) else None,
+                  "Min": round(has_data["NDBI"].min(), 4) if len(has_data) else None,
+                  "Max": round(has_data["NDBI"].max(), 4) if len(has_data) else None}
+
+    regression = None
+    bivariate_png_b64 = ""
+    scatter_png_b64 = ""
+
+    if len(has_data) >= 4:
+        def get_jenks_breaks_1d(values, n_classes=3):
+            import random
+            vals = sorted(list(values))
+            if len(vals) <= n_classes: return vals
+            centroids = [vals[int(i * len(vals) / n_classes)] for i in range(n_classes)]
+            for _ in range(30):
+                clusters = [[] for _ in range(n_classes)]
+                cluster_sums = [0.0] * n_classes
+                for val in vals:
+                    distances = [abs(val - c) for c in centroids]
+                    min_dist_idx = distances.index(min(distances))
+                    clusters[min_dist_idx].append(val)
+                    cluster_sums[min_dist_idx] += val
+                new_centroids = []
+                for i, cl in enumerate(clusters):
+                    if len(cl) > 0:
+                        new_centroids.append(cluster_sums[i] / len(cl))
+                    else:
+                        new_centroids.append(random.choice(vals))
+                new_centroids.sort()
+                if centroids == new_centroids: break
+                centroids = new_centroids
+            breaks = []
+            for cl in clusters[:-1]:
+                if cl: breaks.append(max(cl))
+            return sorted(list(set(breaks)))
+
+        def classify_1d(series, labels=bivar_labels, classification_method=method):
+            valid_vals = series.dropna().tolist()
+            if len(valid_vals) < len(labels):
+                res = pd.qcut(series, q=len(labels), labels=labels, retbins=True, duplicates="drop")
+                return res[0], res[1].tolist()
+            
+            if classification_method == "quantiles":
+                res = pd.qcut(series, q=len(labels), labels=labels, retbins=True, duplicates="drop")
+                if len(res[1]) - 1 == len(labels):
+                    return res[0], res[1].tolist()
+            elif classification_method == "equal_interval":
+                res = pd.cut(series, bins=len(labels), labels=labels, include_lowest=True, retbins=True)
+                return res[0], res[1].tolist()
+
+            # Default to Natural Breaks (Jenks)
+            breaks = get_jenks_breaks_1d(valid_vals, len(labels))
+            bins = [-float("inf")] + breaks + [float("inf")]
+            bins = sorted(list(set(bins)))
+            if len(bins) - 1 == len(labels):
+                res = pd.cut(series, bins=bins, labels=labels, include_lowest=True, retbins=True)
+                return res[0], res[1].tolist()
+            else:
+                res = pd.qcut(series, q=len(labels), labels=labels[:len(bins)-1], retbins=True, duplicates="drop")
+                return res[0], res[1].tolist()
+
+        try:
+            has_data["LST_class"], lst_bins = classify_1d(has_data["LST"])
+            has_data["NDBI_class"], ndbi_bins = classify_1d(has_data["NDBI"])
+        except Exception:
+            has_data["LST_class"] = bivar_labels[n_classes // 2]
+            has_data["NDBI_class"] = bivar_labels[n_classes // 2]
+            
+        has_data["bivar_color"] = has_data.apply(
+            lambda r: bivar_colors.get((str(r["LST_class"]), str(r["NDBI_class"])), "#cccccc"), axis=1
+        )
+
+        slope, intercept, r, p, _ = scipy_stats.linregress(has_data["NDBI"], has_data["LST"])
+        n = len(has_data)
+        regression = {"slope": round(float(slope), 4), "intercept": round(float(intercept), 4),
+                      "r2": round(float(r) ** 2, 4), "p_value": float(p), "n": int(n)}
+
+        bivariate_png_b64 = _render_bivariate_map(has_data, no_data, aoi, aoi_config, bivar_colors, bivar_labels)
+        scatter_png_b64 = _render_scatter(has_data, slope, intercept, r, p, n)
+
+    result = {
+        "center": center,
+        "bbox": bounds,
+        "district": aoi_config.get("district", aoi_config.get("name", "Custom AOI")),
+        "start_date": start_date,
+        "end_date": end_date,
+        "lst_tile_url": lst_tile_url,
+        "lst_download_url": lst_download_url,
+        "lst_thumb_url": lst_thumb_url,
+        "ndbi_tile_url": ndbi_tile_url,
+        "ndbi_download_url": ndbi_download_url,
+        "ndbi_thumb_url": ndbi_thumb_url,
+        "lst_stats": lst_stats,
+        "ndbi_stats": ndbi_stats,
+        "n_cells_total": int(len(df)),
+        "n_cells_with_data": int(len(has_data)),
+        "n_cells_no_data": int(len(no_data)),
+        "regression": regression,
+        "bivariate_png": bivariate_png_b64,
+        "scatter_png": scatter_png_b64,
+        "grid_table": has_data[["grid_id", "LST", "NDBI"]].round(3).to_dict("records") if len(has_data) else [],
+    }
+    
+    with _lock:
+        _cache[cache_key] = result
+    return result

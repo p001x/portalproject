@@ -239,18 +239,31 @@ export function BiomassPage() {
   const statsMutation = useMutation({
     mutationFn: async () => api.biomass.stats(getReq()),
   });
+  const classifyMutation = useMutation({ mutationFn: async () => api.biomass.classify(getReq()) });
+  const exportMutation = useMutation({ mutationFn: async () => api.biomass.export(getReq()) });
 
   const runAnalysis = () => {
     mapMutation.mutate();
     statsMutation.mutate();
+    classifyMutation.mutate();
+    exportMutation.mutate();
   };
 
-  const isPending = mapMutation.isPending || statsMutation.isPending;
-  const anyData = mapMutation.data || statsMutation.data;
+  const isPending = mapMutation.isPending || statsMutation.isPending || classifyMutation.isPending || exportMutation.isPending;
   
   const mapData = mapMutation.data;
   const statsData = statsMutation.data;
-  const error = mapMutation.error || statsMutation.error;
+  const classifyData = classifyMutation.data;
+  const exportData = exportMutation.data;
+
+  const anyData = (mapData && statsData && classifyData && exportData) ? {
+    ...mapData,
+    ...statsData,
+    ...classifyData,
+    ...exportData
+  } : null;
+  
+  const error = mapMutation.error || statsMutation.error || classifyMutation.error || exportMutation.error;
 
   return (
     <div className="space-y-6 max-w-[1600px] mx-auto">

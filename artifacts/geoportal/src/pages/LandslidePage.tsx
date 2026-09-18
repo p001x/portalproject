@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useMutation } from "@tanstack/react-query";
 import {
   BarChart,
@@ -9,7 +9,7 @@ import {
   ResponsiveContainer,
   Cell,
 } from "recharts";
-import { Loader2, AlertTriangle, FileText } from "lucide-react";
+import { Loader2, AlertTriangle, FileText , Tag, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
@@ -66,11 +66,45 @@ const FACTOR_LAYERS = [
   { key: "dist_roads", label: "Dist. to Roads" }
 ];
 
+
+const DEFAULT_PRESETS: Record<number, string[]> = {
+  1: ["Uniform / Full Area"],
+  2: ["Low", "High"],
+  3: ["Low", "Moderate", "High"],
+  4: ["Low", "Moderate", "High", "Very High"],
+  5: ["Very Low", "Low", "Moderate", "High", "Very High"],
+  6: ["Very Low", "Low", "Moderate", "High", "Very High", "Extreme"],
+  7: ["Extremely Low", "Very Low", "Low", "Moderate", "High", "Very High", "Extreme"],
+  8: ["Extremely Low", "Very Low", "Low", "Moderately Low", "Moderately High", "High", "Very High", "Extreme"],
+  9: ["Extremely Low", "Very Low", "Low", "Moderately Low", "Moderate", "Moderately High", "High", "Very High", "Extreme"],
+  10: ["Extremely Low", "Very Low", "Low", "Moderately Low", "Moderate", "Moderately High", "High", "Very High", "Extremely High", "Extreme"],
+};
+
+function getDefaultLabels(n: number): string[] {
+  if (DEFAULT_PRESETS[n]) return [...DEFAULT_PRESETS[n]];
+  return Array.from({ length: n }, (_, i) => `Class ${i + 1}`);
+}
+
 export function LandslidePage() {
-  const [aoi, setAoi] = useState<AOIConfig>({ type: "gaul2", country: "Rwanda", name: "Musanze", level1: "North/Amajyaruguru", level2: "Musanze" });
+  const [aoi, setAoi] = useState<AOIConfig>({ type: "rwanda", country: "Rwanda", name: "Rwanda" });
   const [startYear, setStartYear] = useState(2015);
   const [endYear, setEndYear] = useState(2024);
   const [nClasses, setNClasses] = useState(5);
+  const [method, setMethod] = useState("natural_breaks");
+  const [customClassNames, setCustomClassNames] = useState<string[]>(() => getDefaultLabels(5));
+
+  useEffect(() => {
+    setCustomClassNames((prev) => {
+      if (prev.length === nClasses) return prev;
+      const next = getDefaultLabels(nClasses);
+      for (let i = 0; i < Math.min(prev.length, nClasses); i++) {
+        if (!DEFAULT_PRESETS[prev.length]?.includes(prev[i])) {
+          next[i] = prev[i];
+        }
+      }
+      return next;
+    });
+  }, [nClasses]);
   const [activeLayer, setActiveLayer] = useState<string>("continuous");
 
   // Factor reversal states
@@ -138,6 +172,20 @@ export function LandslidePage() {
     return mapData.factor_maps?.[activeLayer]?.tile_url;
   })();
 
+  const activeAreas = useMemo(() => {
+    const rawAreas = classifyData?.panels?.[0]?.class_areas || statsData?.class_areas_km2;
+    if (!rawAreas) return undefined;
+    const mapped: Record<string, number> = {};
+    const keys = Object.keys(rawAreas);
+    keys.forEach((oldKey, i) => {
+      const newKey = customClassNames[i] || oldKey;
+      mapped[newKey] = rawAreas[oldKey];
+    });
+    return mapped;
+  }, [classifyData, statsData, customClassNames]);
+
+
+
   return (
     <ResizablePanelGroup direction="horizontal" className="h-full items-stretch">
       {/* ── Controls sidebar ─────────────────────────────────────── */}
@@ -182,8 +230,26 @@ export function LandslidePage() {
           </Select>
         </div>
 
+        
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">Classification Method</Label>
+          <Select value={method} onValueChange={setMethod}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Select Method" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="natural_breaks">Natural Breaks (Jenks)</SelectItem>
+              <SelectItem value="equal_interval">Discrete (Equal Interval)</SelectItem>
+              <SelectItem value="quantiles">Discrete (Quantiles / Equal Area)</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
         <div className="space-y-2">
-          <Label>Classes: {nClasses}</Label>
+          <div className="flex justify-between items-center">
+            <Label>Classes: {nClasses}</Label>
+            <span className="text-[11px] text-muted-foreground">{nClasses} intervals</span>
+          </div>
           <Slider
             min={2}
             max={10}
@@ -192,6 +258,46 @@ export function LandslidePage() {
             onValueChange={([v]) => setNClasses(v)}
           />
         </div>
+
+        <div className="space-y-3 bg-muted/40 border rounded-lg p-3">
+          <div className="flex items-center justify-between">
+            <Label className="text-xs font-semibold flex items-center gap-1.5 text-foreground">
+              <Tag className="w-3.5 h-3.5 text-primary" />
+              Rename Classes ({nClasses})
+            </Label>
+            <button
+              type="button"
+              onClick={() => setCustomClassNames(getDefaultLabels(nClasses))}
+              className="text-[10px] text-muted-foreground hover:text-primary flex items-center gap-1 transition-colors"
+              title="Reset to default names"
+            >
+              <RotateCcw className="w-3 h-3" /> Reset
+            </button>
+          </div>
+
+          <div className="space-y-1.5 max-h-[200px] overflow-y-auto pr-1">
+            {Array.from({ length: nClasses }).map((_, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <span
+                  className="w-3.5 h-3.5 rounded-xs shrink-0 border border-black/15 shadow-2xs"
+                  style={{ background: SUSCEPTIBILITY_COLORS[i % SUSCEPTIBILITY_COLORS.length] }}
+                />
+                <input
+                  type="text"
+                  value={customClassNames[i] || ""}
+                  placeholder={`Class ${i + 1}`}
+                  onChange={(e) => {
+                    const next = [...customClassNames];
+                    next[i] = e.target.value;
+                    setCustomClassNames(next);
+                  }}
+                  className="flex-1 h-7 text-xs rounded border border-input bg-background px-2 text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+
 
         {/* Factor Reversal Section */}
         <div className="space-y-2.5 pt-2 border-t">

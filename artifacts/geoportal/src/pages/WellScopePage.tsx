@@ -1,16 +1,17 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 
 import { useMutation } from "@tanstack/react-query";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
 } from "recharts";
-import { Loader2, Waves, FileText, Printer, AlertTriangle, Info, Download, Image as ImageIcon , Play} from "lucide-react";
+import { Loader2, Waves, FileText, Printer, AlertTriangle, Info, Download, Image as ImageIcon , Play, Tag, RotateCcw} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
+
   Select,
   SelectContent,
   SelectItem,
@@ -19,8 +20,10 @@ import {
 } from "@/components/ui/select";
 import { api, AOIConfig } from "@/lib/api";
 import { DistrictMap, LegendItem } from "@/components/DistrictMap";
+import { ReportDownloadButton } from "@/components/ReportDownloadButton";
 import { StudyAreaSelector } from "@/components/StudyAreaSelector";
 import { MapExportControls } from "@/components/MapExportControls";
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 
 const PALETTES = [
   { name: "Default (Score Vis)", value: "default" },
@@ -111,16 +114,16 @@ function FactorMapCard({ factorKey, factor, analysisDate }: {
         </p>
       </div>
 
-      <div className="relative border rounded bg-slate-50 aspect-square overflow-hidden group">
+      <div className="relative border rounded bg-muted/20 aspect-square overflow-hidden group">
         <img src={factor.thumb_url} alt={factor.label} className="w-full h-full object-cover transition-transform group-hover:scale-[1.02] duration-300" />
         
         <div className="absolute inset-0 ring-1 ring-inset ring-black/10 rounded pointer-events-none"></div>
 
-        <div className="absolute top-2 right-2 bg-white/90 backdrop-blur shadow-sm p-1.5 rounded text-[10px] uppercase font-bold text-slate-700 tracking-wider">
+        <div className="absolute top-2 right-2 bg-background/90 backdrop-blur shadow-sm p-1.5 rounded text-[10px] uppercase font-bold text-foreground/80 tracking-wider">
           Score Map
         </div>
-        <div className="absolute bottom-2 left-2 bg-white/90 backdrop-blur shadow-sm p-1.5 rounded text-[9px] uppercase font-bold text-slate-600 tracking-wider flex items-center gap-1">
-          <span className="text-slate-400">Scale:</span> 1 : 100,000
+        <div className="absolute bottom-2 left-2 bg-background/90 backdrop-blur shadow-sm p-1.5 rounded text-[9px] uppercase font-bold text-foreground/70 tracking-wider flex items-center gap-1">
+          <span className="text-muted-foreground">Scale:</span> 1 : 100,000
         </div>
         <div className="absolute bottom-2 right-2 drop-shadow-md">
           <SmallNorthArrow />
@@ -164,8 +167,6 @@ function InteractiveFactorMapCard({ factorKey, factor, aoiConfig }: { factorKey:
   };
 
   useEffect(() => {
-    // Optionally fetch immediately on palette change, but let's wait for user to click a button to save API calls
-    // Actually, generating the thumb on palette change is nice for preview!
     if (selectedPalette !== "default") {
       generateExport();
     } else {
@@ -182,10 +183,10 @@ function InteractiveFactorMapCard({ factorKey, factor, aoiConfig }: { factorKey:
         </p>
       </div>
 
-      <div className="relative border rounded bg-slate-50 aspect-square overflow-hidden group flex-1">
+      <div className="relative border rounded bg-muted/20 aspect-square overflow-hidden group flex-1">
         {loading ? (
-          <div className="absolute inset-0 flex items-center justify-center bg-slate-50/80 backdrop-blur-sm z-10">
-            <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
+          <div className="absolute inset-0 flex items-center justify-center bg-muted/20/80 backdrop-blur-sm z-10">
+            <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
           </div>
         ) : null}
         <img src={urls.thumb_url} alt={factor.label} className="w-full h-full object-cover transition-transform group-hover:scale-[1.02] duration-300" />
@@ -232,8 +233,7 @@ function InteractiveFactorMapCard({ factorKey, factor, aoiConfig }: { factorKey:
               if (urls.download_url) {
                 window.open(urls.download_url, '_blank');
               } else {
-                await generateExport(); // This sets urls
-                // Need to use state after it updates, so we cheat a little by using the API again or waiting
+                await generateExport();
                 const paletteParam = selectedPalette === "default" ? undefined : selectedPalette.split(",");
                 api.wellscope.factorExport({
                   aoi: aoiConfig,
@@ -411,7 +411,7 @@ function printReport(data: any, analysisDate: string) {
     ${matrixRows}
   </table>
 
-  <div style="background:#f4f4f4;padding:12px 16px;border-radius:6px;margin-top:12px">
+  <div style="background:#f4f4f4; color: #111;padding:12px 16px;border-radius:6px;margin-top:12px">
     <p style="margin:0 0 6px"><strong>Consistency Analysis</strong></p>
     <ul style="margin:0;padding-left:20px;font-size:12px">
       <li>Principal Eigenvalue (λ_max) = ${data.ahp_data.lambda_max.toFixed(3)}</li>
@@ -444,13 +444,29 @@ function printReport(data: any, analysisDate: string) {
   window.open(url, "_blank");
 }
 
-export function WellScopePage() {
+  export function WellScopePage() {
   const [aoi, setAoi] = useState<AOIConfig>({ type: "rwanda", country: "Rwanda", province: "Kigali City", name: "Gasabo" });
   const [activeTab, setActiveTab] = useState("map");
 
   const effectiveDistrictName = aoi.name || "Custom Study Area";
   
   const [weights, setWeights] = useState<Record<FactorKey, number>>(() => loadWeights(effectiveDistrictName));
+
+  const [nClasses, setNClasses] = useState(5);
+  const [method, setMethod] = useState("natural_breaks");
+  const [layerMode, setLayerMode] = useState<"classified" | "continuous">("classified");
+  const getDefaultLabels = (n: number) => n === 5 && method !== "continuous" 
+    ? ["Very Low", "Low", "Moderate", "High", "Very High"] 
+    : Array.from({ length: n }, (_, i) => `Class ${i + 1}`);
+  const [customClassNames, setCustomClassNames] = useState<string[]>(() => ["Very Low", "Low", "Moderate", "High", "Very High"]);
+
+  // Sync custom labels length when nClasses changes
+  useEffect(() => {
+    setCustomClassNames(prev => {
+      const def = getDefaultLabels(nClasses);
+      return Array.from({ length: nClasses }, (_, i) => prev[i] || def[i]);
+    });
+  }, [nClasses, method]);
 
   useEffect(() => {
     setWeights(loadWeights(effectiveDistrictName));
@@ -467,343 +483,392 @@ export function WellScopePage() {
   const totalWeight = Object.values(weights).reduce((a, b) => a + b, 0);
   const normalizedWeights = normalize(weights);
 
-  const getReq = () => ({ aoi, custom_weights: normalizedWeights });
+  const getReq = () => ({ 
+    aoi, 
+    custom_weights: normalizedWeights,
+    n_classes: nClasses,
+    method,
+    custom_labels: customClassNames 
+  });
 
-  const mapMutation = useMutation({ mutationFn: async () => api.wellscope.map(getReq()), onSuccess: () => setActiveTab("map") });
+  const mapMutation = useMutation({ 
+    mutationFn: async () => api.wellscope.map(getReq()), 
+    onSuccess: () => {
+      setActiveTab("map");
+      if (method === "continuous") {
+        setLayerMode("continuous");
+      } else {
+        setLayerMode("classified");
+      }
+    } 
+  });
   const statsMutation = useMutation({ mutationFn: async () => api.wellscope.stats(getReq()) });
+  const classifyMutation = useMutation({ mutationFn: async () => api.wellscope.classify(getReq()) });
+  const exportMutation = useMutation({ mutationFn: async () => api.wellscope.export(getReq()) });
 
   const runAnalysis = () => {
     mapMutation.mutate();
     statsMutation.mutate();
+    classifyMutation.mutate();
+    exportMutation.mutate();
   };
 
-  const isPending = mapMutation.isPending || statsMutation.isPending;
-  const anyData = mapMutation.data || statsMutation.data;
+  const isPending = mapMutation.isPending || statsMutation.isPending || classifyMutation.isPending || exportMutation.isPending;
   
   const mapData = mapMutation.data;
   const statsData = statsMutation.data;
+  const classifyData = classifyMutation.data;
+  const exportData = exportMutation.data;
+
+  const anyData = (mapData && statsData && classifyData && exportData) ? {
+    ...mapData,
+    ...statsData,
+    ...classifyData,
+    ...exportData
+  } : null;
   
-  const error = mapMutation.error || statsMutation.error;
-  
-  const handlePrint = () => {
-    if (!mapData || !statsData) return;
-    const fullData = { ...mapData, ...statsData, district: effectiveDistrictName };
-    printReport(fullData, new Date().toLocaleDateString());
-  };
+  const error = mapMutation.error || statsMutation.error || classifyMutation.error || exportMutation.error;
+
+  const isContinuous = layerMode === "continuous";
+  const rawAreas = (!isContinuous && statsData?.classified_areas_km2)
+    ? statsData.classified_areas_km2
+    : (statsData?.class_areas_km2 || {});
+
+  const activeAreas = useMemo(() => {
+    const entries = Object.entries(rawAreas);
+    if (entries.length === 0 || isContinuous) return rawAreas;
+    
+    const mapped: Record<string, number> = {};
+    entries.forEach(([origKey, val], idx) => {
+      const customName = customClassNames[idx] || origKey;
+      mapped[`${customName}`] = val;
+    });
+    return mapped;
+  }, [rawAreas, customClassNames, isContinuous]);
+
+  const activeTileUrl = (!isContinuous && mapData?.classify?.panels?.[0]?.tile_url) 
+    ? mapData.classify.panels[0].tile_url 
+    : mapData?.tile_url;
 
   return (
-    <div className="space-y-6 max-w-[1600px] mx-auto">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">WellScope: Groundwater Potential Suitability</h1>
-          <p className="text-muted-foreground mt-2 max-w-3xl">
-            A 7-factor weighted overlay screening tool to evaluate groundwater potential. 
-            <strong> Pre-screening only: does not guarantee water presence or yield.</strong>
+    <ResizablePanelGroup direction="horizontal" className="h-[calc(100vh-80px)] items-stretch">
+      <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
+        <aside className="h-full w-full md:border-b md:border-b-0 md:border-r bg-card flex flex-col p-5 md:overflow-y-auto">
+          <div className="flex items-center gap-2 text-primary font-semibold text-lg mb-2">
+            <Waves className="w-5 h-5 text-blue-500" />
+            WellScope
+          </div>
+          <p className="text-xs text-muted-foreground leading-relaxed mb-4">
+            A 7-factor weighted overlay screening tool to evaluate groundwater potential.
           </p>
-        </div>
-      </div>
-
-      <div className="bg-amber-50 border border-amber-200 text-amber-800 p-4 rounded-lg flex gap-3 items-start">
-        <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5 text-amber-600" />
-        <div className="text-sm">
-          <p className="font-semibold mb-1">Pre-screening Tool Only</p>
-          <p>
-            WellScope predicts relative groundwater potential based on satellite-derived surface factors (Rainfall, Lithology, Slope, TWI, Drainage Density, Surface Water Proximity, and LULC). 
-            It is <strong>not a substitute for a formal geophysical survey (e.g., VES)</strong> prior to drilling, and does not guarantee depth to water or yield. 
-          </p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        <div className="lg:col-span-1">
-          <div className="bg-card border rounded-lg shadow-sm flex flex-col h-[calc(100vh-210px)] sticky top-20">
-            <h3 className="font-semibold text-lg flex items-center border-b p-5 shrink-0 gap-2">
-              <Waves className="w-5 h-5 text-blue-500" />
-              Configuration
-            </h3>
-            
-            <ScrollArea className="flex-1 px-5 py-4">
-              <div className="space-y-8">
-                <div className="space-y-3">
-                  <StudyAreaSelector value={aoi} onChange={setAoi} />
-                  <p className="text-xs text-muted-foreground">Select a district or draw an area to screen for groundwater potential.</p>
-                </div>
-
-                <div className="space-y-4 pt-2 border-t">
-                  <div>
-                    <h4 className="font-medium text-sm">AHP Factor Weights</h4>
-                    <p className="text-xs text-muted-foreground mt-1 mb-4">Adjust relative importance of each criterion. Weights are auto-normalized to 100%.</p>
-                  </div>
-                  
-                  {FACTOR_KEYS.map((k) => {
-                    const normPct = normalizedWeights[k];
-                    return (
-                      <div key={k} className="space-y-2 bg-slate-50/50 p-2.5 rounded-md border border-slate-100">
-                        <div className="flex justify-between items-center">
-                          <Label className="text-sm font-medium">{FACTOR_LABELS[k]}</Label>
-                          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800">
-                            {normPct.toFixed(1)}%
-                          </span>
-                        </div>
-                        <Slider
-                          value={[weights[k]]}
-                          min={0}
-                          max={100}
-                          step={1}
-                          onValueChange={(v) => handleWeightChange(k, v)}
-                          className="py-1"
-                        />
-                      </div>
-                    );
-                  })}
-                  
-                  <div className={"flex justify-between items-center text-xs font-semibold p-2 rounded " + (totalWeight === 100 ? "bg-green-50 text-green-700" : "bg-amber-50 text-amber-700")}>
-                    <span>Raw Sum: {totalWeight}</span>
-                    <span>{totalWeight !== 100 && "(Auto-normalized)"}</span>
-                  </div>
-                  <Button variant="outline" size="sm" className="w-full text-xs h-8" onClick={() => setWeights({ ...DEFAULT_WEIGHTS })}>
-                    Reset to Defaults
-                  </Button>
-                </div>
-              </div>
-            </ScrollArea>
-
-            <div className="p-5 border-t shrink-0">
-              <Button onClick={runAnalysis} disabled={isPending} className="w-full h-11 text-base">
-                {isPending && <Loader2 className="mr-2 h-5 w-5 animate-spin" />}
-                {isPending ? "Calculating..." : "Run Suitability Model"}
-              </Button>
+          <div className="bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 p-3 rounded-lg flex gap-2 items-start mb-6 text-xs">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold mb-1">Pre-screening Tool Only</p>
+              <p>Does not guarantee depth to water or yield. Not a substitute for a formal geophysical survey.</p>
             </div>
           </div>
-        </div>
 
-        <div className="lg:col-span-3 flex flex-col h-[calc(100vh-210px)] sticky top-20">
+          <div className="space-y-6 flex-1">
+            <div className="space-y-3">
+              <StudyAreaSelector value={aoi} onChange={setAoi} />
+              <p className="text-xs text-muted-foreground">Select a district or draw an area to screen for groundwater potential.</p>
+            </div>
+
+            <div className="space-y-4 pt-2 border-t border-border">
+              <div>
+                <h4 className="font-medium text-sm">AHP Factor Weights</h4>
+                <p className="text-xs text-muted-foreground mt-1 mb-4">Adjust relative importance of each criterion. Weights are auto-normalized to 100%.</p>
+              </div>
+              
+              {FACTOR_KEYS.map((k) => {
+                const normPct = normalizedWeights[k];
+                return (
+                  <div key={k} className="space-y-2 bg-muted/40 p-2.5 rounded-md border border-border/50">
+                    <div className="flex justify-between items-center">
+                      <Label className="text-sm font-medium">{FACTOR_LABELS[k]}</Label>
+                      <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                        {normPct.toFixed(1)}%
+                      </span>
+                    </div>
+                    <Slider
+                      value={[weights[k]]}
+                      min={0}
+                      max={100}
+                      step={1}
+                      onValueChange={(v) => handleWeightChange(k, v)}
+                      className="py-1"
+                    />
+                  </div>
+                );
+              })}
+              
+              <div className={"flex justify-between items-center text-xs font-semibold p-2 rounded " + (totalWeight === 100 ? "bg-emerald-500/10 text-emerald-600" : "bg-amber-500/10 text-amber-600")}>
+                <span>Raw Sum: {totalWeight}</span>
+                <span>{totalWeight !== 100 && "(Auto-normalized)"}</span>
+              </div>
+              <Button variant="outline" size="sm" className="w-full text-xs h-8" onClick={() => setWeights({ ...DEFAULT_WEIGHTS })}>
+                Reset to Defaults
+              </Button>
+
+              <div className="space-y-1 mt-6 border-t border-border pt-4">
+                <Label className="font-medium text-sm">Classification Method</Label>
+                <Select 
+                  value={method} 
+                  onValueChange={(val) => {
+                    setMethod(val);
+                    if (val === "continuous") {
+                      setLayerMode("continuous");
+                    } else {
+                      setLayerMode("classified");
+                    }
+                  }}
+                >
+                  <SelectTrigger className="w-full text-xs h-9">
+                    <SelectValue placeholder="Select Method" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="natural_breaks">Natural Breaks (Jenks)</SelectItem>
+                    <SelectItem value="equal_interval">Discrete (Equal Interval)</SelectItem>
+                    <SelectItem value="quantiles">Discrete (Quantiles / Equal Area)</SelectItem>
+                    <SelectItem value="continuous">Continuous (Smooth Gradient)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {!isContinuous && (
+                <>
+                  <div className="space-y-2 mt-4">
+                    <div className="flex justify-between items-center">
+                    <Label className="text-sm font-medium">Classes: {nClasses}</Label>
+                    <span className="text-[11px] text-muted-foreground">{nClasses} intervals</span>
+                  </div>
+                  <Slider
+                    min={1}
+                    max={15}
+                    step={1}
+                    value={[nClasses]}
+                    onValueChange={([v]) => setNClasses(v)}
+                    className="py-1"
+                  />
+                </div>
+
+                <div className="space-y-3 bg-muted/40 border rounded-lg p-3 mt-4">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-semibold flex items-center gap-1.5 text-foreground">
+                      <Tag className="w-3.5 h-3.5 text-primary" />
+                      Rename Classes ({nClasses})
+                    </Label>
+                    <button
+                      type="button"
+                      onClick={() => setCustomClassNames(getDefaultLabels(nClasses))}
+                      className="text-[10px] text-muted-foreground hover:text-primary flex items-center gap-1 transition-colors"
+                      title="Reset to default names"
+                    >
+                      <RotateCcw className="w-3 h-3" /> Reset
+                    </button>
+                  </div>
+
+                  {Array.from({ length: nClasses }).map((_, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <div className="w-4 h-4 rounded-full flex-shrink-0" style={{ background: CLASS_COLOR_LIST[i % CLASS_COLOR_LIST.length] }} />
+                      <input
+                        type="text"
+                        value={customClassNames[i] || ""}
+                        onChange={(e) => {
+                          const updated = [...customClassNames];
+                          updated[i] = e.target.value;
+                          setCustomClassNames(updated);
+                        }}
+                        className="flex-1 text-xs px-2 py-1 bg-background border rounded-md focus:outline-none focus:ring-1 focus:ring-primary"
+                        placeholder={`Class ${i + 1}`}
+                      />
+                    </div>
+                  ))}
+                </div>
+                </>
+              )}
+            </div>
+          </div>
+
+          <Button onClick={runAnalysis} disabled={isPending} className="w-full gap-2 mt-4 shrink-0">
+            {isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="w-4 h-4" />}
+            {isPending ? "Calculating..." : "Run Suitability Model"}
+          </Button>
+        </aside>
+      </ResizablePanel>
+
+      <ResizableHandle withHandle />
+
+      <ResizablePanel defaultSize={75}>
+        <main className="h-full flex flex-col flex-1 md:overflow-y-auto p-4 md:p-6 bg-background">
           {error ? (
-             <div className="h-full border rounded-lg flex flex-col items-center justify-center bg-red-50 text-red-500 p-6 text-center">
+             <div className="h-full border rounded-lg flex flex-col items-center justify-center bg-destructive/10 text-destructive p-6 text-center">
                <Info className="w-10 h-10 mb-4" />
                <p className="text-lg font-bold">Analysis Failed</p>
                <p className="text-sm mt-2">{error.message}</p>
              </div>
           ) : isPending && !anyData ? (
-            <div className="h-full border rounded-lg flex flex-col items-center justify-center bg-slate-50/50 text-slate-400">
-              <Loader2 className="w-8 h-8 animate-spin mb-4" />
+            <div className="h-full border rounded-lg flex flex-col items-center justify-center bg-muted/20 text-muted-foreground">
+              <Loader2 className="w-8 h-8 animate-spin mb-4 text-primary" />
               <p>Computing weighted overlay suitability...</p>
             </div>
           ) : anyData ? (
             <div className="bg-card border rounded-lg shadow-sm flex flex-col h-full overflow-hidden">
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full flex flex-col h-full">
-                <div className="border-b px-4 py-2 shrink-0 flex items-center justify-between bg-slate-50/50">
+                <div className="border-b px-4 py-2 shrink-0 flex items-center justify-between bg-muted/30">
                   <TabsList>
                     <TabsTrigger value="map">Map</TabsTrigger>
                     <TabsTrigger value="statistics">Statistics</TabsTrigger>
                     <TabsTrigger value="factor-maps">Factor Maps</TabsTrigger>
                     <TabsTrigger value="static-maps">Static Maps</TabsTrigger>
-                    <TabsTrigger value="report">
-                      <FileText className="w-4 h-4 mr-2" />
-                      Report
-                    </TabsTrigger>
+                    <TabsTrigger value="report" className="gap-1.5"><FileText className="w-3.5 h-3.5" />Report</TabsTrigger>
                   </TabsList>
-                  {activeTab === "report" && mapData && (
-                    <Button variant="outline" size="sm" onClick={handlePrint} className="h-8 shadow-sm">
-                      <Printer className="w-4 h-4 mr-2" />
-                      Print / Save PDF
-                    </Button>
+                </div>
+
+                <TabsContent value="map" className="flex-1 p-0 m-0 flex flex-col min-h-0 relative">
+
+                  {mapData ? (
+                    <DistrictMap
+                      tileUrl={activeTileUrl}
+                      center={mapData.center}
+                      bbox={mapData.bbox}
+                      title="Groundwater Suitability"
+                      legend={SUITABILITY_LEGEND}
+                    />
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-muted-foreground">Map not available</div>
                   )}
-                </div>
+                </TabsContent>
 
-                <div className="flex-1 overflow-hidden relative">
-                  <TabsContent value="map" className="h-full w-full m-0 data-[state=active]:flex flex-col">
-                    {mapData ? (
-                      <div className="flex-1 relative bg-slate-100">
-                        <DistrictMap
-                          tileUrl={mapData.tile_url}
-                          center={mapData.center}
-                          bbox={mapData.bbox as unknown as number[][]}
-                          title="Groundwater Potential (0-100)"
-                          legend={SUITABILITY_LEGEND}
-                        />
-                      </div>
-                    ) : (
-          <div className="h-full relative bg-muted/20 border rounded-lg overflow-hidden">
-            <DistrictMap aoi={aoi} basemap="satellite" />
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-4 z-[1000]">
-              <div className="bg-background/80 backdrop-blur-md p-6 rounded-2xl shadow-xl border border-primary/20 text-center max-w-sm pointer-events-none transition-all hover:scale-105 duration-300">
-                <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4 text-primary shadow-inner">
-                  <Map className="w-8 h-8" />
-                </div>
-                <h3 className="text-xl font-bold mb-2 text-foreground">WellScope</h3>
-                <p className="text-sm text-muted-foreground mb-6">
-                  Select a district and parameters from the sidebar, then run the analysis to visualize results here.
-                </p>
-                <Button 
-                  onClick={() => typeof runAnalysis === 'function' ? runAnalysis() : mutate()} 
-                  className="w-full gap-2 rounded-xl shadow-md hover:shadow-lg transition-all"
-                >
-                  <Play className="w-4 h-4 fill-current" />
-                  Run Analysis
-                </Button>
-              </div>
-            </div>
-          </div>
-        )}
-                  </TabsContent>
-
-                  <TabsContent value="statistics" className="h-full w-full m-0 p-6 overflow-y-auto bg-slate-50/50">
-                    <div className="max-w-5xl mx-auto space-y-8">
-                      {statsData && mapData && (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                          <div>
-                            <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                              <div className="w-1.5 h-6 bg-blue-500 rounded-full" />
-                              Area Distribution
-                            </h3>
-                            <div className="space-y-3">
-                              {Object.entries(statsData.class_areas_km2).map(([cls, area]: [string, any], i) => {
-                                const total = Object.values(statsData.class_areas_km2).reduce((a: any, b: any) => a + b, 0) as number;
-                                const pct = total > 0 ? (area / total) * 100 : 0;
-                                return (
-                                  <div key={cls} className="space-y-1.5">
-                                    <div className="flex justify-between text-sm">
-                                      <span className="font-medium text-slate-700">{cls}</span>
-                                      <span className="text-muted-foreground">{area.toFixed(1)} km² ({pct.toFixed(1)}%)</span>
-                                    </div>
-                                    <div className="h-2.5 rounded-full bg-slate-100 overflow-hidden">
-                                      <div 
-                                        className="h-full rounded-full transition-all duration-1000 ease-out" 
-                                        style={{ width: `${pct}%`, backgroundColor: CLASS_COLOR_LIST[i] }} 
-                                      />
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                          <div className="bg-slate-50 rounded-lg p-6 border flex flex-col justify-center">
-                            <p className="text-sm text-slate-600 mb-2">Mean Suitability Index</p>
-                            <div className="text-4xl font-bold text-slate-800">
-                              {statsData.stats["Mean Suitability"]}<span className="text-lg text-slate-400 font-normal ml-1">/ 100</span>
-                            </div>
-                            <div className="mt-4 pt-4 border-t border-slate-200/60">
-                              <div className="flex justify-between text-sm mb-1">
-                                <span className="text-slate-500">Min Score</span>
-                                <span className="font-medium">{statsData.stats["Min Suitability"]}</span>
-                              </div>
-                              <div className="flex justify-between text-sm">
-                                <span className="text-slate-500">Max Score</span>
-                                <span className="font-medium">{statsData.stats["Max Suitability"]}</span>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </TabsContent>
-
-                  <TabsContent value="factor-maps" className="h-full w-full m-0 p-6 overflow-y-auto">
-                    <div className="max-w-7xl mx-auto space-y-4">
+                <TabsContent value="statistics" className="flex-1 p-6 overflow-y-auto m-0 space-y-6">
+                  {statsData ? (
+                    <>
                       <div>
-                        <h3 className="font-semibold text-lg mb-1">Factor Maps</h3>
-                        <p className="text-sm text-muted-foreground">Customize colors and download individual criteria maps.</p>
+                        <h2 className="font-semibold text-lg mb-1">Analysis Results â€” {effectiveDistrictName}</h2>
+                        <p className="text-sm text-muted-foreground">Overall groundwater suitability distribution.</p>
                       </div>
-                      {mapData?.factor_maps ? (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pt-4 border-t">
-                          {Object.entries(mapData.factor_maps).map(([key, f]: [string, any]) => (
-                            <InteractiveFactorMapCard 
-                              key={key} 
-                              factorKey={key} 
-                              factor={f} 
-                              aoiConfig={aoi}
-                            />
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="pt-8 text-center text-muted-foreground flex flex-col items-center">
-                          <Info className="w-8 h-8 mb-2 opacity-50" />
-                          <p>Please run the Suitability Model first to view factor maps.</p>
-                        </div>
-                      )}
-                    </div>
-                  </TabsContent>
 
-                  <TabsContent value="static-maps" className="h-full w-full m-0 p-6 overflow-y-auto">
-                    <div className="max-w-6xl mx-auto space-y-4">
-                      <div>
-                        <h2 className="font-semibold text-lg mb-1">Professional Cartography</h2>
-                        <p className="text-sm text-muted-foreground">High-quality static maps ready for presentation.</p>
-                      </div>
-                      {mapData ? (
-                        <div className="bg-card border rounded-lg p-4">
-                          <MapExportControls
-                            district={effectiveDistrictName}
-                            title="Groundwater Potential Suitability"
-                            tileUrl={mapData.tile_url}
-                            thumbUrl={mapData.thumb_url}
-                            legend={SUITABILITY_LEGEND}
-                          />
-                        </div>
-                      ) : null}
-                    </div>
-                  </TabsContent>
-
-                  <TabsContent value="report" className="h-full w-full m-0 overflow-y-auto bg-slate-50/50">
-                    <div className="max-w-5xl mx-auto p-8 space-y-10">
-                      <div className="bg-white border rounded-xl p-8 shadow-sm">
-                        <div className="flex items-start justify-between border-b pb-6 mb-8">
-                          <div>
-                            <h2 className="text-2xl font-bold text-slate-800">Groundwater Potential Assessment</h2>
-                            <p className="text-muted-foreground mt-1 flex items-center gap-2">
-                              <span className="font-medium text-foreground">{effectiveDistrictName}</span>
-                              <span className="text-slate-300">•</span>
-                              <span>Analyzed on {new Date().toLocaleDateString()}</span>
-                            </p>
-                          </div>
-                          <div className="text-right">
-                            <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-blue-50 text-blue-600 mb-2 ring-4 ring-blue-50/50">
-                              <Waves className="w-6 h-6" />
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="border rounded-lg p-5 shadow-sm space-y-4 bg-card">
+                          <h3 className="font-medium flex items-center gap-2"><Waves className="w-4 h-4 text-blue-500" />Suitability Area Distribution</h3>
+                          {isContinuous ? (
+                            <div className="text-muted-foreground p-8 text-center border rounded-lg bg-muted/20 mt-4">
+                              <Waves className="w-8 h-8 mx-auto mb-2 opacity-20" />
+                              <p>Continuous maps do not have discrete area statistics.</p>
                             </div>
-                          </div>
+                          ) : (
+                            <ResponsiveContainer width="100%" height={250}>
+                              <BarChart data={Object.entries(activeAreas).map(([k,v], i) => ({ name: k, area: v, classIndex: i }))}>
+                                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                                <YAxis unit=" km²" tick={{ fontSize: 11 }} />
+                                <Tooltip formatter={(v) => [`${v} km²`, 'Area']} />
+                                <Bar dataKey="area" radius={[4, 4, 0, 0]}>
+                                  {Object.keys(activeAreas).map((_, i) => (
+                                    <Cell key={i} fill={CLASS_COLOR_LIST[i % CLASS_COLOR_LIST.length]} />
+                                  ))}
+                                </Bar>
+                              </BarChart>
+                            </ResponsiveContainer>
+                          )}
                         </div>
-
-                        {mapData?.ahp_data && (
-                          <div>
-                            <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                              <div className="w-1.5 h-6 bg-purple-500 rounded-full" />
-                              AHP Consistency Verification
-                            </h3>
-                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                              <div className="border rounded-md p-3 bg-white">
-                                <div className="text-xs text-slate-500 mb-1">Principal Eigenvalue (λ_max)</div>
-                                <div className="font-semibold">{mapData.ahp_data.lambda_max.toFixed(3)}</div>
-                              </div>
-                              <div className="border rounded-md p-3 bg-white">
-                                <div className="text-xs text-slate-500 mb-1">Consistency Index (CI)</div>
-                                <div className="font-semibold">{mapData.ahp_data.ci.toFixed(3)}</div>
-                              </div>
-                              <div className="border rounded-md p-3 bg-white">
-                                <div className="text-xs text-slate-500 mb-1">Random Index (RI)</div>
-                                <div className="font-semibold">{mapData.ahp_data.ri.toFixed(2)}</div>
-                              </div>
-                              <div className={`border rounded-md p-3 ${mapData.ahp_data.consistent ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200"}`}>
-                                <div className={`text-xs mb-1 ${mapData.ahp_data.consistent ? "text-green-700" : "text-red-700"}`}>Consistency Ratio (CR)</div>
-                                <div className={`font-bold ${mapData.ahp_data.consistent ? "text-green-800" : "text-red-800"}`}>
-                                  {mapData.ahp_data.cr.toFixed(3)}
-                                  <span className="text-xs font-normal ml-2 bg-white/50 px-1.5 py-0.5 rounded">
-                                    {mapData.ahp_data.consistent ? "Acceptable (< 0.10)" : "Inconsistent"}
-                                  </span>
+                        
+                        <div className="border rounded-lg p-5 shadow-sm space-y-4 bg-card">
+                           <h3 className="font-medium text-sm">AHP Consistency Check</h3>
+                           {mapData?.ahp_data ? (
+                             <div className="bg-muted/40 p-4 rounded text-sm space-y-2">
+                                <div className="flex justify-between"><span>Principal Eigenvalue (λ_max)</span> <span className="font-medium">{mapData.ahp_data.lambda_max.toFixed(3)}</span></div>
+                                <div className="flex justify-between"><span>Consistency Index (CI)</span> <span className="font-medium">{mapData.ahp_data.ci.toFixed(3)}</span></div>
+                                <div className="flex justify-between"><span>Random Index (RI)</span> <span className="font-medium">{mapData.ahp_data.ri.toFixed(2)}</span></div>
+                                <div className={"mt-2 pt-2 border-t font-semibold flex justify-between " + (mapData.ahp_data.consistent ? "text-emerald-600" : "text-amber-600")}>
+                                  <span>Consistency Ratio (CR)</span>
+                                  <span>{mapData.ahp_data.cr.toFixed(3)} {mapData.ahp_data.consistent ? "✓" : "⚠"}</span>
                                 </div>
-                              </div>
-                            </div>
-                          </div>
-                        )}
+                             </div>
+                           ) : (
+                             <div className="text-muted-foreground text-sm flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin"/> Loading AHP data...</div>
+                           )}
+                        </div>
                       </div>
-                    </div>
-                  </TabsContent>
-                </div>
+                    </>
+                  ) : <div className="text-muted-foreground">Stats unavailable</div>}
+                </TabsContent>
+
+                <TabsContent value="factor-maps" className="flex-1 p-6 overflow-y-auto m-0 space-y-4">
+                   <h2 className="font-semibold text-lg">Factor Maps</h2>
+                   <p className="text-sm text-muted-foreground mb-4">Standardized score maps for each criterion.</p>
+                   {mapData ? (
+                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                       {FACTOR_KEYS.map((k) => (
+                         <InteractiveFactorMapCard 
+                           key={k} 
+                           factorKey={k} 
+                           factor={mapData.factor_maps[k]} 
+                           aoiConfig={aoi} 
+                         />
+                       ))}
+                     </div>
+                   ) : <div className="text-muted-foreground">Factor maps unavailable</div>}
+                </TabsContent>
+                
+                <TabsContent value="static-maps" className="flex-1 p-6 overflow-y-auto m-0 space-y-4">
+                   <h2 className="font-semibold text-lg">Professional Cartography</h2>
+                   {mapData ? (
+                     <MapExportControls
+                        district={effectiveDistrictName}
+                        title="Groundwater Suitability"
+                        tileUrl={activeTileUrl}
+                        thumbUrl={mapData.thumb_url}
+                        legend={SUITABILITY_LEGEND}
+                        classAreas={activeAreas}
+                     />
+                   ) : <div className="text-muted-foreground">Static maps unavailable</div>}
+                </TabsContent>
+
+                <TabsContent value="report" className="flex-1 p-6 overflow-y-auto m-0 space-y-6">
+                  <div className="max-w-3xl mx-auto">
+                    {mapData && statsData ? (
+                      <ReportDownloadButton
+                        moduleName="WellScope Groundwater Suitability"
+                        aoi={aoi}
+                        district={effectiveDistrictName}
+                        dateRange={new Date().toLocaleDateString()}
+                        stats={{
+                          "Mean Suitability": statsData.stats?.["Mean Suitability"] || 0,
+                          "Consistency Ratio (CR)": mapData.ahp_data.cr,
+                          "Total Area (km²)": Object.values(activeAreas).reduce((a: any, b: any) => a + b, 0) as number,
+                        }}
+                        classAreas={activeAreas}
+                        extraNotes={`The AHP consistency ratio (CR = ${mapData.ahp_data.cr.toFixed(3)}) confirms the weight assignments are ${mapData.ahp_data.consistent ? "acceptable" : "inconsistent — consider revising weights"}.`}
+                        maps={Object.entries(mapData.factor_maps).map(([k, f]: any) => [f.label, f.thumb_url] as [string, string])}
+                      />
+                    ) : (
+                      <div className="text-muted-foreground p-8 text-center border rounded-lg bg-muted/20">
+                        Run the suitability model first to generate a report.
+                      </div>
+                    )}
+                  </div>
+                </TabsContent>
               </Tabs>
             </div>
-          ) : null}
-        </div>
-      </div>
-    </div>
+          ) : (
+            <div className="h-full relative bg-muted/20 rounded-lg overflow-hidden border">
+              <DistrictMap aoi={aoi} basemap="satellite" />
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-4 z-[1000]">
+                <div className="bg-background/80 backdrop-blur-md p-6 rounded-2xl shadow-xl border border-primary/20 text-center max-w-sm transition-all hover:scale-105 duration-300">
+                  <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4 text-primary shadow-inner">
+                    <Waves className="w-8 h-8" />
+                  </div>
+                  <h3 className="text-xl font-bold mb-2 text-foreground">Analysis Configuration</h3>
+                  <p className="text-sm text-muted-foreground mb-6">
+                    Select a study area and adjust AHP factor weights in the sidebar, then click run to visualize groundwater potential.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+        </main>
+      </ResizablePanel>
+    </ResizablePanelGroup>
   );
 }

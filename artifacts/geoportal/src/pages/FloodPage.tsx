@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { StudyAreaSelector } from "@/components/StudyAreaSelector";
 import { useMutation } from "@tanstack/react-query";
 import {
@@ -10,7 +10,7 @@ import {
   ResponsiveContainer,
   Cell,
 } from "recharts";
-import { Loader2, Waves, FileText, AlertTriangle , Play} from "lucide-react";
+import { Loader2, Waves, FileText, AlertTriangle , Play, Tag, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
@@ -48,11 +48,45 @@ const YEARS = Array.from({ length: 2024 - 1981 + 1 }, (_, i) => 1981 + i);
 const SUSCEPTIBILITY_COLORS = ["#1a9850", "#91cf60", "#fee08b", "#fc8d59", "#d73027"];
 const SUSCEPTIBILITY_LABELS = ["Very Low", "Low", "Moderate", "High", "Very High"];
 
+
+const DEFAULT_PRESETS: Record<number, string[]> = {
+  1: ["Uniform / Full Area"],
+  2: ["Low", "High"],
+  3: ["Low", "Moderate", "High"],
+  4: ["Low", "Moderate", "High", "Very High"],
+  5: ["Very Low", "Low", "Moderate", "High", "Very High"],
+  6: ["Very Low", "Low", "Moderate", "High", "Very High", "Extreme"],
+  7: ["Extremely Low", "Very Low", "Low", "Moderate", "High", "Very High", "Extreme"],
+  8: ["Extremely Low", "Very Low", "Low", "Moderately Low", "Moderately High", "High", "Very High", "Extreme"],
+  9: ["Extremely Low", "Very Low", "Low", "Moderately Low", "Moderate", "Moderately High", "High", "Very High", "Extreme"],
+  10: ["Extremely Low", "Very Low", "Low", "Moderately Low", "Moderate", "Moderately High", "High", "Very High", "Extremely High", "Extreme"],
+};
+
+function getDefaultLabels(n: number): string[] {
+  if (DEFAULT_PRESETS[n]) return [...DEFAULT_PRESETS[n]];
+  return Array.from({ length: n }, (_, i) => `Class ${i + 1}`);
+}
+
 export function FloodPage() {
-  const [aoi, setAoi] = useState<AOIConfig>({ type: "gaul2", country: "Rwanda", name: "Musanze", level1: "North/Amajyaruguru", level2: "Musanze" });
+  const [aoi, setAoi] = useState<AOIConfig>({ type: "rwanda", country: "Rwanda", name: "Rwanda" });
   const [startYear, setStartYear] = useState(2019);
   const [endYear, setEndYear] = useState(2024);
   const [nClasses, setNClasses] = useState(5);
+  const [method, setMethod] = useState("natural_breaks");
+  const [customClassNames, setCustomClassNames] = useState<string[]>(() => getDefaultLabels(5));
+
+  useEffect(() => {
+    setCustomClassNames((prev) => {
+      if (prev.length === nClasses) return prev;
+      const next = getDefaultLabels(nClasses);
+      for (let i = 0; i < Math.min(prev.length, nClasses); i++) {
+        if (!DEFAULT_PRESETS[prev.length]?.includes(prev[i])) {
+          next[i] = prev[i];
+        }
+      }
+      return next;
+    });
+  }, [nClasses]);
   const [activeLayer, setActiveLayer] = useState<"continuous" | "classified">("continuous");
 
   // Weights
@@ -83,26 +117,42 @@ export function FloodPage() {
     ndvi: false,
   });
 
-  const { mutate, data, isPending, error } = useMutation<FloodResult, Error>({
-    mutationFn: () =>
-      api.flood({
-        aoi,
-                start_year: startYear,
-        end_year: endYear,
-        n_classes: nClasses,
-        reverse_rainfall: reversals.rainfall,
-        reverse_twi: reversals.twi,
-        reverse_lulc: reversals.lulc,
-        reverse_elevation: reversals.elevation,
-        reverse_slope: reversals.slope,
-        reverse_river_dist: reversals.river_dist,
-        reverse_road_dist: reversals.road_dist,
-        reverse_soil_type: reversals.soil_type,
-        reverse_drainage_density: reversals.drainage_density,
-        reverse_ndvi: reversals.ndvi,
-        custom_weights: weights,
-      }),
-  });
+  const payloadBase = {
+    aoi,
+    start_year: startYear,
+    end_year: endYear,
+    reverse_rainfall: reversals.rainfall,
+    reverse_twi: reversals.twi,
+    reverse_lulc: reversals.lulc,
+    reverse_elevation: reversals.elevation,
+    reverse_slope: reversals.slope,
+    reverse_river_dist: reversals.river_dist,
+    reverse_road_dist: reversals.road_dist,
+    reverse_soil_type: reversals.soil_type,
+    reverse_drainage_density: reversals.drainage_density,
+    reverse_ndvi: reversals.ndvi,
+    custom_weights: weights,
+  };
+
+  const mapMutation = useMutation({ mutationFn: () => api.flood.map(payloadBase) });
+  const statsMutation = useMutation({ mutationFn: () => api.flood.stats(payloadBase) });
+  const classifyMutation = useMutation({ mutationFn: () => api.flood.classify({ ...payloadBase, n_classes: nClasses, custom_labels: customClassNames, method }) });
+  const exportMutation = useMutation({ mutationFn: () => api.flood.export(payloadBase) });
+
+  const handleRunAnalysis = () => {
+    mapMutation.mutate();
+    statsMutation.mutate();
+    classifyMutation.mutate();
+    exportMutation.mutate();
+  };
+
+  const isPending = mapMutation.isPending || statsMutation.isPending || classifyMutation.isPending || exportMutation.isPending;
+  const error = mapMutation.error || statsMutation.error || classifyMutation.error || exportMutation.error;
+  
+  const dataMap = mapMutation.data;
+  const dataStats = statsMutation.data;
+  const dataClassify = classifyMutation.data;
+  const dataExport = exportMutation.data;
 
   const handleWeightChange = (key: string, val: number) => {
     setWeights((prev) => ({ ...prev, [key]: val / 100 }));
@@ -112,36 +162,47 @@ export function FloodPage() {
     setReversals((prev) => ({ ...prev, [key]: checked }));
   };
 
-  const activeFactorPanel = data?.classify.panels.find((p) => p.name === `${activeLayer}_score`);
+  const activeFactorPanel = dataClassify?.classify?.panels?.find((p) => p.name === `${activeLayer}_score`);
 
-  const currentTileUrl = data
+  const currentTileUrl = dataMap
     ? activeLayer === "continuous"
-      ? data.tile_url
+      ? dataMap.tile_url
       : activeLayer === "classified"
-      ? data.classify.panels[0].tile_url
-      : activeFactorPanel?.tile_url || data.factor_maps[activeLayer]?.tile_url
+      ? dataClassify?.classify?.panels?.[0]?.tile_url
+      : activeFactorPanel?.tile_url || dataMap.factor_maps[activeLayer]?.tile_url
     : undefined;
 
   const getReportPayload = () => {
-    if (!data) return null;
+    if (!dataMap || !dataStats || !dataClassify) return null;
     return {
       moduleName: "Flood Susceptibility",
-      district: data.aoi.name || "Custom",
-      dateRange: `${data.start_year} - ${data.end_year}`,
-      stats: data.stats,
-      classAreas: data.class_areas_km2,
+      district: aoi.name || "Custom",
+      dateRange: `${startYear} - ${endYear}`,
+      stats: dataStats.stats,
+      classAreas: dataStats.class_areas_km2,
       extraNotes: "Flood Susceptibility computed using Spatial Multi-Criteria Evaluation (SMCE).",
       maps: [
-        ["Flood Susceptibility Index", data.thumb_url] as [string, string],
-        ["Classified Flood Risk", data.classify.panels[0].thumb_url] as [string, string],
-        ...Object.entries(data.factor_maps).map(
-          ([key, fm]) => [fm.label, fm.thumb_url] as [string, string]
-        )
+        ["Flood Susceptibility Index", ""] as [string, string],
+        ["Classified Flood Risk", ""] as [string, string],
       ] as [string, string][]
     };
   };
 
   const totalWeight = Object.values(weights).reduce((a, b) => a + b, 0);
+
+  const activeAreas = useMemo(() => {
+    const rawAreas = dataClassify?.classify?.panels?.[0]?.class_areas || dataStats?.class_areas_km2;
+    if (!rawAreas) return undefined;
+    const mapped: Record<string, number> = {};
+    const keys = Object.keys(rawAreas);
+    keys.forEach((oldKey, i) => {
+      const newKey = customClassNames[i] || oldKey;
+      mapped[newKey] = rawAreas[oldKey];
+    });
+    return mapped;
+  }, [dataClassify, dataStats, customClassNames]);
+
+
 
   return (
     <ResizablePanelGroup direction="horizontal" className="h-full items-stretch">
@@ -187,18 +248,71 @@ export function FloodPage() {
           </div>
         </div>
 
-        <div className="space-y-1">
-          <Label>Classification Classes (Quantile)</Label>
-          <Select value={nClasses.toString()} onValueChange={(v) => setNClasses(parseInt(v))}>
-            <SelectTrigger>
-              <SelectValue />
+        <div className="space-y-1.5">
+          <Label className="text-xs text-muted-foreground">Classification Method</Label>
+          <Select value={method} onValueChange={setMethod}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Select Method" />
             </SelectTrigger>
             <SelectContent>
-              {[3, 4, 5, 6, 7].map((n) => (
-                <SelectItem key={n} value={n.toString()}>{n} Classes</SelectItem>
-              ))}
+              <SelectItem value="natural_breaks">Natural Breaks (Jenks)</SelectItem>
+              <SelectItem value="equal_interval">Discrete (Equal Interval)</SelectItem>
+              <SelectItem value="quantiles">Discrete (Quantiles / Equal Area)</SelectItem>
             </SelectContent>
           </Select>
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex justify-between items-center">
+            <Label>Classes: {nClasses}</Label>
+            <span className="text-[11px] text-muted-foreground">{nClasses} intervals</span>
+          </div>
+          <Slider
+            min={2}
+            max={10}
+            step={1}
+            value={[nClasses]}
+            onValueChange={([v]) => setNClasses(v)}
+          />
+        </div>
+
+        <div className="space-y-3 bg-muted/40 border rounded-lg p-3">
+          <div className="flex items-center justify-between">
+            <Label className="text-xs font-semibold flex items-center gap-1.5 text-foreground">
+              <Tag className="w-3.5 h-3.5 text-primary" />
+              Rename Classes ({nClasses})
+            </Label>
+            <button
+              type="button"
+              onClick={() => setCustomClassNames(getDefaultLabels(nClasses))}
+              className="text-[10px] text-muted-foreground hover:text-primary flex items-center gap-1 transition-colors"
+              title="Reset to default names"
+            >
+              <RotateCcw className="w-3 h-3" /> Reset
+            </button>
+          </div>
+
+          <div className="space-y-1.5 max-h-[200px] overflow-y-auto pr-1">
+            {Array.from({ length: nClasses }).map((_, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <span
+                  className="w-3.5 h-3.5 rounded-xs shrink-0 border border-black/15 shadow-2xs"
+                  style={{ background: ["#08306b", "#313695", "#74add1", "#fee090", "#f46d43", "#a50026", "#000000", "#555555", "#999999", "#cccccc"][i % 10] }}
+                />
+                <input
+                  type="text"
+                  value={customClassNames[i] || ""}
+                  placeholder={`Class ${i + 1}`}
+                  onChange={(e) => {
+                    const next = [...customClassNames];
+                    next[i] = e.target.value;
+                    setCustomClassNames(next);
+                  }}
+                  className="flex-1 h-7 text-xs rounded border border-input bg-background px-2 text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+            ))}
+          </div>
         </div>
 
         <div className="space-y-3 pt-2 border-t">
@@ -231,7 +345,7 @@ export function FloodPage() {
           ))}
         </div>
 
-        <Button onClick={() => mutate()} disabled={isPending} className="w-full mt-2">
+        <Button onClick={handleRunAnalysis} disabled={isPending} className="w-full mt-2">
           {isPending ? (
             <>
               <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Computing...
@@ -248,11 +362,11 @@ export function FloodPage() {
       <ResizableHandle withHandle />
       
       <ResizablePanel defaultSize={75}>
-        <main className="h-full flex flex-col min-w-0 bg-muted/30">
-        {!data && !error && !isPending && (
-          <div className="h-full relative bg-muted/20">
+        <main className="h-full flex flex-col min-w-0 bg-muted/30 p-6">
+        {!dataMap && !isPending && (
+          <div className="h-full relative bg-muted/20 rounded-lg border overflow-hidden">
             <DistrictMap aoi={aoi} basemap="satellite" />
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-4">
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-4 z-[1000]">
               <div className="bg-background/80 backdrop-blur-md p-6 rounded-2xl shadow-xl border border-primary/20 text-center max-w-sm pointer-events-none transition-all hover:scale-105 duration-300">
                 <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4 text-primary shadow-inner">
                   <Waves className="w-8 h-8" />
@@ -289,7 +403,7 @@ export function FloodPage() {
           </div>
         )}
 
-        {data && (
+        {dataMap && dataStats && dataClassify && dataExport && (
           <Tabs defaultValue="map" className="h-full flex flex-col">
             <TabsList className="mb-4 self-start flex-wrap h-auto gap-1">
               <TabsTrigger value="map">Map</TabsTrigger>
@@ -324,7 +438,7 @@ export function FloodPage() {
                 
                 <div className="flex flex-wrap gap-2 items-center">
                   <span className="text-xs font-semibold text-muted-foreground uppercase mr-2">Factor Maps:</span>
-                  {Object.entries(data.factor_maps).map(([k, fm]) => (
+                  {Object.entries(dataMap.factor_maps).map(([k, fm]) => (
                     <button
                       key={k}
                       onClick={() => setActiveLayer(k as any)}
@@ -340,7 +454,7 @@ export function FloodPage() {
 
               <div className="h-[520px] rounded-lg overflow-hidden border relative">
                 {currentTileUrl ? (
-                  <DistrictMap tileUrl={currentTileUrl} center={data.center} />
+                  <DistrictMap tileUrl={currentTileUrl} center={dataMap.center} />
                 ) : (
                   <div className="flex-1 h-full flex items-center justify-center bg-muted">
                     <span className="text-muted-foreground">Map data unavailable</span>
@@ -353,7 +467,7 @@ export function FloodPage() {
             <TabsContent value="stats" className="space-y-6">
               <div>
                 <h2 className="font-semibold text-lg mb-1">
-                  Flood Statistics — {data.district}
+                  Flood Statistics — {aoi.name || "Custom"}
                 </h2>
               </div>
 
@@ -361,14 +475,14 @@ export function FloodPage() {
                 <div className="bg-card border rounded-lg p-4">
                   <div className="text-xs text-muted-foreground mb-1">Mean Flood Index</div>
                   <div className="text-2xl font-bold text-primary">
-                    {data.stats.mean_suitability?.toFixed(2) || "N/A"}
+                    {dataStats.stats.mean_suitability?.toFixed(2) || "N/A"}
                   </div>
                   <div className="text-[10px] text-muted-foreground mt-1">Scale 1-5</div>
                 </div>
                 <div className="bg-card border rounded-lg p-4">
                   <div className="text-xs text-muted-foreground mb-1">High Risk Area</div>
                   <div className="text-2xl font-bold text-destructive">
-                    {data.stats.max_risk_area_km2?.toFixed(1) || "0"} <span className="text-sm font-normal">km²</span>
+                    {dataStats.stats.max_risk_area_km2?.toFixed(1) || "0"} <span className="text-sm font-normal">km²</span>
                   </div>
                   <div className="text-[10px] text-muted-foreground mt-1">Area &gt; 4.5 index</div>
                 </div>
@@ -378,7 +492,7 @@ export function FloodPage() {
                 <h3 className="font-medium mb-3">Area by Flood Risk Class (km²)</h3>
                 <ResponsiveContainer width="100%" height={240}>
                   <BarChart
-                    data={Object.entries(data.class_areas_km2).map(([name, val], i) => ({
+                    data={Object.entries(activeAreas || {}).map(([name, val], i) => ({
                       name: name,
                       value: Math.round(val),
                       color: SUSCEPTIBILITY_COLORS[i % SUSCEPTIBILITY_COLORS.length],
@@ -388,7 +502,7 @@ export function FloodPage() {
                     <YAxis unit=" km²" tick={{ fontSize: 11 }} />
                     <Tooltip formatter={(v: number) => [`${v} km²`, "Area"]} />
                     <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-                      {Object.keys(data.class_areas_km2).map((_, index) => (
+                      {Object.keys(dataStats.class_areas_km2).map((_, index) => (
                         <Cell key={`cell-${index}`} fill={SUSCEPTIBILITY_COLORS[index % SUSCEPTIBILITY_COLORS.length]} />
                       ))}
                     </Bar>
@@ -406,8 +520,8 @@ export function FloodPage() {
                 
                 <div className="flex justify-between items-center bg-muted/50 p-4 rounded-lg border mb-6 max-w-md">
                   <span className="font-semibold">Consistency Ratio (CR)</span>
-                  <span className={`px-3 py-1 rounded text-sm font-bold ${data.ahp.consistent ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}>
-                    {data.ahp.cr.toFixed(3)} {data.ahp.consistent ? "(Consistent)" : "(Inconsistent)"}
+                  <span className={`px-3 py-1 rounded text-sm font-bold ${dataMap.ahp.consistent ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}`}>
+                    {dataMap.ahp.cr.toFixed(3)} {dataMap.ahp.consistent ? "(Consistent)" : "(Inconsistent)"}
                   </span>
                 </div>
                 
@@ -421,7 +535,7 @@ export function FloodPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y">
-                      {Object.entries(data.ahp.weights).map(([k, w]) => (
+                      {Object.entries(dataMap.ahp.weights).map(([k, w]) => (
                         <tr key={k} className="hover:bg-muted/30">
                           <td className="px-4 py-3 capitalize">{k.replace("_", " ")}</td>
                           <td className="px-4 py-3 text-right font-mono">{(w * 100).toFixed(1)}%</td>
@@ -456,7 +570,7 @@ export function FloodPage() {
                   </button>
                 </div>
                 <div className="flex flex-wrap gap-2 items-center mb-4">
-                  {Object.entries(data.factor_maps).map(([k, fm]) => (
+                  {Object.entries(dataMap.factor_maps).map(([k, fm]) => (
                     <button
                       key={k}
                       onClick={() => setActiveLayer(k as any)}
@@ -475,28 +589,31 @@ export function FloodPage() {
                   <MapExportControls
                     title="Flood_Susceptibility"
                     district={aoi.name || "Custom"}
-                    tileUrl={data.tile_url}
-                    thumbUrl={data.thumb_url}
-                    downloadUrl={data.thumb_url}
+                    tileUrl={dataMap.tile_url}
+                    thumbUrl={dataExport?.download_url || ""}
+                    downloadUrl={dataExport?.download_url || ""}  classAreas={activeAreas}
+
                   />
                 )}
-                {activeLayer === "classified" && data.classify?.panels[0] && (
+                {activeLayer === "classified" && dataClassify.classify?.panels[0] && (
                   <MapExportControls
                     title="Flood_Risk_Classified"
                     district={aoi.name || "Custom"}
-                    tileUrl={data.classify.panels[0].tile_url}
-                    thumbUrl={data.classify.panels[0].thumb_url}
-                    downloadUrl={data.classify.panels[0].thumb_url}
-                    classAreas={data.class_areas_km2}
+                    tileUrl={dataClassify.classify.panels[0].tile_url}
+                    thumbUrl={dataExport?.download_url || ""}
+                    downloadUrl={dataExport?.download_url || ""}
+                    classAreas={activeAreas}
+
                   />
                 )}
-                {activeLayer !== "continuous" && activeLayer !== "classified" && data.factor_maps[activeLayer] && (
+                {activeLayer !== "continuous" && activeLayer !== "classified" && dataMap.factor_maps[activeLayer] && (
                   <MapExportControls
                     title={`Flood_Factor_${activeLayer}`}
                     district={aoi.name || "Custom"}
-                    tileUrl={data.factor_maps[activeLayer].class_tile_url || data.factor_maps[activeLayer].tile_url}
-                    thumbUrl={data.factor_maps[activeLayer].class_thumb_url || data.factor_maps[activeLayer].thumb_url}
-                    downloadUrl={data.factor_maps[activeLayer].class_thumb_url || data.factor_maps[activeLayer].thumb_url}
+                    tileUrl={dataMap.factor_maps[activeLayer].class_tile_url || dataMap.factor_maps[activeLayer].tile_url}
+                    thumbUrl={dataExport?.download_url || ""}
+                    downloadUrl={dataExport?.download_url || ""}  classAreas={activeAreas}
+
                     
                   />
                 )}
@@ -512,7 +629,7 @@ export function FloodPage() {
                   <p className="text-muted-foreground">
                     Download a detailed PDF report containing all generated maps, 
                     factor weightings, consistency ratios, and statistical breakdowns 
-                    for {data.district}.
+                    for {aoi.name || "Custom"}.
                   </p>
                   <div className="pt-4">
                     <ReportDownloadButton aoi={aoi} {...getReportPayload()!} />

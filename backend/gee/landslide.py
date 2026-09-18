@@ -312,11 +312,11 @@ def compute_landslide_classify(
     aoi_config: dict, start_year: int = 2019, end_year: int = 2024, n_classes: int = 5,
     reverse_slope: bool = False, reverse_rainfall: bool = False, reverse_litho: bool = False,
     reverse_soiltype: bool = False, reverse_landcover: bool = False, reverse_twi: bool = False,
-    reverse_dist: bool = False,
+    reverse_dist: bool = False, method: str = "natural_breaks", custom_labels: list = None
 ) -> dict:
     cache_key = (json.dumps(aoi_config, sort_keys=True), start_year, end_year, n_classes,
         reverse_slope, reverse_rainfall, reverse_litho, reverse_soiltype,
-        reverse_landcover, reverse_twi, reverse_dist
+        reverse_landcover, reverse_twi, reverse_dist, method, tuple(custom_labels) if custom_labels else None
     )
     with _lock:
         if cache_key in _cache_classify:
@@ -341,7 +341,8 @@ def compute_landslide_classify(
     classify = quantile_classify(
         layers=layers,
         aoi=aoi, scale=get_dynamic_scale(aoi), n_classes=n_classes,
-        custom_labels=LSI_CLASS_NAMES
+        custom_labels=custom_labels or LSI_CLASS_NAMES,
+        method=method
     )
 
     result = {
@@ -431,7 +432,8 @@ def compute_landslide_susceptibility(
     district_or_aoi, start_year: int = 2019, end_year: int = 2024, n_classes: int = 5,
     reverse_slope: bool = False, reverse_rainfall: bool = False, reverse_litho: bool = False,
     reverse_soiltype: bool = False, reverse_landcover: bool = False, reverse_twi: bool = False,
-    reverse_dist: bool = False, custom_palettes: dict = None
+    reverse_dist: bool = False, custom_palettes: dict = None,
+    method: str = "natural_breaks", custom_labels: list = None
 ) -> dict:
     if isinstance(district_or_aoi, str):
         aoi_config = {"type": "gaul2", "country": "Rwanda", "name": district_or_aoi, "level2": district_or_aoi}
@@ -451,7 +453,8 @@ def compute_landslide_susceptibility(
     classify_res = compute_landslide_classify(
         aoi_config, start_year, end_year, n_classes,
         reverse_slope, reverse_rainfall, reverse_litho, reverse_soiltype,
-        reverse_landcover, reverse_twi, reverse_dist
+        reverse_landcover, reverse_twi, reverse_dist,
+        method=method, custom_labels=custom_labels
     )
     export_res = compute_landslide_export(
         aoi_config, start_year, end_year,

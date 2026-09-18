@@ -132,37 +132,31 @@ export interface LSTResult {
   end_date: string;
 }
 
-export interface RUSLEResult {
+export interface RUSLEMapResult {
   tile_url: string;
-  risk_index: {
-    tile_url: string;
-    thumb_url: string;
-    mean: number;
-    std_dev: number;
-    class_areas_km2: Record<string, number>;
-    weight_pct_each: number;
-  };
+  thumb_url?: string;
+  factor_maps: Record<string, any>;
+  center: [number, number];
+}
+
+export interface RUSLEStatsResult {
   stats: Record<string, number>;
   factor_means: Record<string, number>;
-  class_areas_km2: Record<string, number>;
-  n_class_soil_loss_km2: Record<string, number>;
-  n_class_soil_loss_tile: string;
-  factor_maps: Record<string, {
-    label: string;
-    tile_url: string;
-    thumb_url: string;
-    download_url: string;
-    class_tile_url?: string;
-    class_thumb_url?: string;
-    reversed?: boolean;
-    direction_desc?: string;
-  }>;
-  reverse_flags: Record<string, boolean>;
-  center: [number, number];
-  bbox?: number[];
-  aoi: AOIConfig;
-  district?: string;
-  year: number;
+}
+
+export interface RUSLEClassifyResult {
+  classify?: { panels: ClassifyPanel[]; n_classes: number; percentile_steps: number[] };
+  panels?: Array<{ name: string; tile_url: string; thumb_url: string; class_areas: Record<string, number> }>;
+}
+
+export interface RUSLEExportResult {
+  A: string;
+  R: string;
+  K: string;
+  LS: string;
+  C: string;
+  P: string;
+  risk_index: string;
 }
 
 export interface SlopeResult {
@@ -237,40 +231,43 @@ export interface HabitatFactorMap {
   labels?: string[];
 }
 
-export interface HabitatMapResult {
+export interface HabitatResult {
   tile_url: string;
   factor_maps: Record<string, { tile_url: string }>;
   center: [number, number];
   bbox: number[];
-}
-
-export interface HabitatStatsResult {
   class_areas_km2: Record<string, number>;
-}
-
-export interface HabitatClassifyResult {
   classify: { panels: ClassifyPanel[]; n_classes: number; percentile_steps: number[] };
-}
-
-export interface HabitatExportResult {
   thumb_url: string;
   download_url?: string;
   factors: Record<string, HabitatFactorMap>;
 }
 
-export interface AirPollutionResult {
+export interface AirPollutionMapResult {
   tile_url: string;
-  download_url?: string;
-  stats: Record<string, number>;
-  exceeds_who: boolean;
-  time_series: Array<{ year: number; month: number; "NO2 (µmol/m²)": number }>;
-  classify: { panels: ClassifyPanel[]; n_classes: number; percentile_steps: number[] };
+  thumb_url: string;
   center: [number, number];
   bbox?: number[];
-  aoi: AOIConfig;
   district?: string;
   start_date: string;
   end_date: string;
+}
+
+export interface AirPollutionStatsResult {
+  stats: Record<string, number>;
+  exceeds_who: boolean;
+}
+
+export interface AirPollutionClassifyResult {
+  classify: { panels: ClassifyPanel[]; n_classes: number; percentile_steps: number[] };
+}
+
+export interface AirPollutionTimeseriesResult {
+  time_series: Array<{ year: number; month: number; "NO2 (µmol/m²)": number; "CO (mol/m²)": number; "SO2 (µmol/m²)": number; "Aerosol Index": number; }>;
+}
+
+export interface AirPollutionExportResult {
+  download_url: string;
 }
 
 export interface LandslideMapResult {
@@ -288,7 +285,8 @@ export interface IrrigationMapResult {
   tile_url: string;
   factor_maps: Record<string, { tile_url: string }>;
   center: [number, number];
-  bbox: number[];
+  bbox?: number[];
+  classify?: { panels: any[]; n_classes: number; method: string; };
 }
 
 export interface IrrigationStatsResult {
@@ -391,6 +389,27 @@ export interface FloodFactorMap {
   reversed: boolean;
 }
 
+export interface FloodMapResult {
+  tile_url: string;
+  center: [number, number];
+  bbox?: number[];
+  ahp: AhpData;
+  factor_maps: Record<string, FloodFactorMap>;
+}
+
+export interface FloodStatsResult {
+  stats: Record<string, number>;
+  class_areas_km2: Record<string, number>;
+}
+
+export interface FloodClassifyResult {
+  classify: { panels: ClassifyPanel[]; n_classes: number; percentile_steps: number[] };
+}
+
+export interface FloodExportResult {
+  download_url: string;
+}
+
 export interface FloodResult {
   tile_url: string;
   thumb_url: string;
@@ -407,6 +426,7 @@ export interface FloodResult {
   start_year: number;
   end_year: number;
 }
+
 
 export interface UHIResult {
   center: [number, number];
@@ -637,31 +657,31 @@ export const api = {
   changeDetection: (req: ChangeDetectionRequest) => post<ChangeDetectionResult>("/change-detection", req),
   lst: (req: { aoi: AOIConfig; district?: string; start_date: string; end_date: string; n_classes: number }) =>
     post<LSTResult>("/lst", req),
-  rusle: (req: {
-    aoi: AOIConfig;
-  district?: string;
-    year: number;
-    n_classes: number;
-    reverse_r: boolean;
-    reverse_k: boolean;
-    reverse_ls: boolean;
-    reverse_c: boolean;
-    reverse_p: boolean;
-  }) => post<RUSLEResult>("/rusle", req),
-  slope: (req: { aoi: AOIConfig; district?: string; n_classes: number }) =>
-    post<SlopeResult>("/slope", req),
-  landfill: (req: {
-    aoi: AOIConfig;
-  district?: string;
-    n_classes?: number;
-    reverse_river?: boolean;
-    reverse_residential?: boolean;
-    reverse_slope?: boolean;
-    reverse_road?: boolean;
-    reverse_lulc?: boolean;
-    custom_weights?: Record<string, number>;
-  }) => post<LandfillResult>("/landfill", req),
-  airPollution: (req: any) => post<AirPollutionResult>("/air-pollution", req),
+  rusle: {
+    map: (req: any) => post<RUSLEMapResult>("/rusle/map", req),
+    stats: (req: any) => post<RUSLEStatsResult>("/rusle/stats", req),
+    classify: (req: any) => post<RUSLEClassifyResult>("/rusle/classify", req),
+    export: (req: any) => post<RUSLEExportResult>("/rusle/export", req),
+  },
+  slope: {
+    map: (req: any) => post<any>("/slope/map", req),
+    stats: (req: any) => post<any>("/slope/stats", req),
+    classify: (req: any) => post<any>("/slope/classify", req),
+    export: (req: any) => post<any>("/slope/export", req),
+  },
+  landfill: {
+    map: (req: any) => post<any>("/landfill/map", req),
+    stats: (req: any) => post<any>("/landfill/stats", req),
+    classify: (req: any) => post<any>("/landfill/classify", req),
+    export: (req: any) => post<any>("/landfill/export", req),
+  },
+  airPollution: {
+    map: (req: any) => post<AirPollutionMapResult>("/air-pollution/map", req),
+    stats: (req: any) => post<AirPollutionStatsResult>("/air-pollution/stats", req),
+    classify: (req: any) => post<AirPollutionClassifyResult>("/air-pollution/classify", req),
+    export: (req: any) => post<AirPollutionExportResult>("/air-pollution/export", req),
+    timeseries: (req: any) => post<AirPollutionTimeseriesResult>("/air-pollution/timeseries", req),
+  },
   landslide: {
     map: (req: any) => post<LandslideMapResult>("/landslide/map", req),
     stats: (req: any) => post<LandslideStatsResult>("/landslide/stats", req),
@@ -674,37 +694,18 @@ export const api = {
     classify: (req: AccessibilityRequest) => post<AccessibilityClassifyResult>("/accessibility/classify", req),
     export: (req: AccessibilityRequest) => post<AccessibilityExportResult>("/accessibility/export", req),
   },
-  drought: (req: {
-    aoi: AOIConfig;
-  district?: string;
-    year: number;
-    n_classes: number;
-    reverse_sm?: boolean;
-    reverse_rf?: boolean;
-    reverse_ndvi?: boolean;
-    reverse_vci?: boolean;
-    reverse_lst?: boolean;
-    reverse_cdd?: boolean;
-    reverse_evi?: boolean;
-  }) => post<DroughtResult>("/drought", req),
-  flood: (req: {
-    aoi: AOIConfig;
-  district?: string;
-    start_year: number;
-    end_year: number;
-    n_classes: number;
-    reverse_rainfall?: boolean;
-    reverse_twi?: boolean;
-    reverse_lulc?: boolean;
-    reverse_elevation?: boolean;
-    reverse_slope?: boolean;
-    reverse_river_dist?: boolean;
-    reverse_road_dist?: boolean;
-    reverse_soil_type?: boolean;
-    reverse_drainage_density?: boolean;
-    reverse_ndvi?: boolean;
-    custom_weights?: Record<string, number>;
-  }) => post<FloodResult>("/flood", req),
+  drought: {
+    map: (req: any) => post<any>("/drought/map", req),
+    stats: (req: any) => post<any>("/drought/stats", req),
+    classify: (req: any) => post<any>("/drought/classify", req),
+    export: (req: any) => post<any>("/drought/export", req),
+  },
+  flood: {
+    map: (req: any) => post<FloodMapResult>("/flood/map", req),
+    stats: (req: any) => post<FloodStatsResult>("/flood/stats", req),
+    classify: (req: any) => post<FloodClassifyResult>("/flood/classify", req),
+    export: (req: any) => post<FloodExportResult>("/flood/export", req),
+  },
   uhi: (req: any) => post<UHIResult>("/uhi", req),
   adminVerify: (password: string) => post<{ ok: boolean }>("/admin/verify", { password }),
   uploadLogo: async (file: File): Promise<{ url: string }> => {
@@ -805,23 +806,23 @@ export const api = {
       return res.json() as Promise<{ ok: boolean }>;
     }
   },
-  habitat: {
-    map: (req: any) => post<HabitatMapResult>("/habitat/map", req),
-    stats: (req: any) => post<HabitatStatsResult>("/habitat/stats", req),
-    classify: (req: any) => post<HabitatClassifyResult>("/habitat/classify", req),
-    export: (req: any) => post<HabitatExportResult>("/habitat/export", req),
-    ahp: (customWeights: Record<string, number> | null) => post<AhpData>("/habitat/ahp", { custom_weights: customWeights || {} }),
-  },
+  habitat: (req: any) => post<HabitatResult>("/habitat", req),
+  habitatAhp: (customWeights: Record<string, number> | null) => post<AhpData>("/habitat/ahp", { custom_weights: customWeights || {} }),
   waterHarvesting: {
     map: (req: { aoi: AOIConfig; year: number; runoff_coefficient?: number; manual_area_m2?: number; use_building_footprint?: boolean; household_size?: number; daily_water_use_liters?: number }) => post<any>("/water-harvesting/map", req),
     stats: (req: { aoi: AOIConfig; year: number; runoff_coefficient?: number; manual_area_m2?: number; use_building_footprint?: boolean; household_size?: number; daily_water_use_liters?: number }) => post<any>("/water-harvesting/stats", req),
     export: (req: { aoi: AOIConfig; year: number; runoff_coefficient?: number; manual_area_m2?: number; use_building_footprint?: boolean; household_size?: number; daily_water_use_liters?: number }) => post<any>("/water-harvesting/export", req),
   },
   wellscope: {
-    map: (req: { aoi: AOIConfig; custom_weights?: Record<string, number> }) => post<any>("/wellscope/map", req),
-    stats: (req: { aoi: AOIConfig; custom_weights?: Record<string, number> }) => post<any>("/wellscope/stats", req),
-    factorExport: (req: { aoi: AOIConfig; factor_key: string; palette?: string[] }) => post<{ thumb_url: string; download_url: string }>("/wellscope/factor-export", req),
+    map: (req: any) => post<any>("/wellscope/map", req),
+    stats: (req: any) => post<any>("/wellscope/stats", req),
+    classify: (req: any) => post<any>("/wellscope/classify", req),
+    export: (req: any) => post<any>("/wellscope/export", req),
+    factorExport: (req: any) => post<{ thumb_url: string; download_url: string }>("/wellscope/factor-export", req),
   },
+
+  
+  // ... (some lines are omitted for brevity if needed, wait no I shouldn't omit lines in replacement if I match exactly)
   report: async (body: {
     module_name: string;
     aoi: AOIConfig;
@@ -869,11 +870,11 @@ export const api = {
   },
 
   irrigation: {
-    map: (req: { aoi: AOIConfig; start_date: string; end_date: string; crop_type: string }) =>
+    map: (req: { aoi: AOIConfig; start_date: string; end_date: string; planting_date: string; crop_type: string; n_classes?: number; method?: string; custom_labels?: string[] }) =>
       post<IrrigationMapResult>("/irrigation/map", req),
-    stats: (req: { aoi: AOIConfig; start_date: string; end_date: string; crop_type: string }) =>
+    stats: (req: { aoi: AOIConfig; start_date: string; end_date: string; planting_date: string; crop_type: string; n_classes?: number; method?: string; custom_labels?: string[] }) =>
       post<IrrigationStatsResult>("/irrigation/stats", req),
-    export: (req: { aoi: AOIConfig; start_date: string; end_date: string; crop_type: string }) =>
+    export: (req: { aoi: AOIConfig; start_date: string; end_date: string; planting_date: string; crop_type: string; n_classes?: number; method?: string; custom_labels?: string[] }) =>
       post<IrrigationExportResult>("/irrigation/export", req),
   },
 

@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { ClassificationControls } from "@/components/ClassificationControls";
 
 import { useMutation } from "@tanstack/react-query";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
 } from "recharts";
-import { Loader2, Trash2, FileText, Printer , Play} from "lucide-react";
+import { Loader2, Trash2, FileText, Printer , Play, Tag, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
@@ -88,6 +89,10 @@ function normalize(w: Record<FactorKey, number>): Record<FactorKey, number> {
 
 /** North arrow for thumbnail overlays */
 function SmallNorthArrow() {
+
+
+
+
   return (
     <svg width="18" height="22" viewBox="0 0 28 36" fill="none">
       <polygon points="14,2 20,18 14,14 8,18" fill="#111" />
@@ -178,7 +183,7 @@ function printReport(data: LandfillResult, analysisDate: string) {
       ${row.map((v) => `<td style="text-align:center">${v.toFixed(2)}</td>`).join("")}
     </tr>`).join("");
 
-  const areaRows = Object.entries(data.class_areas_km2).map(([cls, km2], i) => `
+  const areaRows = Object.entries(data.class_areas_km2 || {}).map(([cls, km2], i) => `
     <tr>
       <td>${cls}</td>
       <td style="text-align:right">${km2} km²</td>
@@ -344,9 +349,43 @@ function printReport(data: LandfillResult, analysisDate: string) {
 
 // ── Main component ──────────────────────────────────────────────────────────
 
+
+const DEFAULT_PRESETS: Record<number, string[]> = {
+  1: ["Uniform / Full Area"],
+  2: ["Low", "High"],
+  3: ["Low", "Moderate", "High"],
+  4: ["Low", "Moderate", "High", "Very High"],
+  5: ["Very Low", "Low", "Moderate", "High", "Very High"],
+  6: ["Very Low", "Low", "Moderate", "High", "Very High", "Extreme"],
+  7: ["Extremely Low", "Very Low", "Low", "Moderate", "High", "Very High", "Extreme"],
+  8: ["Extremely Low", "Very Low", "Low", "Moderately Low", "Moderately High", "High", "Very High", "Extreme"],
+  9: ["Extremely Low", "Very Low", "Low", "Moderately Low", "Moderate", "Moderately High", "High", "Very High", "Extreme"],
+  10: ["Extremely Low", "Very Low", "Low", "Moderately Low", "Moderate", "Moderately High", "High", "Very High", "Extremely High", "Extreme"],
+};
+
+function getDefaultLabels(n: number): string[] {
+  if (DEFAULT_PRESETS[n]) return [...DEFAULT_PRESETS[n]];
+  return Array.from({ length: n }, (_, i) => `Class ${i + 1}`);
+}
+
 export function LandfillPage() {
-  const [aoi, setAoi] = useState<AOIConfig>({ type: "gaul2", country: "Rwanda", name: "Musanze", level1: "North/Amajyaruguru", level2: "Musanze" });
+  const [aoi, setAoi] = useState<AOIConfig>({ type: "rwanda", country: "Rwanda", name: "Rwanda" });
   const [nClasses, setNClasses] = useState(4);
+  const [method, setMethod] = useState("natural_breaks");
+  const [customClassNames, setCustomClassNames] = useState<string[]>(() => getDefaultLabels(5));
+
+  useEffect(() => {
+    setCustomClassNames((prev) => {
+      if (prev.length === nClasses) return prev;
+      const next = getDefaultLabels(nClasses);
+      for (let i = 0; i < Math.min(prev.length, nClasses); i++) {
+        if (!DEFAULT_PRESETS[prev.length]?.includes(prev[i])) {
+          next[i] = prev[i];
+        }
+      }
+      return next;
+    });
+  }, [nClasses]);
 
   // Weights (stored per-district in localStorage)
   const [weights, setWeights] = useState<Record<FactorKey, number>>(() => loadWeights("Nyagatare"));
@@ -377,21 +416,92 @@ export function LandfillPage() {
   // AHP CR from normalized weights (always 0 for direct-entry weights — consistent by definition)
   const ahpCR = 0.0;
 
-  const { mutate, data, isPending, error } = useMutation<LandfillResult, Error>({
-    mutationFn: () =>
-      api.landfill({
-        aoi,
-                n_classes: nClasses,
-        reverse_river: reverseRiver,
-        reverse_residential: reverseResidential,
-        reverse_slope: reverseSlope,
-        reverse_road: reverseRoad,
-        reverse_lulc: reverseLulc,
-        custom_weights: Object.fromEntries(
-          FACTOR_KEYS.map((k) => [k, normalizedWeights[k] / 100])
-        ) as Record<string, number>,
-      }),
+  const mapMutation = useMutation({
+    mutationFn: () => api.landfill.map({
+      aoi,
+      reverse_river: reverseRiver,
+      reverse_residential: reverseResidential,
+      reverse_slope: reverseSlope,
+      reverse_road: reverseRoad,
+      reverse_lulc: reverseLulc,
+      custom_weights: Object.fromEntries(
+        FACTOR_KEYS.map((k) => [k, normalizedWeights[k] / 100])
+      ) as Record<string, number>,
+      n_classes: nClasses,
+      method,
+      custom_labels: customClassNames,
+    }),
   });
+  const statsMutation = useMutation({
+    mutationFn: () => api.landfill.stats({
+      aoi,
+      reverse_river: reverseRiver,
+      reverse_residential: reverseResidential,
+      reverse_slope: reverseSlope,
+      reverse_road: reverseRoad,
+      reverse_lulc: reverseLulc,
+      custom_weights: Object.fromEntries(
+        FACTOR_KEYS.map((k) => [k, normalizedWeights[k] / 100])
+      ) as Record<string, number>,
+      n_classes: nClasses,
+      method,
+      custom_labels: customClassNames,
+    }),
+  });
+  const classifyMutation = useMutation({
+    mutationFn: () => api.landfill.classify({
+      aoi,
+      reverse_river: reverseRiver,
+      reverse_residential: reverseResidential,
+      reverse_slope: reverseSlope,
+      reverse_road: reverseRoad,
+      reverse_lulc: reverseLulc,
+      custom_weights: Object.fromEntries(
+        FACTOR_KEYS.map((k) => [k, normalizedWeights[k] / 100])
+      ) as Record<string, number>,
+      n_classes: nClasses,
+      method,
+      custom_labels: customClassNames,
+    }),
+  });
+  const exportMutation = useMutation({
+    mutationFn: () => api.landfill.export({
+      aoi,
+      reverse_river: reverseRiver,
+      reverse_residential: reverseResidential,
+      reverse_slope: reverseSlope,
+      reverse_road: reverseRoad,
+      reverse_lulc: reverseLulc,
+      custom_weights: Object.fromEntries(
+        FACTOR_KEYS.map((k) => [k, normalizedWeights[k] / 100])
+      ) as Record<string, number>,
+      n_classes: nClasses,
+      method,
+      custom_labels: customClassNames,
+    }),
+  });
+
+  const handleAnalyze = () => {
+    mapMutation.mutate();
+    statsMutation.mutate();
+    classifyMutation.mutate();
+    exportMutation.mutate();
+  };
+
+  const isPending = mapMutation.isPending || statsMutation.isPending || classifyMutation.isPending || exportMutation.isPending;
+  const error = mapMutation.error || statsMutation.error || classifyMutation.error || exportMutation.error;
+  
+  const mapData = mapMutation.data;
+  const statsData = statsMutation.data;
+  const classifyData = classifyMutation.data;
+  const exportData = exportMutation.data;
+
+  const data = (mapData && statsData && classifyData && exportData) ? {
+    ...mapData,
+    ...statsData,
+    ...classifyData,
+    ...exportData
+  } : null;
 
   const analysisDate = new Date().toLocaleDateString("en-US", {
     year: "numeric", month: "long", day: "numeric",
@@ -415,10 +525,55 @@ export function LandfillPage() {
         <StudyAreaSelector value={aoi} onChange={setAoi} />
 
         {/* Classes */}
-        <div className="space-y-2">
-          <Label>Classes: {nClasses}</Label>
-          <Slider min={2} max={10} step={1} value={[nClasses]} onValueChange={([v]) => setNClasses(v)} />
+        
+        <ClassificationControls
+          method={method}
+          setMethod={setMethod}
+          nClasses={nClasses}
+          setNClasses={setNClasses}
+          minClasses={2}
+          maxClasses={10}
+        />
+
+        <div className="space-y-3 bg-muted/40 border rounded-lg p-3">
+          <div className="flex items-center justify-between">
+            <Label className="text-xs font-semibold flex items-center gap-1.5 text-foreground">
+              <Tag className="w-3.5 h-3.5 text-primary" />
+              Rename Classes ({nClasses})
+            </Label>
+            <button
+              type="button"
+              onClick={() => setCustomClassNames(getDefaultLabels(nClasses))}
+              className="text-[10px] text-muted-foreground hover:text-primary flex items-center gap-1 transition-colors"
+              title="Reset to default names"
+            >
+              <RotateCcw className="w-3 h-3" /> Reset
+            </button>
+          </div>
+
+          <div className="space-y-1.5 max-h-[200px] overflow-y-auto pr-1">
+            {Array.from({ length: nClasses }).map((_, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <span
+                  className="w-3.5 h-3.5 rounded-xs shrink-0 border border-black/15 shadow-2xs"
+                  style={{ background: CLASS_COLOR_LIST[i % CLASS_COLOR_LIST.length] }}
+                />
+                <input
+                  type="text"
+                  value={customClassNames[i] || ""}
+                  placeholder={`Class ${i + 1}`}
+                  onChange={(e) => {
+                    const next = [...customClassNames];
+                    next[i] = e.target.value;
+                    setCustomClassNames(next);
+                  }}
+                  className="flex-1 h-7 text-xs rounded border border-input bg-background px-2 text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+            ))}
+          </div>
         </div>
+
 
         {/* ── AHP Weight Sliders ── */}
         <div className="space-y-3">
@@ -494,9 +649,13 @@ export function LandfillPage() {
           </div>
         </div>
 
-        <Button className="w-full gap-2" onClick={() => mutate()} disabled={isPending}>
-          {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-          {isPending ? "Computing…" : "Analyze Suitability"}
+        <Button
+          className="w-full gap-2 mt-4"
+          onClick={handleAnalyze}
+          disabled={isPending}
+        >
+          {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+          {isPending ? "Computing…" : "Run Multi-Criteria Analysis"}
         </Button>
 
         {error && (
@@ -606,7 +765,7 @@ export function LandfillPage() {
               <div>
                 <h3 className="font-medium mb-3">Suitability Class Areas</h3>
                 <ResponsiveContainer width="100%" height={240}>
-                  <BarChart data={Object.entries(data.class_areas_km2).map(([k, v], i) => ({
+                  <BarChart data={Object.entries(data.class_areas_km2 || {}).map(([k, v], i) => ({
                     name: k, area: v, fill: CLASS_COLOR_LIST[i % CLASS_COLOR_LIST.length],
                   }))}>
                     <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={60} />
@@ -628,7 +787,7 @@ export function LandfillPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {Object.entries(data.class_areas_km2).map(([cls, km2], i) => (
+                    {Object.entries(data.class_areas_km2 || {}).map(([cls, km2], i) => (
                       <tr key={cls} className={i % 2 === 0 ? "bg-background" : "bg-muted/30"}>
                         <td className="px-3 py-1.5 flex items-center gap-2">
                           <span
@@ -679,6 +838,7 @@ export function LandfillPage() {
                   district={aoi.name || "Custom"}
                   title="Landfill Site Suitability"
                   classAreas={data.class_areas_km2}
+
                 />
               </div>
             </TabsContent>
@@ -832,7 +992,7 @@ export function LandfillPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {Object.entries(data.class_areas_km2).map(([cls, km2], i) => {
+                    {Object.entries(data.class_areas_km2 || {}).map(([cls, km2], i) => {
                       const total2 = Object.values(data.class_areas_km2).reduce((a, b) => a + b, 0);
                       return (
                         <tr key={cls} className={i % 2 === 0 ? "bg-background" : "bg-muted/30"}>

@@ -1,57 +1,37 @@
 import ee
 from .aoi_utils import get_aoi_geometry
 import concurrent.futures
+from .classify_utils import quantile_classify
 
 _PALETTE = ["#0000ff", "#00ffff", "#00ff00", "#ffff00", "#ff0000"]
 _VIS = {"min": 0, "max": 100, "palette": _PALETTE}
 
-def compute_biomass_depletion(aoi_config: dict, buffer_km: float = 3.0, year_start: int = 2019, year_end: int = 2023):
-    """
-    Computes Firewood/Biomass Depletion Risk.
-    Risk (0-100) = Proximity to settlement * (Recent Forest Loss OR NDVI Degradation) * Forest Baseline
-    """
-    
+def _build_biomass_base(aoi_config: dict, buffer_km: float = 3.0, year_start: int = 2019, year_end: int = 2023):
     aoi = get_aoi_geometry(aoi_config)
-    # Calculate dynamic scale based on geometry size (sq km)
     area_sqkm = aoi.area().divide(1e6).getInfo()
     if area_sqkm > 10000:
-        dynamic_scale = 500   # Entire Country (High memory footprint)
+        dynamic_scale = 500
     elif area_sqkm > 2000:
-        dynamic_scale = 250   # Province
+        dynamic_scale = 250
     elif area_sqkm > 500:
-        dynamic_scale = 100   # Large District
+        dynamic_scale = 100
     else:
-        dynamic_scale = 30    # Sector or small polygon
+        dynamic_scale = 30
 
-    
-    # 1. Settlement Proximity Risk (WorldPop)
     pop = ee.ImageCollection("WorldPop/GP/100m/pop_age_sex_cons_unadj") \
         .filter(ee.Filter.inList('country', ['RWA'])) \
-        .filterDate('2020-01-01', '2021-01-01') \
-        .mean()
+        .filterDate('2020-01-01', '2021-01-01').mean()
     
-    # Distance to areas with > 10 people per pixel.
-    # fastDistanceTransform measures distance to nearest 0 pixel in pixels.
-    # We make settlements 0, everything else 1.
     settlements_inv = pop.lte(10)
-    # Convert pixel distance to meters (approx 100m per WorldPop pixel)
     dist_m = settlements_inv.fastDistanceTransform(256).multiply(100)
-    
     max_dist = buffer_km * 1000
-    # Proximity risk: 1.0 at settlement (0 dist), 0.0 at max_dist
     proximity_risk = ee.Image(1).subtract(dist_m.divide(max_dist)).clamp(0, 1)
     
-    # 2. Forest Baseline & Clear-cut Loss (Hansen)
     hansen = ee.Image("UMD/hansen/global_forest_change_2022_v1_10")
     forest_mask = hansen.select('treecover2000').gt(30)
-    
-    # Recent clear-cut loss (e.g. 2019 = 19 in lossyear)
     recent_loss = hansen.select('lossyear').gte(year_start - 2000)
     
-    # 3. NDVI Degradation (Thinning/Gathering) - Dry Season (Jun-Aug)
-        
     from gee.aoi_utils import get_historical_ndvi
-    
     ndvi_images = []
     for y in range(year_start, year_end + 1):
         start_date = f"{y}-06-01"
@@ -60,69 +40,26 @@ def compute_biomass_depletion(aoi_config: dict, buffer_km: float = 3.0, year_sta
         ndvi_images.append(ndvi.addBands(ee.Image.constant(y).rename('year')).float())
         
     ndvi_col = ee.ImageCollection(ndvi_images)
-    
-    # Linear trend of NDVI over time
     trend = ndvi_col.select(['year', 'NDVI']).reduce(ee.Reducer.linearFit())
     slope = trend.select('scale')
-    
-    # Convert negative slope (greenness loss) to risk 0-1
-    # A slope of -0.05 NDVI per year is very high degradation
     degradation_risk = slope.multiply(-1).divide(0.05).clamp(0, 1).unmask(0)
     
-    # 4. Final Biomass Depletion Score
-    # Risk is max of clear-cut loss or gradual degradation
     combined_loss_risk = degradation_risk.max(recent_loss.unmask(0))
-
-    
     depletion_score = proximity_risk.multiply(combined_loss_risk).multiply(forest_mask).multiply(100).round()
     depletion_score = depletion_score.clip(aoi).rename('depletion_risk')
-    
-    # Mask out 0 areas so the map isn't covered in solid 0 values
     depletion_score = depletion_score.updateMask(depletion_score.gt(0))
     
-    # 5. Statistics
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        f_stats = executor.submit(
-            lambda: depletion_score.reduceRegion(
-                reducer=ee.Reducer.mean().combine(ee.Reducer.max(), sharedInputs=True),
-                geometry=aoi,
-                scale=dynamic_scale,
-                maxPixels=1e10
-            ).getInfo()
-        )
-        
-        # Area distribution
-        # Let's group into classes: High (75-100), Moderate (50-75), Low (25-50), Minimal (1-25)
-        classes = ee.Image(0) \
-            .where(depletion_score.gt(0).And(depletion_score.lte(25)), 1) \
-            .where(depletion_score.gt(25).And(depletion_score.lte(50)), 2) \
-            .where(depletion_score.gt(50).And(depletion_score.lte(75)), 3) \
-            .where(depletion_score.gt(75), 4) \
-            .updateMask(depletion_score.gt(0))
-            
-        area_img = ee.Image.pixelArea().addBands(classes).reduceRegion(
-            reducer=ee.Reducer.sum().group(groupField=1, groupName='class'),
-            geometry=aoi,
-            scale=dynamic_scale,
-            maxPixels=1e10
-        )
-        
-        f_area = executor.submit(lambda: area_img.getInfo())
-        f_bounds = executor.submit(lambda: aoi.bounds().getInfo()["coordinates"][0])
-        
-        stats_raw = f_stats.result()
-        area_raw = f_area.result()
-        bounds = f_bounds.result()
-        
-    area_groups = area_raw.get('groups', [])
-    area_dict = {str(int(g['class'])): g['sum'] for g in area_groups}
-    
-    class_areas_km2 = {
-        "High Risk (75-100)": round(area_dict.get('4', 0) / 1e6, 2),
-        "Moderate Risk (50-75)": round(area_dict.get('3', 0) / 1e6, 2),
-        "Low Risk (25-50)": round(area_dict.get('2', 0) / 1e6, 2),
-        "Minimal Risk (1-25)": round(area_dict.get('1', 0) / 1e6, 2)
-    }
+    return aoi, dynamic_scale, depletion_score, proximity_risk, recent_loss, degradation_risk, forest_mask
+
+def compute_biomass_map(aoi_config: dict, buffer_km: float = 3.0, year_start: int = 2019, year_end: int = 2023) -> dict:
+    aoi, dynamic_scale, depletion_score, proximity_risk, recent_loss, degradation_risk, forest_mask = _build_biomass_base(aoi_config, buffer_km, year_start, year_end)
+
+    classes = ee.Image(0) \
+        .where(depletion_score.gt(0).And(depletion_score.lte(25)), 1) \
+        .where(depletion_score.gt(25).And(depletion_score.lte(50)), 2) \
+        .where(depletion_score.gt(50).And(depletion_score.lte(75)), 3) \
+        .where(depletion_score.gt(75), 4) \
+        .updateMask(depletion_score.gt(0))
 
     _CLASS_VIS = {"min": 1, "max": 4, "palette": ["#0000ff", "#00ff00", "#ffff00", "#ff0000"]}
     map_id = classes.getMapId(_CLASS_VIS)
@@ -172,32 +109,36 @@ def compute_biomass_depletion(aoi_config: dict, buffer_km: float = 3.0, year_sta
     }
     
     factor_results = {}
-    for key, f_data in factor_maps.items():
-        img = f_data["image"]
-        f_vis = {"min": f_data["min"], "max": f_data["max"], "palette": f_data["palette"]}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        def process_factor(key, f_data):
+            img = f_data["image"]
+            f_vis = {"min": f_data["min"], "max": f_data["max"], "palette": f_data["palette"]}
+            if f_data["max"] == 1:
+                img = img.updateMask(img.gt(0))
+            f_mapid = img.getMapId(f_vis)
+            f_thumb = img.getThumbURL({
+                "min": f_vis["min"], "max": f_vis["max"], 
+                "palette": f_vis["palette"], 
+                "dimensions": 512, "region": aoi.bounds(), "format": "png"
+            })
+            return key, {
+                "title": f_data["title"],
+                "description": f_data["description"],
+                "tile_url": f_mapid["tile_fetcher"].url_format,
+                "thumb_url": f_thumb,
+                "min": f_vis["min"],
+                "max": f_vis["max"],
+                "palette": f_vis["palette"],
+                "unit": f_data["unit"],
+                "reverse": f_data["reverse"]
+            }
         
-        if f_data["max"] == 1:
-            img = img.updateMask(img.gt(0))
-            
-        f_mapid = img.getMapId(f_vis)
-        f_thumb = img.getThumbURL({
-            "min": f_vis["min"], "max": f_vis["max"], 
-            "palette": f_vis["palette"], 
-            "dimensions": 512, "region": aoi.bounds(), "format": "png"
-        })
-        
-        factor_results[key] = {
-            "title": f_data["title"],
-            "description": f_data["description"],
-            "tile_url": f_mapid["tile_fetcher"].url_format,
-            "thumb_url": f_thumb,
-            "min": f_vis["min"],
-            "max": f_vis["max"],
-            "palette": f_vis["palette"],
-            "unit": f_data["unit"],
-            "reverse": f_data["reverse"]
-        }
-    
+        futures = [executor.submit(process_factor, key, f_data) for key, f_data in factor_maps.items()]
+        for future in concurrent.futures.as_completed(futures):
+            k, result_dict = future.result()
+            factor_results[k] = result_dict
+
+    bounds = aoi.bounds().getInfo()["coordinates"][0]
     center_lon = (bounds[0][0] + bounds[2][0]) / 2
     center_lat = (bounds[0][1] + bounds[2][1]) / 2
 
@@ -207,76 +148,81 @@ def compute_biomass_depletion(aoi_config: dict, buffer_km: float = 3.0, year_sta
         "factor_maps": factor_results,
         "center": [center_lat, center_lon],
         "bbox": bounds,
-        "stats": {
-            "Mean Depletion Risk": round(stats_raw.get("depletion_risk_mean", 0) or 0, 1),
-            "Max Depletion Risk": round(stats_raw.get("depletion_risk_max", 0) or 0, 1)
-        },
-        "class_areas_km2": class_areas_km2,
         "district": aoi_config.get("district", aoi_config.get("name", "Custom AOI"))
     }
 
+def compute_biomass_stats(aoi_config: dict, buffer_km: float = 3.0, year_start: int = 2019, year_end: int = 2023) -> dict:
+    aoi, dynamic_scale, depletion_score, _, _, _, _ = _build_biomass_base(aoi_config, buffer_km, year_start, year_end)
+
+    stats_raw = depletion_score.reduceRegion(
+        reducer=ee.Reducer.mean().combine(ee.Reducer.max(), sharedInputs=True),
+        geometry=aoi,
+        scale=dynamic_scale,
+        maxPixels=1e10
+    ).getInfo()
+
+    return {
+        "stats": {
+            "Mean Depletion Risk": round(stats_raw.get("depletion_risk_mean", 0) or 0, 1),
+            "Max Depletion Risk": round(stats_raw.get("depletion_risk_max", 0) or 0, 1)
+        }
+    }
+
+def compute_biomass_classify(aoi_config: dict, buffer_km: float = 3.0, year_start: int = 2019, year_end: int = 2023, n_classes: int = 4, method: str = "natural_breaks", custom_labels: list = None) -> dict:
+    aoi, dynamic_scale, depletion_score, _, _, _, _ = _build_biomass_base(aoi_config, buffer_km, year_start, year_end)
+
+    layers = [{
+        "name": "risk_index",
+        "title": "Biomass Depletion Risk",
+        "image": depletion_score,
+        "mask": depletion_score.gt(0)
+    }]
+
+    return quantile_classify(
+        layers=layers,
+        aoi=aoi,
+        scale=dynamic_scale,
+        n_classes=n_classes,
+        reverse_palette=False,
+        custom_labels=custom_labels,
+        method=method
+    )
+
+def compute_biomass_export(aoi_config: dict, buffer_km: float = 3.0, year_start: int = 2019, year_end: int = 2023) -> dict:
+    aoi, _, depletion_score, _, _, _, _ = _build_biomass_base(aoi_config, buffer_km, year_start, year_end)
+    return {
+        "download_url": depletion_score.getDownloadURL({
+            "name": "biomass_depletion_risk",
+            "scale": 100,
+            "region": aoi.bounds(),
+            "format": "GEO_TIFF",
+            "crs": "EPSG:4326"
+        })
+    }
+
 def export_factor_map(aoi_config: dict, factor_key: str, palette: list = None, buffer_km: float = 3.0, year_start: int = 2019, year_end: int = 2023):
-    """
-    Export a specific biomass factor as a GeoTIFF, either raw or styled (RGB).
-    """
-    aoi = get_aoi_geometry(aoi_config)
+    aoi, _, _, proximity_risk, recent_loss, degradation_risk, forest_mask = _build_biomass_base(aoi_config, buffer_km, year_start, year_end)
     
     if factor_key == "proximity":
-        pop = ee.ImageCollection("WorldPop/GP/100m/pop_age_sex_cons_unadj") \
-            .filter(ee.Filter.inList('country', ['RWA'])) \
-            .filterDate('2020-01-01', '2021-01-01').mean()
-        dist_m = pop.lte(10).fastDistanceTransform(256).multiply(100)
-        img = ee.Image(1).subtract(dist_m.divide(buffer_km * 1000)).clamp(0, 1)
-        img = img.clip(aoi).multiply(100).round()
-        default_palette = ["#f7fbff", "#c6dbef", "#6baed6", "#2171b5", "#08306b"]
+        img = proximity_risk.clip(aoi).multiply(100).round()
         vis_min, vis_max = 0, 100
-        
     elif factor_key == "recent_loss":
-        hansen = ee.Image("UMD/hansen/global_forest_change_2022_v1_10")
-        img = hansen.select('lossyear').gte(year_start - 2000).clip(aoi).unmask(0)
-        default_palette = ["#ffffff", "#d73027"]
+        img = recent_loss.clip(aoi).unmask(0)
         vis_min, vis_max = 0, 1
-        
     elif factor_key == "degradation":
-        from gee.aoi_utils import get_historical_ndvi
-        ndvi_images = []
-        for y in range(year_start, year_end + 1):
-            start_date = f"{y}-06-01"
-            end_date = f"{y}-08-31"
-            ndvi = get_historical_ndvi(aoi, y, start_date, end_date, 60).rename('NDVI')
-            ndvi_images.append(ndvi.addBands(ee.Image.constant(y).rename('year')).float())
-        ndvi_col = ee.ImageCollection(ndvi_images)
-        slope = ndvi_col.select(['year', 'NDVI']).reduce(ee.Reducer.linearFit()).select('scale')
-        img = slope.multiply(-1).divide(0.05).clamp(0, 1).unmask(0).clip(aoi).multiply(100).round()
-        default_palette = ["#ffffcc", "#ffeda0", "#fed976", "#feb24c", "#fd8d3c", "#fc4e2a", "#e31a1c", "#b10026"]
+        img = degradation_risk.clip(aoi).unmask(0).multiply(100).round()
         vis_min, vis_max = 0, 100
-        
     elif factor_key == "baseline":
-        hansen = ee.Image("UMD/hansen/global_forest_change_2022_v1_10")
-        img = hansen.select('treecover2000').gt(30).clip(aoi)
-        default_palette = ["#ffffff", "#238b45"]
+        img = forest_mask.clip(aoi)
         vis_min, vis_max = 0, 1
-    
     else:
         raise ValueError(f"Unknown factor {factor_key}")
         
     if palette:
-        # User requested a styled RGB export
         styled = img.visualize(min=vis_min, max=vis_max, palette=palette)
-        url = styled.getDownloadURL({
-            "name": f"biomass_{factor_key}_styled",
-            "scale": 100,
-            "region": aoi.bounds(),
-            "format": "GEO_TIFF"
-        })
+        url = styled.getDownloadURL({"name": f"biomass_{factor_key}_styled", "scale": 100, "region": aoi.bounds(), "format": "GEO_TIFF"})
     else:
-        # Raw data export
-        url = img.toFloat().getDownloadURL({
-            "name": f"biomass_{factor_key}_raw",
-            "scale": 100,
-            "region": aoi.bounds(),
-            "format": "GEO_TIFF"
-        })
+        url = img.toFloat().getDownloadURL({"name": f"biomass_{factor_key}_raw", "scale": 100, "region": aoi.bounds(), "format": "GEO_TIFF"})
         
     return {"download_url": url}
 

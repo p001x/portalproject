@@ -68,25 +68,11 @@ def norm_positive(img: ee.Image, lo: float, hi: float, name: str) -> ee.Image:
     ).rename(name)
 
 
-def compute_agricultural_drought(
-    aoi_config: dict,
-    year: int,
-    n_classes: int = 5,
-    reverse_sm: bool = False,
-    reverse_rf: bool = False,
-    reverse_ndvi: bool = False,
-    reverse_vci: bool = False,
-    reverse_lst: bool = False,
-    reverse_cdd: bool = False,
-    reverse_evi: bool = False,
-) -> dict:
-    cache_key = (json.dumps(aoi_config, sort_keys=True), year, n_classes,
-        reverse_sm, reverse_rf, reverse_ndvi, reverse_vci, reverse_lst, reverse_cdd, reverse_evi
-    )
-    with _lock:
-        if cache_key in _cache:
-            return _cache[cache_key]
-
+def _build_drought_images(
+    aoi_config: dict, year: int,
+    reverse_sm: bool, reverse_rf: bool, reverse_ndvi: bool,
+    reverse_vci: bool, reverse_lst: bool, reverse_cdd: bool, reverse_evi: bool
+):
     from gee.aoi_utils import get_aoi_geometry
     aoi = get_aoi_geometry(aoi_config)
 
@@ -260,93 +246,120 @@ def compute_agricultural_drought(
     )
     
     dvi = dvi.reproject(crs="EPSG:4326", scale=get_dynamic_scale(geometry))
+    return aoi, geometry, dvi, vci, sm_anom, rf_anom, lst_anom, dry_pentads, ndvi_current
 
-    dvi_class = (
-        ee.Image(0)
-        .where(dvi.lte(0.20), 1)
-        .where(dvi.gt(0.20).And(dvi.lte(0.40)), 2)
-        .where(dvi.gt(0.40).And(dvi.lte(0.60)), 3)
-        .where(dvi.gt(0.60).And(dvi.lte(0.80)), 4)
-        .where(dvi.gt(0.80), 5)
-        .rename("Vuln_Class").updateMask(dvi.mask()).clip(geometry)
+
+def compute_drought_map(
+    aoi_config: dict, year: int,
+    reverse_sm: bool = False, reverse_rf: bool = False, reverse_ndvi: bool = False,
+    reverse_vci: bool = False, reverse_lst: bool = False, reverse_cdd: bool = False, reverse_evi: bool = False
+) -> dict:
+    cache_key = ("map", json.dumps(aoi_config, sort_keys=True), year, reverse_sm, reverse_rf, reverse_ndvi, reverse_vci, reverse_lst, reverse_cdd, reverse_evi)
+    with _lock:
+        if cache_key in _cache:
+            return _cache[cache_key]
+
+    aoi, geometry, dvi, _, _, _, _, _, _ = _build_drought_images(
+        aoi_config, year, reverse_sm, reverse_rf, reverse_ndvi, reverse_vci, reverse_lst, reverse_cdd, reverse_evi
     )
 
     dvi_map_id = dvi.getMapId(DVI_VIS)
-    dvi_class_map_id = dvi_class.getMapId(CLASS_VIS)
-
-    import concurrent.futures
-
-    class_area_bands = ee.Image.cat(
-        [dvi_class.eq(i + 1).multiply(ee.Image.pixelArea()).rename(f"c{i}") for i in range(5)]
-    )
-
-    def get_stats_and_areas():
-        combined = ee.Dictionary({
-            "stats": dvi.reduceRegion(
-                reducer=ee.Reducer.mean().combine(ee.Reducer.min(), sharedInputs=True)
-                .combine(ee.Reducer.max(), sharedInputs=True).combine(ee.Reducer.stdDev(), sharedInputs=True),
-                geometry=geometry, scale=get_dynamic_scale(geometry), maxPixels=1e10,
-            ),
-            "areas": class_area_bands.reduceRegion(
-                reducer=ee.Reducer.sum(), geometry=geometry, scale=get_dynamic_scale(geometry), maxPixels=1e10,
-            ),
-            "centroid": geometry.centroid(maxError=100).coordinates(),
-            "bounds": geometry.bounds().coordinates().get(0)
-        })
-        return combined.getInfo()
-
-    def get_classify():
-        return quantile_classify(
-            layers=[
-                {"name": "DVI", "image": dvi, "title": "Drought Vulnerability Index"},
-                {"name": "VCI", "image": vci, "title": "Vegetation Condition Index (VCI)"},
-                {"name": "SM", "image": sm_anom, "title": "Soil Moisture Anomaly (SM)"},
-                {"name": "RF", "image": rf_anom, "title": "Rainfall Anomaly (RF)"},
-                {"name": "LST", "image": lst_anom, "title": "Land Surface Temp Anomaly (LST)"},
-                {"name": "CDD", "image": dry_pentads, "title": "Consecutive Dry Days (CDD)"},
-                {"name": "NDVI", "image": ndvi_current, "title": "NDVI Vegetation Health"},
-            ],
-            aoi=geometry, scale=get_dynamic_scale(geometry), n_classes=n_classes,
-        )
-
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        future_stats = executor.submit(get_stats_and_areas)
-        future_classify = executor.submit(get_classify)
-
-        combined_results = future_stats.result()
-        classify = future_classify.result()
-
-    stats_raw = combined_results.get("stats", {})
-    class_area_dict = combined_results.get("areas", {})
-    centroid = combined_results.get("centroid", [0, 0])
-    bounds = combined_results.get("bounds")
-    
-    class_areas = {
-        lbl: round((class_area_dict.get(f"c{i}", 0) or 0) / 1e6, 2)
-        for i, lbl in enumerate(CLASS_NAMES)
-    }
-
-    center = [centroid[1], centroid[0]]
+    centroid = geometry.centroid(maxError=100).coordinates().getInfo()
+    bounds = geometry.bounds().coordinates().get(0).getInfo()
 
     result = {
-        "dvi_tile_url": dvi_map_id["tile_fetcher"].url_format,
-        "dvi_thumb_url": dvi.getThumbURL({**DVI_VIS, "region": geometry.bounds(), "dimensions": 800, "format": "png"}),
-        "dvi_download_url": dvi.getDownloadURL({"region": geometry.bounds(), "scale": 100, "format": "GEO_TIFF", "crs": "EPSG:4326"}),
-        "dvi_class_tile_url": dvi_class_map_id["tile_fetcher"].url_format,
-        "dvi_class_thumb_url": dvi_class.getThumbURL({**CLASS_VIS, "region": geometry.bounds(), "dimensions": 800, "format": "png"}),
-        "stats": {
-            "Mean DVI": round(stats_raw.get("DVI_mean") or 0, 3),
-            "Min DVI": round(stats_raw.get("DVI_min") or 0, 3),
-            "Max DVI": round(stats_raw.get("DVI_max") or 0, 3),
-            "Std Dev": round(stats_raw.get("DVI_stdDev") or 0, 3),
-        },
-        "class_areas_km2": class_areas,
-        "classify": classify,
-        "center": center,
-        "district": aoi_config.get("district", aoi_config.get("name", "Custom AOI")),
+        "tile_url": dvi_map_id["tile_fetcher"].url_format,
+        "thumb_url": dvi.getThumbURL({**DVI_VIS, "region": geometry.bounds(), "dimensions": 800, "format": "png"}),
+        "center": [centroid[1], centroid[0]],
         "bbox": bounds,
-        "year": year,
+        "district": aoi_config.get("district", aoi_config.get("name", "Custom AOI")),
+    }
+    with _lock:
+        _cache[cache_key] = result
+    return result
+
+
+def compute_drought_stats(
+    aoi_config: dict, year: int,
+    reverse_sm: bool = False, reverse_rf: bool = False, reverse_ndvi: bool = False,
+    reverse_vci: bool = False, reverse_lst: bool = False, reverse_cdd: bool = False, reverse_evi: bool = False
+) -> dict:
+    cache_key = ("stats", json.dumps(aoi_config, sort_keys=True), year, reverse_sm, reverse_rf, reverse_ndvi, reverse_vci, reverse_lst, reverse_cdd, reverse_evi)
+    with _lock:
+        if cache_key in _cache:
+            return _cache[cache_key]
+
+    aoi, geometry, dvi, _, _, _, _, _, _ = _build_drought_images(
+        aoi_config, year, reverse_sm, reverse_rf, reverse_ndvi, reverse_vci, reverse_lst, reverse_cdd, reverse_evi
+    )
+
+    stats = dvi.reduceRegion(
+        reducer=ee.Reducer.mean().combine(ee.Reducer.min(), sharedInputs=True)
+        .combine(ee.Reducer.max(), sharedInputs=True).combine(ee.Reducer.stdDev(), sharedInputs=True),
+        geometry=geometry, scale=get_dynamic_scale(geometry), maxPixels=1e10,
+    ).getInfo()
+
+    result = {
+        "Mean DVI": round(stats.get("DVI_mean") or 0, 3),
+        "Min DVI": round(stats.get("DVI_min") or 0, 3),
+        "Max DVI": round(stats.get("DVI_max") or 0, 3),
+        "Std Dev": round(stats.get("DVI_stdDev") or 0, 3),
+    }
+    with _lock:
+        _cache[cache_key] = result
+    return result
+
+
+def compute_drought_classify(
+    aoi_config: dict, year: int, n_classes: int = 5, method: str = "natural_breaks", custom_labels: list = None,
+    reverse_sm: bool = False, reverse_rf: bool = False, reverse_ndvi: bool = False,
+    reverse_vci: bool = False, reverse_lst: bool = False, reverse_cdd: bool = False, reverse_evi: bool = False
+) -> dict:
+    cache_key = ("classify", json.dumps(aoi_config, sort_keys=True), year, n_classes, method, tuple(custom_labels) if custom_labels else None,
+                 reverse_sm, reverse_rf, reverse_ndvi, reverse_vci, reverse_lst, reverse_cdd, reverse_evi)
+    with _lock:
+        if cache_key in _cache:
+            return _cache[cache_key]
+
+    aoi, geometry, dvi, vci, sm_anom, rf_anom, lst_anom, dry_pentads, ndvi_current = _build_drought_images(
+        aoi_config, year, reverse_sm, reverse_rf, reverse_ndvi, reverse_vci, reverse_lst, reverse_cdd, reverse_evi
+    )
+
+    result = quantile_classify(
+        layers=[
+            {"name": "DVI", "image": dvi, "title": "Drought Vulnerability Index"},
+            {"name": "VCI", "image": vci, "title": "Vegetation Condition Index (VCI)"},
+            {"name": "SM", "image": sm_anom, "title": "Soil Moisture Anomaly (SM)"},
+            {"name": "RF", "image": rf_anom, "title": "Rainfall Anomaly (RF)"},
+            {"name": "LST", "image": lst_anom, "title": "Land Surface Temp Anomaly (LST)"},
+            {"name": "CDD", "image": dry_pentads, "title": "Consecutive Dry Days (CDD)"},
+            {"name": "NDVI", "image": ndvi_current, "title": "NDVI Vegetation Health"},
+        ],
+        aoi=geometry, scale=get_dynamic_scale(geometry), n_classes=n_classes,
+        method=method, custom_labels=custom_labels or CLASS_NAMES[:n_classes]
+    )
+
+    with _lock:
+        _cache[cache_key] = result
+    return result
+
+
+def compute_drought_export(
+    aoi_config: dict, year: int,
+    reverse_sm: bool = False, reverse_rf: bool = False, reverse_ndvi: bool = False,
+    reverse_vci: bool = False, reverse_lst: bool = False, reverse_cdd: bool = False, reverse_evi: bool = False
+) -> dict:
+    cache_key = ("export", json.dumps(aoi_config, sort_keys=True), year, reverse_sm, reverse_rf, reverse_ndvi, reverse_vci, reverse_lst, reverse_cdd, reverse_evi)
+    with _lock:
+        if cache_key in _cache:
+            return _cache[cache_key]
+
+    aoi, geometry, dvi, _, _, _, _, _, _ = _build_drought_images(
+        aoi_config, year, reverse_sm, reverse_rf, reverse_ndvi, reverse_vci, reverse_lst, reverse_cdd, reverse_evi
+    )
+
+    result = {
+        "download_url": dvi.getDownloadURL({"region": geometry.bounds(), "scale": 100, "format": "GEO_TIFF", "crs": "EPSG:4326"})
     }
     with _lock:
         _cache[cache_key] = result

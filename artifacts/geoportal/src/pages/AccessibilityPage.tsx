@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useMutation } from "@tanstack/react-query";
 import {
   BarChart,
@@ -9,12 +9,19 @@ import {
   ResponsiveContainer,
   Cell,
 } from "recharts";
-import { Loader2, Navigation, FileText } from "lucide-react";
+import { Loader2, Navigation, FileText , Tag, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { api, AccessibilityMapResult, AccessibilityStatsResult, AccessibilityClassifyResult, AccessibilityExportResult, AOIConfig } from "@/lib/api";
 import { DistrictMap } from "@/components/DistrictMap";
 import { ReportDownloadButton } from "@/components/ReportDownloadButton";
@@ -37,10 +44,44 @@ const AMENITY_OPTIONS = [
   { id: "marketplace", label: "Marketplace" }
 ];
 
+
+const DEFAULT_PRESETS: Record<number, string[]> = {
+  1: ["Uniform / Full Area"],
+  2: ["Low", "High"],
+  3: ["Low", "Moderate", "High"],
+  4: ["Low", "Moderate", "High", "Very High"],
+  5: ["Very Low", "Low", "Moderate", "High", "Very High"],
+  6: ["Very Low", "Low", "Moderate", "High", "Very High", "Extreme"],
+  7: ["Extremely Low", "Very Low", "Low", "Moderate", "High", "Very High", "Extreme"],
+  8: ["Extremely Low", "Very Low", "Low", "Moderately Low", "Moderately High", "High", "Very High", "Extreme"],
+  9: ["Extremely Low", "Very Low", "Low", "Moderately Low", "Moderate", "Moderately High", "High", "Very High", "Extreme"],
+  10: ["Extremely Low", "Very Low", "Low", "Moderately Low", "Moderate", "Moderately High", "High", "Very High", "Extremely High", "Extreme"],
+};
+
+function getDefaultLabels(n: number): string[] {
+  if (DEFAULT_PRESETS[n]) return [...DEFAULT_PRESETS[n]];
+  return Array.from({ length: n }, (_, i) => `Class ${i + 1}`);
+}
+
 export function AccessibilityPage() {
-  const [aoi, setAoi] = useState<AOIConfig>({ type: "gaul2", country: "Rwanda", name: "Kigali City", level1: "Kigali City", level2: "Gasabo" });
+  const [aoi, setAoi] = useState<AOIConfig>({ type: "rwanda", country: "Rwanda", name: "Rwanda" });
   const [selectedAmenities, setSelectedAmenities] = useState<string[]>(["primary_school"]);
   const [nClasses, setNClasses] = useState(4);
+  const [method, setMethod] = useState("natural_breaks");
+  const [customClassNames, setCustomClassNames] = useState<string[]>(() => getDefaultLabels(5));
+
+  useEffect(() => {
+    setCustomClassNames((prev) => {
+      if (prev.length === nClasses) return prev;
+      const next = getDefaultLabels(nClasses);
+      for (let i = 0; i < Math.min(prev.length, nClasses); i++) {
+        if (!DEFAULT_PRESETS[prev.length]?.includes(prev[i])) {
+          next[i] = prev[i];
+        }
+      }
+      return next;
+    });
+  }, [nClasses]);
   const [activeLayer, setActiveLayer] = useState<string>("classified");
   const [showRoads, setShowRoads] = useState(false);
 
@@ -106,6 +147,20 @@ export function AccessibilityPage() {
     });
   })();
 
+  const activeAreas = useMemo(() => {
+    const rawAreas = classifyData?.panels?.[0]?.class_areas || statsData?.class_areas_km2;
+    if (!rawAreas) return undefined;
+    const mapped: Record<string, number> = {};
+    const keys = Object.keys(rawAreas);
+    keys.forEach((oldKey, i) => {
+      const newKey = customClassNames[i] || oldKey;
+      mapped[newKey] = rawAreas[oldKey];
+    });
+    return mapped;
+  }, [classifyData, statsData, customClassNames]);
+
+
+
   return (
     <ResizablePanelGroup direction="horizontal" className="h-full items-stretch">
       {/* ── Controls sidebar ─────────────────────────────────────── */}
@@ -143,6 +198,73 @@ export function AccessibilityPage() {
           {selectedAmenities.length === 0 && (
             <p className="text-xs text-destructive">Select at least one amenity.</p>
           )}
+        </div>
+
+        <div className="space-y-1.5 pt-4 border-t">
+          <Label className="text-xs text-muted-foreground">Classification Method</Label>
+          <Select value={method} onValueChange={setMethod}>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Select Method" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="natural_breaks">Natural Breaks (Jenks)</SelectItem>
+              <SelectItem value="equal_interval">Discrete (Equal Interval)</SelectItem>
+              <SelectItem value="quantiles">Discrete (Quantiles / Equal Area)</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex justify-between items-center">
+            <Label>Classes: {nClasses}</Label>
+            <span className="text-[11px] text-muted-foreground">{nClasses} intervals</span>
+          </div>
+          <Slider
+            min={2}
+            max={10}
+            step={1}
+            value={[nClasses]}
+            onValueChange={([v]) => setNClasses(v)}
+          />
+        </div>
+
+        <div className="space-y-3 bg-muted/40 border rounded-lg p-3">
+          <div className="flex items-center justify-between">
+            <Label className="text-xs font-semibold flex items-center gap-1.5 text-foreground">
+              <Tag className="w-3.5 h-3.5 text-primary" />
+              Rename Classes ({nClasses})
+            </Label>
+            <button
+              type="button"
+              onClick={() => setCustomClassNames(getDefaultLabels(nClasses))}
+              className="text-[10px] text-muted-foreground hover:text-primary flex items-center gap-1 transition-colors"
+              title="Reset to default names"
+            >
+              <RotateCcw className="w-3 h-3" /> Reset
+            </button>
+          </div>
+
+          <div className="space-y-1.5 max-h-[200px] overflow-y-auto pr-1">
+            {Array.from({ length: nClasses }).map((_, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <span
+                  className="w-3.5 h-3.5 rounded-xs shrink-0 border border-black/15 shadow-2xs"
+                  style={{ background: ["#08306b", "#313695", "#74add1", "#fee090", "#f46d43", "#a50026", "#000000", "#555555", "#999999", "#cccccc"][i % 10] }}
+                />
+                <input
+                  type="text"
+                  value={customClassNames[i] || ""}
+                  placeholder={`Class ${i + 1}`}
+                  onChange={(e) => {
+                    const next = [...customClassNames];
+                    next[i] = e.target.value;
+                    setCustomClassNames(next);
+                  }}
+                  className="flex-1 h-7 text-xs rounded border border-input bg-background px-2 text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+            ))}
+          </div>
         </div>
 
         <div className="space-y-2 border-t pt-4">
@@ -405,6 +527,7 @@ export function AccessibilityPage() {
                     district={mapData.district || aoi.name || "Custom"}
                     title={activeLayer === "continuous" ? "Travel Time Continuous Map" : "Accessibility Classes Map"}
                     classAreas={activeLayer === "classified" ? statsData?.class_areas_km2 : undefined}
+
                   />
                 </div>
               ) : (

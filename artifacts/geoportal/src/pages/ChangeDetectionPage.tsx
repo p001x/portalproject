@@ -29,7 +29,7 @@ import {
 const CLASS_COLORS = ["#d73027", "#f46d43", "#fee08b", "#d9ef8b", "#1a9850"];
 
 export function ChangeDetectionPage() {
-  const [aoi, setAoi] = useState<AOIConfig>({ type: "gaul2", country: "Rwanda", name: "Musanze", level1: "North/Amajyaruguru", level2: "Musanze" });
+  const [aoi, setAoi] = useState<AOIConfig>({ type: "rwanda", country: "Rwanda", name: "Rwanda" });
   
   // Default values: 2023 vs 2024 (Jan to Jun)
   const [beforeStart, setBeforeStart] = useState("2023-01-01");

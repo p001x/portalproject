@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
+import { ClassificationControls } from "@/components/ClassificationControls";
 import { useMutation } from "@tanstack/react-query";
 import {
   BarChart,
@@ -9,7 +10,7 @@ import {
   ResponsiveContainer,
   Cell,
 } from "recharts";
-import { Loader2, Mountain, FileText , Play} from "lucide-react";
+import { Loader2, Mountain, FileText , Play, Tag, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
@@ -58,15 +59,79 @@ const palette = (n: number) => {
   return Array.from({ length: n }, (_, i) => full[Math.round(i * step)]);
 };
 
+
+const DEFAULT_PRESETS: Record<number, string[]> = {
+  1: ["Uniform / Full Area"],
+  2: ["Low", "High"],
+  3: ["Low", "Moderate", "High"],
+  4: ["Low", "Moderate", "High", "Very High"],
+  5: ["Very Low", "Low", "Moderate", "High", "Very High"],
+  6: ["Very Low", "Low", "Moderate", "High", "Very High", "Extreme"],
+  7: ["Extremely Low", "Very Low", "Low", "Moderate", "High", "Very High", "Extreme"],
+  8: ["Extremely Low", "Very Low", "Low", "Moderately Low", "Moderately High", "High", "Very High", "Extreme"],
+  9: ["Extremely Low", "Very Low", "Low", "Moderately Low", "Moderate", "Moderately High", "High", "Very High", "Extreme"],
+  10: ["Extremely Low", "Very Low", "Low", "Moderately Low", "Moderate", "Moderately High", "High", "Very High", "Extremely High", "Extreme"],
+};
+
+function getDefaultLabels(n: number): string[] {
+  if (DEFAULT_PRESETS[n]) return [...DEFAULT_PRESETS[n]];
+  return Array.from({ length: n }, (_, i) => `Class ${i + 1}`);
+}
+
 export function SlopePage() {
-  const [aoi, setAoi] = useState<AOIConfig>({ type: "gaul2", country: "Rwanda", name: "Musanze", level1: "North/Amajyaruguru", level2: "Musanze" });
+  const [aoi, setAoi] = useState<AOIConfig>({ type: "rwanda", country: "Rwanda", name: "Rwanda" });
   const [nClasses, setNClasses] = useState(5);
+  const [method, setMethod] = useState("natural_breaks");
+  const [customClassNames, setCustomClassNames] = useState<string[]>(() => getDefaultLabels(5));
+
+  useEffect(() => {
+    setCustomClassNames((prev) => {
+      if (prev.length === nClasses) return prev;
+      const next = getDefaultLabels(nClasses);
+      for (let i = 0; i < Math.min(prev.length, nClasses); i++) {
+        if (!DEFAULT_PRESETS[prev.length]?.includes(prev[i])) {
+          next[i] = prev[i];
+        }
+      }
+      return next;
+    });
+  }, [nClasses]);
   const [activeLayer, setActiveLayer] = useState("slope");
 
-  const { mutate, data, isPending, error } = useMutation<SlopeResult, Error>({
-    mutationFn: () => api.slope({ aoi,
-        n_classes: nClasses }),
+  const mapMutation = useMutation({
+    mutationFn: () => api.slope.map({ aoi, n_classes: nClasses, method, custom_labels: customClassNames }),
   });
+  const statsMutation = useMutation({
+    mutationFn: () => api.slope.stats({ aoi, n_classes: nClasses, method, custom_labels: customClassNames }),
+  });
+  const classifyMutation = useMutation({
+    mutationFn: () => api.slope.classify({ aoi, n_classes: nClasses, method, custom_labels: customClassNames }),
+  });
+  const exportMutation = useMutation({
+    mutationFn: () => api.slope.export({ aoi, n_classes: nClasses, method, custom_labels: customClassNames }),
+  });
+
+  const handleAnalyze = () => {
+    mapMutation.mutate();
+    statsMutation.mutate();
+    classifyMutation.mutate();
+    exportMutation.mutate();
+  };
+
+  const isPending = mapMutation.isPending || statsMutation.isPending || classifyMutation.isPending || exportMutation.isPending;
+  const error = mapMutation.error || statsMutation.error || classifyMutation.error || exportMutation.error;
+  
+  const mapData = mapMutation.data;
+  const statsData = statsMutation.data;
+  const classifyData = classifyMutation.data;
+  const exportData = exportMutation.data;
+
+  const data = (mapData && statsData && classifyData && exportData) ? {
+    ...mapData,
+    ...statsData,
+    ...classifyData,
+    ...exportData
+  } : null;
 
 
   const getActiveTileUrl = () => {
@@ -75,6 +140,20 @@ export function SlopePage() {
     if (activeLayer === "aspect") return data.aspect_tile_url;
     return data.slope_tile_url;
   };
+
+  const activeAreas = useMemo(() => {
+    const rawAreas = data?.classify?.panels?.[0]?.class_areas || data?.class_areas_km2;
+    if (!rawAreas) return undefined;
+    const mapped: Record<string, number> = {};
+    const keys = Object.keys(rawAreas);
+    keys.forEach((oldKey, i) => {
+      const newKey = customClassNames[i] || oldKey;
+      mapped[newKey] = rawAreas[oldKey];
+    });
+    return mapped;
+  }, [data, customClassNames]);
+
+
 
   return (
     <ResizablePanelGroup direction="horizontal" className="h-full items-stretch">
@@ -92,20 +171,59 @@ export function SlopePage() {
 
         <StudyAreaSelector value={aoi} onChange={setAoi} />
 
-        <div className="space-y-2">
-          <Label>Classes: {nClasses}</Label>
-          <Slider
-            min={2}
-            max={10}
-            step={1}
-            value={[nClasses]}
-            onValueChange={([v]) => setNClasses(v)}
-          />
+        
+        <ClassificationControls
+          method={method}
+          setMethod={setMethod}
+          nClasses={nClasses}
+          setNClasses={setNClasses}
+          minClasses={2}
+          maxClasses={10}
+        />
+
+        <div className="space-y-3 bg-muted/40 border rounded-lg p-3">
+          <div className="flex items-center justify-between">
+            <Label className="text-xs font-semibold flex items-center gap-1.5 text-foreground">
+              <Tag className="w-3.5 h-3.5 text-primary" />
+              Rename Classes ({nClasses})
+            </Label>
+            <button
+              type="button"
+              onClick={() => setCustomClassNames(getDefaultLabels(nClasses))}
+              className="text-[10px] text-muted-foreground hover:text-primary flex items-center gap-1 transition-colors"
+              title="Reset to default names"
+            >
+              <RotateCcw className="w-3 h-3" /> Reset
+            </button>
+          </div>
+
+          <div className="space-y-1.5 max-h-[200px] overflow-y-auto pr-1">
+            {Array.from({ length: nClasses }).map((_, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <span
+                  className="w-3.5 h-3.5 rounded-xs shrink-0 border border-black/15 shadow-2xs"
+                  style={{ background: palette(nClasses)[i % nClasses] }}
+                />
+                <input
+                  type="text"
+                  value={customClassNames[i] || ""}
+                  placeholder={`Class ${i + 1}`}
+                  onChange={(e) => {
+                    const next = [...customClassNames];
+                    next[i] = e.target.value;
+                    setCustomClassNames(next);
+                  }}
+                  className="flex-1 h-7 text-xs rounded border border-input bg-background px-2 text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+            ))}
+          </div>
         </div>
+
 
         <Button
           className="w-full gap-2"
-          onClick={() => mutate()}
+          onClick={handleAnalyze}
           disabled={isPending}
         >
           {isPending ? (
@@ -246,7 +364,7 @@ export function SlopePage() {
                 <h3 className="font-medium mb-3">Slope Class Areas</h3>
                 <ResponsiveContainer width="100%" height={240}>
                   <BarChart
-                    data={Object.entries(data.class_areas_km2).map(([k, v], i) => ({
+                    data={Object.entries(activeAreas || {}).map(([k, v], i) => ({
                       name: k,
                       area: v,
                       fill: SLOPE_COLORS[i % SLOPE_COLORS.length],
@@ -271,7 +389,7 @@ export function SlopePage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {Object.entries(data.class_areas_km2).map(([cls, km2], i) => (
+                    {Object.entries(activeAreas || {}).map(([cls, km2], i) => (
                       <tr key={cls} className={i % 2 === 0 ? "bg-background" : "bg-muted/30"}>
                         <td className="px-3 py-1.5 flex items-center gap-2">
                           <span
@@ -379,7 +497,7 @@ export function SlopePage() {
                   district={aoi.name || "Custom"}
                   dateRange="Current (SRTM 30m)"
                   stats={data.stats as Record<string, number>}
-                  classAreas={data.class_areas_km2}
+                  classAreas={activeAreas}
                   extraNotes={`Terrain analysis derived from USGS SRTM (Shuttle Radar Topography Mission) 30m Digital Elevation Model. Analysis covers ${data.district} district.`}
                   maps={data.classify?.panels?.map((p) => [p.title, p.thumb_url] as [string, string]) ?? []}
                   filename={`Slope_${data.district}.pdf`}

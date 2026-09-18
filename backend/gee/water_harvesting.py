@@ -30,12 +30,12 @@ def _build_water_harvesting_images(aoi_config: dict, year: int):
     start_date = f"{year}-01-01"
     end_date = f"{year}-12-31"
 
-    # Precipitation from TERRACLIMATE (Monthly, ~4km) - MUCH faster than summing daily CHIRPS
+    # Precipitation from TERRACLIMATE (Monthly, ~4km)
     precip_col = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterDate(start_date, end_date).select("pr")
     annual_precip = precip_col.sum().clip(aoi).rename("annual_precip")
     monthly_precip = annual_precip.divide(12).rename("monthly_precip")
     
-    return aoi, annual_precip, monthly_precip
+    return aoi, annual_precip, monthly_precip, precip_col
 
 
 def apply_natural_breaks(img: ee.Image, aoi: ee.Geometry, scale: int, n_classes: int = 5):
@@ -84,7 +84,7 @@ def compute_water_harvesting_map(aoi_config: dict, year: int) -> dict:
         if cache_key in _cache_map:
             return _cache_map[cache_key]
 
-    aoi, annual_precip, monthly_precip = _build_water_harvesting_images(aoi_config, year)
+    aoi, annual_precip, monthly_precip, _ = _build_water_harvesting_images(aoi_config, year)
 
     # Classify using natural breaks
     scale = get_dynamic_scale(aoi)
@@ -136,7 +136,7 @@ def compute_water_harvesting_stats(aoi_config: dict, year: int, runoff_coefficie
         if cache_key in _cache_stats:
             return _cache_stats[cache_key]
 
-    aoi, annual_precip, monthly_precip = _build_water_harvesting_images(aoi_config, year)
+    aoi, annual_precip, monthly_precip, precip_col = _build_water_harvesting_images(aoi_config, year)
     
     # Calculate Area
     if manual_area_m2 and manual_area_m2 > 0:
@@ -171,29 +171,76 @@ def compute_water_harvesting_stats(aoi_config: dict, year: int, runoff_coefficie
         # Calculate area of polygon in square meters
         area_m2 = aoi.area(1).getInfo()
         
-    # Average monthly precipitation
-    mean_reducer = ee.Reducer.mean()
-    res = monthly_precip.reduceRegion(reducer=mean_reducer, geometry=aoi, scale=get_dynamic_scale(aoi), maxPixels=1e10).getInfo()
+    # Extract time series of monthly precipitation over AOI
+    def get_monthly(img):
+        val = img.reduceRegion(reducer=ee.Reducer.mean(), geometry=aoi, scale=get_dynamic_scale(aoi), maxPixels=1e10).get('pr')
+        return ee.Feature(None, {'pr': val})
     
-    avg_monthly_precip = float(res.get("monthly_precip", 0) or 0)
+    fc = precip_col.map(get_monthly)
+    monthly_precip_series = fc.aggregate_array('pr').getInfo()
+    monthly_precip_series = [float(v) if v is not None else 0.0 for v in monthly_precip_series]
     
-    # Volume (Liters) = Area (m2) * Monthly Rainfall (mm) * Runoff Coefficient
-    volume_liters = area_m2 * avg_monthly_precip * runoff_coefficient
+    # Pad to 12 months if necessary (TerraClimate should have 12)
+    while len(monthly_precip_series) < 12:
+        monthly_precip_series.append(0.0)
+    monthly_precip_series = monthly_precip_series[:12]
     
-    recommended_tank = recommend_tank(volume_liters)
+    # Calculate Total Annual Harvest
+    annual_precip_mm = sum(monthly_precip_series)
+    annual_volume_liters = area_m2 * annual_precip_mm * runoff_coefficient
     
-    # Household demand logic
-    monthly_demand = household_size * daily_water_use_liters * 30
-    demand_met_percent = (volume_liters / monthly_demand * 100) if monthly_demand > 0 else 100
+    # Household demand
+    daily_demand = household_size * daily_water_use_liters
+    monthly_demand = daily_demand * 30.4 # Average days in a month
+    annual_demand = monthly_demand * 12
+    
+    # Tank Simulation
+    tank_sizes = [250, 500, 1000, 2000, 3000, 5000, 10000, 15000, 20000, 25000, 50000, 100000]
+    recommended_tank = None
+    best_months_met = 0
+    
+    for tank_size in tank_sizes:
+        storage = 0
+        months_met = 0
+        # Simulate over 2 years to allow reservoir to carry over
+        simulation_months = monthly_precip_series * 2
+        for pr in simulation_months:
+            inflow = area_m2 * pr * runoff_coefficient
+            storage += inflow
+            if storage > tank_size:
+                storage = tank_size
+            
+            if storage >= monthly_demand:
+                storage -= monthly_demand
+                months_met += 1
+            else:
+                storage = 0
+                
+        if months_met >= 24:
+            recommended_tank = tank_size
+            best_months_met = 12
+            break
+        else:
+            if months_met // 2 > best_months_met:
+                best_months_met = months_met // 2
+                
+    if recommended_tank is None:
+        recommended_tank = tank_sizes[-1]
+
+    # Overall demand met percentage based on pure volume, capped at 100
+    demand_met_percent = (annual_volume_liters / annual_demand * 100) if annual_demand > 0 else 100
+    if demand_met_percent > 100:
+        demand_met_percent = 100
 
     out = {
         "area_m2": round(area_m2, 2),
-        "avg_monthly_precip_mm": round(avg_monthly_precip, 2),
-        "monthly_volume_liters": round(volume_liters, 2),
+        "annual_precip_mm": round(annual_precip_mm, 2),
+        "annual_volume_liters": round(annual_volume_liters, 2),
         "recommended_tank_liters": recommended_tank,
         "runoff_coefficient": runoff_coefficient,
-        "monthly_demand_liters": round(monthly_demand, 2),
-        "demand_met_percent": round(demand_met_percent, 1)
+        "annual_demand_liters": round(annual_demand, 2),
+        "demand_met_percent": round(demand_met_percent, 1),
+        "months_of_autonomy": best_months_met
     }
     
     with _lock:
@@ -207,7 +254,7 @@ def compute_water_harvesting_export(aoi_config: dict, year: int) -> dict:
         if cache_key in _cache_export:
             return _cache_export[cache_key]
 
-    aoi, annual_precip, monthly_precip = _build_water_harvesting_images(aoi_config, year)
+    aoi, annual_precip, monthly_precip, _ = _build_water_harvesting_images(aoi_config, year)
     
     # Classify using natural breaks for export
     scale = get_dynamic_scale(aoi)

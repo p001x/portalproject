@@ -53,22 +53,45 @@ import auth_db
 
 from gee.irrigation import compute_irrigation_map, compute_irrigation_stats, compute_irrigation_export
 from gee.water_harvesting import compute_water_harvesting_map, compute_water_harvesting_stats, compute_water_harvesting_export
-from gee.wellscope import compute_wellscope
-from gee.biomass import compute_biomass_depletion
+from gee.wellscope import (
+    compute_wellscope_map,
+    compute_wellscope_stats,
+    compute_wellscope_classify,
+    compute_wellscope_export
+)
+from gee.biomass import (
+    compute_biomass_map,
+    compute_biomass_stats,
+    compute_biomass_classify,
+    compute_biomass_export
+)
 from gee.aoi_utils import RWANDA_DISTRICTS
 from gee.ndvi import compute_ndvi
 from gee.lst import compute_lst
-from gee.rusle import compute_rusle
-from gee.slope import compute_slope
-from gee.landfill import compute_landfill_suitability
+from gee.rusle import compute_rusle_map, compute_rusle_stats, compute_rusle_classify, compute_rusle_export
+from gee.slope import (
+    compute_slope_map,
+    compute_slope_stats,
+    compute_slope_classify,
+    compute_slope_export
+)
+from gee.landfill import (
+    compute_landfill_map,
+    compute_landfill_stats,
+    compute_landfill_classify,
+    compute_landfill_export
+)
 from gee.habitat import (
-    compute_habitat_map,
-    compute_habitat_stats,
-    compute_habitat_classify,
-    compute_habitat_export,
+    compute_habitat,
     compute_ahp_data as compute_habitat_ahp
 )
-from gee.air_pollution import compute_no2
+from gee.air_pollution import (
+    compute_air_pollution_map,
+    compute_air_pollution_stats,
+    compute_air_pollution_classify,
+    compute_air_pollution_export,
+    compute_air_pollution_timeseries,
+)
 from gee.landslide import (
     compute_landslide_map,
     compute_landslide_stats,
@@ -82,8 +105,18 @@ from gee.accessibility import (
     compute_accessibility_export,
 )
 from gee.uhi import compute_uhi
-from gee.drought import compute_agricultural_drought
-from gee.flood import compute_flood_susceptibility
+from gee.drought import (
+    compute_drought_map,
+    compute_drought_stats,
+    compute_drought_classify,
+    compute_drought_export
+)
+from gee.flood import (
+    compute_flood_map,
+    compute_flood_stats,
+    compute_flood_classify,
+    compute_flood_export,
+)
 from gee.change_detection import compute_change_detection
 from reports.cartography import enhance_map_cartography
 
@@ -784,14 +817,18 @@ class LSTRequest(BaseModel):
     district: Optional[str] = Field(None, examples=["Gasabo"])
     start_date: str = Field(..., examples=["2024-01-01"])
     end_date: str = Field(..., examples=["2024-06-30"])
-    n_classes: int = Field(5, ge=2, le=10)
+    n_classes: int = Field(5, ge=1, le=15)
+    method: Optional[str] = Field("natural_breaks", description="Classification method")
+    custom_labels: Optional[list[str]] = Field(None, description="Custom class names/labels")
 
 
 class RUSLERequest(BaseModel):
     aoi: dict = Field(default_factory=dict, description="AOI Configuration object")
     district: Optional[str] = Field(None, examples=["Huye"])
     year: int = Field(2023, ge=2010, le=2024)
-    n_classes: int = Field(5, ge=2, le=10)
+    n_classes: int = Field(5, ge=1, le=15)
+    method: Optional[str] = Field("natural_breaks", description="Classification method")
+    custom_labels: Optional[list[str]] = Field(None, description="Custom class names/labels")
     reverse_r: bool = False
     reverse_k: bool = False
     reverse_ls: bool = False
@@ -802,7 +839,9 @@ class RUSLERequest(BaseModel):
 class SlopeRequest(BaseModel):
     aoi: dict = Field(default_factory=dict, description="AOI Configuration object")
     district: Optional[str] = Field(None, examples=["Musanze"])
-    n_classes: int = Field(5, ge=2, le=10)
+    n_classes: int = Field(5, ge=1, le=15)
+    method: Optional[str] = Field("natural_breaks", description="Classification method")
+    custom_labels: Optional[list[str]] = Field(None, description="Custom class names/labels")
 
 
 class LandfillRequest(BaseModel):
@@ -812,13 +851,17 @@ class LandfillRequest(BaseModel):
     reverse_slope: bool = False
     reverse_road: bool = False
     reverse_lulc: bool = False
-    n_classes: int = 5
+    n_classes: int = Field(5, ge=1, le=15)
+    method: Optional[str] = Field("natural_breaks", description="Classification method")
+    custom_labels: Optional[list[str]] = Field(None, description="Custom class names/labels")
     custom_weights: Optional[dict] = None
 
 class HabitatRequest(BaseModel):
     aoi: dict
     reverse_flags: dict = Field(default_factory=dict)
-    n_classes: int = 5
+    n_classes: int = Field(5, ge=1, le=15)
+    method: Optional[str] = Field("natural_breaks", description="Classification method")
+    custom_labels: Optional[list[str]] = Field(None, description="Custom class names/labels")
     classify_method: str = "natural_breaks"
     custom_weights: Optional[dict] = None
 
@@ -831,7 +874,9 @@ class AirPollutionRequest(BaseModel):
     district: Optional[str] = Field(None, examples=["Nyarugenge"])
     start_date: str = Field(..., examples=["2023-01-01"])
     end_date: str = Field(..., examples=["2023-12-31"])
-    n_classes: int = Field(5, ge=2, le=10)
+    n_classes: int = Field(5, ge=1, le=15)
+    method: Optional[str] = Field("natural_breaks", description="Classification method")
+    custom_labels: Optional[list[str]] = Field(None, description="Custom class names/labels")
 
 
 class LandslideRequest(BaseModel):
@@ -839,7 +884,9 @@ class LandslideRequest(BaseModel):
     district: Optional[str] = Field(None, examples=["Musanze"])
     start_year: int = Field(2015, ge=1981, le=2024)
     end_year: int = Field(2024, ge=1981, le=2024)
-    n_classes: int = Field(5, ge=2, le=10)
+    n_classes: int = Field(5, ge=1, le=15)
+    method: Optional[str] = Field("natural_breaks", description="Classification method")
+    custom_labels: Optional[list[str]] = Field(None, description="Custom class names/labels")
     reverse_slope: bool = False
     reverse_rainfall: bool = False
     reverse_litho: bool = False
@@ -855,7 +902,9 @@ class AccessibilityRequest(BaseModel):
     district: Optional[str] = Field(None, examples=["Gasabo"])
     amenities: list[str] = Field(..., description="List of Origin OSM amenity tags e.g. ['primary_school']")
     dest_amenities: list[str] = Field(default_factory=list, description="List of Destination OSM amenity tags e.g. ['hospital']")
-    n_classes: int = Field(4, ge=2, le=10)
+    n_classes: int = Field(4, ge=1, le=15)
+    method: Optional[str] = Field("natural_breaks", description="Classification method")
+    custom_labels: Optional[list[str]] = Field(None, description="Custom class names/labels")
     service_threshold_mins: int = Field(30, ge=5, le=120)
 
 
@@ -866,13 +915,17 @@ class UHIRequest(BaseModel):
     end_date: str = Field(..., examples=["2024-06-30"])
     grid_size: int = Field(6, ge=3, le=12)
     n_classes: int = Field(5, ge=4, le=10)
+    method: Optional[str] = Field("natural_breaks", description="Classification method")
+    custom_labels: Optional[list[str]] = Field(None, description="Custom class names/labels")
 
 
 class DroughtRequest(BaseModel):
     aoi: dict = Field(default_factory=dict, description="AOI Configuration object")
     district: Optional[str] = Field(None, examples=["Kayonza"])
     year: int = Field(2023, ge=2013, le=2024)
-    n_classes: int = Field(5, ge=2, le=10)
+    n_classes: int = Field(5, ge=1, le=15)
+    method: Optional[str] = Field("natural_breaks", description="Classification method")
+    custom_labels: Optional[list[str]] = Field(None, description="Custom class names/labels")
     reverse_sm: bool = False
     reverse_rf: bool = False
     reverse_ndvi: bool = False
@@ -886,7 +939,9 @@ class FloodRequest(BaseModel):
     district: Optional[str] = Field(None, examples=["Kigali City", "Gasabo"])
     start_year: int = Field(2019, ge=1981, le=2024)
     end_year: int = Field(2024, ge=1981, le=2024)
-    n_classes: int = Field(5, ge=2, le=10)
+    n_classes: int = Field(5, ge=1, le=15)
+    method: Optional[str] = Field("natural_breaks", description="Classification method")
+    custom_labels: Optional[list[str]] = Field(None, description="Custom class names/labels")
     reverse_rainfall: bool = False
     reverse_twi: bool = False
     reverse_lulc: bool = False
@@ -1028,13 +1083,26 @@ class IrrigationRequest(BaseModel):
     aoi: dict
     start_date: str
     end_date: str
+    planting_date: str
     crop_type: str
+    n_classes: int = 5
+    method: str = "continuous"
+    custom_labels: Optional[list] = None
 
 @app.post("/api/irrigation/map", tags=["analysis"])
 def irrigation_map_endpoint(req: IrrigationRequest):
     _require_gee()
     try:
-        res = compute_irrigation_map(req.aoi, req.start_date, req.end_date, req.crop_type)
+        res = compute_irrigation_map(
+            req.aoi, 
+            req.start_date, 
+            req.end_date, 
+            req.planting_date, 
+            req.crop_type,
+            req.n_classes,
+            req.method,
+            req.custom_labels
+        )
         return res
     except Exception as exc:
         logger.exception("Irrigation map failed")
@@ -1044,7 +1112,7 @@ def irrigation_map_endpoint(req: IrrigationRequest):
 def irrigation_stats_endpoint(req: IrrigationRequest):
     _require_gee()
     try:
-        res = compute_irrigation_stats(req.aoi, req.start_date, req.end_date, req.crop_type)
+        res = compute_irrigation_stats(req.aoi, req.start_date, req.end_date, req.planting_date, req.crop_type)
         return res
     except Exception as exc:
         logger.exception("Irrigation stats failed")
@@ -1054,7 +1122,7 @@ def irrigation_stats_endpoint(req: IrrigationRequest):
 def irrigation_export_endpoint(req: IrrigationRequest):
     _require_gee()
     try:
-        res = compute_irrigation_export(req.aoi, req.start_date, req.end_date, req.crop_type)
+        res = compute_irrigation_export(req.aoi, req.start_date, req.end_date, req.planting_date, req.crop_type)
         return res
     except Exception as exc:
         logger.exception("Irrigation export failed")
@@ -1100,22 +1168,44 @@ def water_harvesting_export_endpoint(req: WaterHarvestingRequest):
 class WellScopeRequest(BaseModel):
     aoi: dict
     custom_weights: Optional[dict] = None
+    n_classes: Optional[int] = 5
+    method: Optional[str] = "natural_breaks"
+    custom_labels: Optional[list] = None
 
 @app.post("/api/wellscope/map", tags=["analysis"])
 def wellscope_map_endpoint(req: WellScopeRequest):
     _require_gee()
     try:
-        res = compute_wellscope(req.aoi, req.custom_weights)
-        return {
-            "tile_url": res["tile_url"],
-            "thumb_url": res["thumb_url"],
-            "center": res["center"],
-            "bbox": res["bbox"],
-            "factor_maps": res["factor_maps"],
-            "ahp_data": res["ahp_data"]
-        }
+        return compute_wellscope_map(req.aoi, req.custom_weights)
     except Exception as exc:
         logger.exception("WellScope map failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.post("/api/wellscope/stats", tags=["analysis"])
+def wellscope_stats_endpoint(req: WellScopeRequest):
+    _require_gee()
+    try:
+        return compute_wellscope_stats(req.aoi, req.custom_weights)
+    except Exception as exc:
+        logger.exception("WellScope stats failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.post("/api/wellscope/classify", tags=["analysis"])
+def wellscope_classify_endpoint(req: WellScopeRequest):
+    _require_gee()
+    try:
+        return compute_wellscope_classify(req.aoi, req.custom_weights, req.n_classes, req.method, req.custom_labels)
+    except Exception as exc:
+        logger.exception("WellScope classify failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.post("/api/wellscope/export", tags=["analysis"])
+def wellscope_export_endpoint(req: WellScopeRequest):
+    _require_gee()
+    try:
+        return compute_wellscope_export(req.aoi, req.custom_weights)
+    except Exception as exc:
+        logger.exception("WellScope export failed")
         raise HTTPException(status_code=500, detail=str(exc))
 
 class BiomassRequest(BaseModel):
@@ -1123,20 +1213,15 @@ class BiomassRequest(BaseModel):
     buffer_km: Optional[float] = 3.0
     year_start: Optional[int] = 2019
     year_end: Optional[int] = 2023
+    n_classes: Optional[int] = 4
+    method: Optional[str] = "natural_breaks"
+    custom_labels: Optional[list] = None
 
 @app.post("/api/biomass/map", tags=["analysis"])
 def biomass_map_endpoint(req: BiomassRequest):
-    # trigger reload
     _require_gee()
     try:
-        res = compute_biomass_depletion(req.aoi, req.buffer_km, req.year_start, req.year_end)
-        return {
-            "tile_url": res["tile_url"],
-            "thumb_url": res.get("thumb_url"),
-            "factor_maps": res.get("factor_maps", {}),
-            "center": res["center"],
-            "bbox": res["bbox"]
-        }
+        return compute_biomass_map(req.aoi, req.buffer_km, req.year_start, req.year_end)
     except Exception as exc:
         logger.exception("Biomass map failed")
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1145,14 +1230,27 @@ def biomass_map_endpoint(req: BiomassRequest):
 def biomass_stats_endpoint(req: BiomassRequest):
     _require_gee()
     try:
-        res = compute_biomass_depletion(req.aoi, req.buffer_km, req.year_start, req.year_end)
-        return {
-            "stats": res["stats"],
-            "class_areas_km2": res["class_areas_km2"],
-            "district": res["district"]
-        }
+        return compute_biomass_stats(req.aoi, req.buffer_km, req.year_start, req.year_end)
     except Exception as exc:
         logger.exception("Biomass stats failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.post("/api/biomass/classify", tags=["analysis"])
+def biomass_classify_endpoint(req: BiomassRequest):
+    _require_gee()
+    try:
+        return compute_biomass_classify(req.aoi, req.buffer_km, req.year_start, req.year_end, req.n_classes, req.method, req.custom_labels)
+    except Exception as exc:
+        logger.exception("Biomass classify failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.post("/api/biomass/export", tags=["analysis"])
+def biomass_export_endpoint(req: BiomassRequest):
+    _require_gee()
+    try:
+        return compute_biomass_export(req.aoi, req.buffer_km, req.year_start, req.year_end)
+    except Exception as exc:
+        logger.exception("Biomass export failed")
         raise HTTPException(status_code=500, detail=str(exc))
 
 class BiomassFactorExportRequest(BaseModel):
@@ -1173,19 +1271,7 @@ def biomass_factor_export_endpoint(req: BiomassFactorExportRequest):
         logger.exception("Biomass factor export failed")
         raise HTTPException(status_code=500, detail=str(exc))
 
-@app.post("/api/wellscope/stats", tags=["analysis"])
-def wellscope_stats_endpoint(req: WellScopeRequest):
-    _require_gee()
-    try:
-        res = compute_wellscope(req.aoi, req.custom_weights)
-        return {
-            "stats": res["stats"],
-            "class_areas_km2": res["class_areas_km2"],
-            "district": res["district"]
-        }
-    except Exception as exc:
-        logger.exception("WellScope stats failed")
-        raise HTTPException(status_code=500, detail=str(exc))
+
 
 class WellScopeFactorExportRequest(BaseModel):
     aoi: dict
@@ -1270,34 +1356,81 @@ def static_map_download_endpoint(
         logger.exception("Static map download failed")
         raise HTTPException(status_code=500, detail=str(exc))
 
+def _get_flood_reverse_flags(req: FloodRequest):
+    return {
+        "rainfall": req.reverse_rainfall,
+        "twi": req.reverse_twi,
+        "lulc": req.reverse_lulc,
+        "elevation": req.reverse_elevation,
+        "slope": req.reverse_slope,
+        "river_dist": req.reverse_river_dist,
+        "road_dist": req.reverse_road_dist,
+        "soil_type": req.reverse_soil_type,
+        "drainage_density": req.reverse_drainage_density,
+        "ndvi": req.reverse_ndvi,
+    }
 
-
-@app.post("/api/flood", tags=["analysis"])
-def flood_endpoint(req: FloodRequest, user: dict = Depends(get_current_user)):
+@app.post("/api/flood/map", tags=["analysis"])
+def flood_map_endpoint(req: FloodRequest):
     _require_gee()
     try:
-        reverse_flags = {
-            "rainfall": req.reverse_rainfall,
-            "twi": req.reverse_twi,
-            "lulc": req.reverse_lulc,
-            "elevation": req.reverse_elevation,
-            "slope": req.reverse_slope,
-            "river_dist": req.reverse_river_dist,
-            "road_dist": req.reverse_road_dist,
-            "soil_type": req.reverse_soil_type,
-            "drainage_density": req.reverse_drainage_density,
-            "ndvi": req.reverse_ndvi,
-        }
-        return compute_flood_susceptibility(
+        return compute_flood_map(
             aoi_config=req.aoi,
             start_year=req.start_year,
             end_year=req.end_year,
-            n_classes=req.n_classes,
             weights=req.custom_weights,
-            reverse_flags=reverse_flags,
+            reverse_flags=_get_flood_reverse_flags(req),
         )
     except Exception as exc:
-        logger.exception("Flood Susceptibility failed for %s", req.district)
+        logger.exception("Flood map failed")
+        raise HTTPException(500, str(exc)) from exc
+
+@app.post("/api/flood/stats", tags=["analysis"])
+def flood_stats_endpoint(req: FloodRequest):
+    _require_gee()
+    try:
+        return compute_flood_stats(
+            aoi_config=req.aoi,
+            start_year=req.start_year,
+            end_year=req.end_year,
+            weights=req.custom_weights,
+            reverse_flags=_get_flood_reverse_flags(req),
+        )
+    except Exception as exc:
+        logger.exception("Flood stats failed")
+        raise HTTPException(500, str(exc)) from exc
+
+@app.post("/api/flood/classify", tags=["analysis"])
+def flood_classify_endpoint(req: FloodRequest):
+    _require_gee()
+    try:
+        return compute_flood_classify(
+            aoi_config=req.aoi,
+            start_year=req.start_year,
+            end_year=req.end_year,
+            weights=req.custom_weights,
+            reverse_flags=_get_flood_reverse_flags(req),
+            n_classes=req.n_classes,
+            custom_labels=req.custom_labels,
+            method=req.method,
+        )
+    except Exception as exc:
+        logger.exception("Flood classify failed")
+        raise HTTPException(500, str(exc)) from exc
+
+@app.post("/api/flood/export", tags=["analysis"])
+def flood_export_endpoint(req: FloodRequest):
+    _require_gee()
+    try:
+        return compute_flood_export(
+            aoi_config=req.aoi,
+            start_year=req.start_year,
+            end_year=req.end_year,
+            weights=req.custom_weights,
+            reverse_flags=_get_flood_reverse_flags(req),
+        )
+    except Exception as exc:
+        logger.exception("Flood export failed")
         raise HTTPException(500, str(exc)) from exc
 
 
@@ -1325,81 +1458,157 @@ def change_detection_endpoint(req: ChangeDetectionRequest, user: dict = Depends(
 def lst_endpoint(req: LSTRequest, user: dict = Depends(get_current_user)):
     _require_gee()
     try:
-        return compute_lst(req.aoi, req.start_date, req.end_date, req.n_classes)
+        return compute_lst(req.aoi, req.start_date, req.end_date, req.n_classes, method=req.method, custom_labels=req.custom_labels)
     except Exception as exc:
         logger.exception("LST failed for %s", req.district)
         raise HTTPException(500, str(exc)) from exc
 
 
-@app.post("/api/rusle", tags=["analysis"])
-def rusle_endpoint(req: RUSLERequest, user: dict = Depends(get_current_user)):
+@app.post("/api/rusle/map", tags=["analysis"])
+def rusle_map_endpoint(req: RUSLERequest, user: dict = Depends(get_current_user)):
     _require_gee()
     try:
-        return compute_rusle(req.aoi, req.year, req.n_classes,
-            req.reverse_r, req.reverse_k, req.reverse_ls, req.reverse_c, req.reverse_p,
+        return compute_rusle_map(req.aoi, req.year, req.reverse_r, req.reverse_k, req.reverse_ls, req.reverse_c, req.reverse_p)
+    except Exception as exc:
+        logger.exception("RUSLE map failed for %s", req.district)
+        raise HTTPException(500, str(exc)) from exc
+
+@app.post("/api/rusle/stats", tags=["analysis"])
+def rusle_stats_endpoint(req: RUSLERequest, user: dict = Depends(get_current_user)):
+    _require_gee()
+    try:
+        return compute_rusle_stats(req.aoi, req.year, req.reverse_r, req.reverse_k, req.reverse_ls, req.reverse_c, req.reverse_p)
+    except Exception as exc:
+        logger.exception("RUSLE stats failed for %s", req.district)
+        raise HTTPException(500, str(exc)) from exc
+
+@app.post("/api/rusle/classify", tags=["analysis"])
+def rusle_classify_endpoint(req: RUSLERequest, user: dict = Depends(get_current_user)):
+    _require_gee()
+    try:
+        return compute_rusle_classify(req.aoi, req.year, req.n_classes, req.reverse_r, req.reverse_k, req.reverse_ls, req.reverse_c, req.reverse_p, method=req.method, custom_labels=req.custom_labels)
+    except Exception as exc:
+        logger.exception("RUSLE classify failed for %s", req.district)
+        raise HTTPException(500, str(exc)) from exc
+
+@app.post("/api/rusle/export", tags=["analysis"])
+def rusle_export_endpoint(req: RUSLERequest, user: dict = Depends(get_current_user)):
+    _require_gee()
+    try:
+        return compute_rusle_export(req.aoi, req.year, req.reverse_r, req.reverse_k, req.reverse_ls, req.reverse_c, req.reverse_p)
+    except Exception as exc:
+        logger.exception("RUSLE export failed for %s", req.district)
+        raise HTTPException(500, str(exc)) from exc
+
+
+@app.post("/api/slope/map", tags=["analysis"])
+def slope_map_endpoint(req: SlopeRequest):
+    _require_gee()
+    try:
+        return compute_slope_map(req.aoi)
+    except Exception as exc:
+        logger.exception("Slope map failed for %s", req.district)
+        raise HTTPException(500, str(exc)) from exc
+
+@app.post("/api/slope/stats", tags=["analysis"])
+def slope_stats_endpoint(req: SlopeRequest):
+    _require_gee()
+    try:
+        return compute_slope_stats(req.aoi)
+    except Exception as exc:
+        logger.exception("Slope stats failed for %s", req.district)
+        raise HTTPException(500, str(exc)) from exc
+
+@app.post("/api/slope/classify", tags=["analysis"])
+def slope_classify_endpoint(req: SlopeRequest):
+    _require_gee()
+    try:
+        return compute_slope_classify(req.aoi, req.n_classes, method=req.method, custom_labels=req.custom_labels)
+    except Exception as exc:
+        logger.exception("Slope classify failed for %s", req.district)
+        raise HTTPException(500, str(exc)) from exc
+
+@app.post("/api/slope/export", tags=["analysis"])
+def slope_export_endpoint(req: SlopeRequest):
+    _require_gee()
+    try:
+        return compute_slope_export(req.aoi)
+    except Exception as exc:
+        logger.exception("Slope export failed for %s", req.district)
+        raise HTTPException(500, str(exc)) from exc
+
+
+@app.post("/api/landfill/map", tags=["analysis"])
+def landfill_map_endpoint(req: LandfillRequest):
+    _require_gee()
+    try:
+        return compute_landfill_map(
+            req.aoi, req.reverse_river, req.reverse_residential,
+            req.reverse_slope, req.reverse_road, req.reverse_lulc, req.custom_weights
         )
     except Exception as exc:
-        logger.exception("RUSLE failed for %s", req.district)
-        raise HTTPException(500, str(exc)) from exc
+        logger.exception("Landfill map failed for %s", req.aoi.get("name", "unknown"))
+        raise HTTPException(status_code=500, detail=str(exc))
 
-
-@app.post("/api/slope", tags=["analysis"])
-def slope_endpoint(req: SlopeRequest, user: dict = Depends(get_current_user)):
+@app.post("/api/landfill/stats", tags=["analysis"])
+def landfill_stats_endpoint(req: LandfillRequest):
     _require_gee()
     try:
-        return compute_slope(req.aoi, req.n_classes)
+        return compute_landfill_stats(
+            req.aoi, req.reverse_river, req.reverse_residential,
+            req.reverse_slope, req.reverse_road, req.reverse_lulc, req.custom_weights
+        )
     except Exception as exc:
-        logger.exception("Slope failed for %s", req.district)
-        raise HTTPException(500, str(exc)) from exc
+        logger.exception("Landfill stats failed for %s", req.aoi.get("name", "unknown"))
+        raise HTTPException(status_code=500, detail=str(exc))
 
-
-@app.post("/api/landfill", tags=["analysis"])
-def landfill_endpoint(req: LandfillRequest, user: dict = Depends(get_current_user)):
+@app.post("/api/landfill/classify", tags=["analysis"])
+def landfill_classify_endpoint(req: LandfillRequest):
     _require_gee()
     try:
-        return compute_landfill_suitability(req.aoi, req.reverse_river, req.reverse_residential,
-            req.reverse_slope, req.reverse_road, req.reverse_lulc, req.n_classes,
+        return compute_landfill_classify(
+            aoi_config=req.aoi,
+            reverse_river=req.reverse_river,
+            reverse_residential=req.reverse_residential,
+            reverse_slope=req.reverse_slope,
+            reverse_road=req.reverse_road,
+            reverse_lulc=req.reverse_lulc,
+            n_classes=req.n_classes,
+            method=req.method,
+            custom_labels=req.custom_labels,
+            custom_weights=req.custom_weights
+        )
+    except Exception as exc:
+        logger.exception("Landfill classify failed for %s", req.aoi.get("name", "unknown"))
+        raise HTTPException(status_code=500, detail=str(exc))
+
+@app.post("/api/landfill/export", tags=["analysis"])
+def landfill_export_endpoint(req: LandfillRequest):
+    _require_gee()
+    try:
+        return compute_landfill_export(
+            req.aoi, req.reverse_river, req.reverse_residential,
+            req.reverse_slope, req.reverse_road, req.reverse_lulc, req.custom_weights
+        )
+    except Exception as exc:
+        logger.exception("Landfill export failed for %s", req.aoi.get("name", "unknown"))
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/habitat", tags=["analysis"])
+def habitat_endpoint(req: HabitatRequest):
+    _require_gee()
+    try:
+        return compute_habitat(
+            aoi_config=req.aoi,
+            reverse_flags=req.reverse_flags,
+            n_classes=req.n_classes,
             custom_weights=req.custom_weights,
+            method=req.method,
+            custom_labels=req.custom_labels
         )
     except Exception as exc:
-        logger.exception("Landfill failed for %s", req.aoi.get("name", "unknown"))
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
-@app.post("/api/habitat/map", tags=["analysis"])
-def habitat_map_endpoint(req: HabitatRequest):
-    _require_gee()
-    try:
-        return compute_habitat_map(req.aoi, req.reverse_flags, req.custom_weights)
-    except Exception as exc:
-        logger.exception("Habitat map failed for %s", req.aoi.get("name", "unknown"))
-        raise HTTPException(status_code=500, detail=str(exc))
-
-@app.post("/api/habitat/stats", tags=["analysis"])
-def habitat_stats_endpoint(req: HabitatRequest):
-    _require_gee()
-    try:
-        return compute_habitat_stats(req.aoi, req.reverse_flags, req.custom_weights)
-    except Exception as exc:
-        logger.exception("Habitat stats failed for %s", req.aoi.get("name", "unknown"))
-        raise HTTPException(status_code=500, detail=str(exc))
-
-@app.post("/api/habitat/classify", tags=["analysis"])
-def habitat_classify_endpoint(req: HabitatRequest):
-    _require_gee()
-    try:
-        return compute_habitat_classify(req.aoi, req.reverse_flags, req.n_classes, req.custom_weights, req.classify_method)
-    except Exception as exc:
-        logger.exception("Habitat classify failed for %s", req.aoi.get("name", "unknown"))
-        raise HTTPException(status_code=500, detail=str(exc))
-
-@app.post("/api/habitat/export", tags=["analysis"])
-def habitat_export_endpoint(req: HabitatRequest):
-    _require_gee()
-    try:
-        return compute_habitat_export(req.aoi, req.reverse_flags, req.n_classes, req.custom_weights, req.classify_method)
-    except Exception as exc:
-        logger.exception("Habitat export failed for %s", req.aoi.get("name", "unknown"))
+        logger.exception("Habitat analysis failed for %s", req.aoi.get("name", "unknown"))
         raise HTTPException(status_code=500, detail=str(exc))
 
 @app.post("/api/habitat/ahp", tags=["analysis"])
@@ -1412,15 +1621,49 @@ def habitat_ahp_endpoint(req: HabitatAhpRequest):
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@app.post("/api/air-pollution", tags=["analysis"])
-def air_pollution_endpoint(req: AirPollutionRequest):
+@app.post("/api/air-pollution/map", tags=["analysis"])
+def air_pollution_map_endpoint(req: AirPollutionRequest):
     _require_gee()
     try:
-        return compute_no2(req.aoi, req.start_date, req.end_date, req.n_classes)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
+        return compute_air_pollution_map(req.aoi, req.start_date, req.end_date)
     except Exception as exc:
-        logger.exception("Air pollution failed for %s", req.district)
+        logger.exception("Air pollution map failed for %s", req.district)
+        raise HTTPException(500, str(exc)) from exc
+
+@app.post("/api/air-pollution/stats", tags=["analysis"])
+def air_pollution_stats_endpoint(req: AirPollutionRequest):
+    _require_gee()
+    try:
+        return compute_air_pollution_stats(req.aoi, req.start_date, req.end_date)
+    except Exception as exc:
+        logger.exception("Air pollution stats failed for %s", req.district)
+        raise HTTPException(500, str(exc)) from exc
+
+@app.post("/api/air-pollution/classify", tags=["analysis"])
+def air_pollution_classify_endpoint(req: AirPollutionRequest):
+    _require_gee()
+    try:
+        return compute_air_pollution_classify(req.aoi, req.start_date, req.end_date, req.n_classes, method=req.method, custom_labels=req.custom_labels)
+    except Exception as exc:
+        logger.exception("Air pollution classify failed for %s", req.district)
+        raise HTTPException(500, str(exc)) from exc
+
+@app.post("/api/air-pollution/export", tags=["analysis"])
+def air_pollution_export_endpoint(req: AirPollutionRequest):
+    _require_gee()
+    try:
+        return compute_air_pollution_export(req.aoi, req.start_date, req.end_date)
+    except Exception as exc:
+        logger.exception("Air pollution export failed for %s", req.district)
+        raise HTTPException(500, str(exc)) from exc
+
+@app.post("/api/air-pollution/timeseries", tags=["analysis"])
+def air_pollution_timeseries_endpoint(req: AirPollutionRequest):
+    _require_gee()
+    try:
+        return compute_air_pollution_timeseries(req.aoi, req.start_date, req.end_date)
+    except Exception as exc:
+        logger.exception("Air pollution timeseries failed for %s", req.district)
         raise HTTPException(500, str(exc)) from exc
 
 
@@ -1503,7 +1746,7 @@ def accessibility_stats_endpoint(req: AccessibilityRequest):
 def accessibility_classify_endpoint(req: AccessibilityRequest):
     _require_gee()
     try:
-        return compute_accessibility_classify(req.aoi, req.amenities, req.dest_amenities, req.n_classes, req.service_threshold_mins)
+        return compute_accessibility_classify(req.aoi, req.amenities, req.dest_amenities, req.n_classes, req.service_threshold_mins, method=req.method, custom_labels=req.custom_labels)
     except Exception as exc:
         logger.exception("Accessibility classify failed for %s", req.district)
         raise HTTPException(500, str(exc)) from exc
@@ -1522,17 +1765,26 @@ def accessibility_export_endpoint(req: AccessibilityRequest):
 def uhi_endpoint(req: UHIRequest):
     _require_gee()
     try:
-        return compute_uhi(req.aoi, req.start_date, req.end_date, req.grid_size, req.n_classes)
+        return compute_uhi(
+            req.aoi,
+            req.start_date,
+            req.end_date,
+            req.grid_size,
+            req.n_classes,
+            req.method,
+            req.custom_labels
+        )
     except Exception as exc:
-        logger.exception("UHI failed for %s", req.district)
+        logger.exception("UHI analysis failed for %s", req.district)
         raise HTTPException(500, str(exc)) from exc
 
 
-@app.post("/api/drought", tags=["analysis"])
-def drought_endpoint(req: DroughtRequest):
+@app.post("/api/drought/map", tags=["analysis"])
+def drought_map_endpoint(req: DroughtRequest):
     _require_gee()
     try:
-        return compute_agricultural_drought(req.aoi, req.year, req.n_classes,
+        return compute_drought_map(
+            req.aoi, req.year,
             reverse_sm=req.reverse_sm,
             reverse_rf=req.reverse_rf,
             reverse_ndvi=req.reverse_ndvi,
@@ -1542,7 +1794,62 @@ def drought_endpoint(req: DroughtRequest):
             reverse_evi=req.reverse_evi,
         )
     except Exception as exc:
-        logger.exception("Drought failed for %s", req.district)
+        logger.exception("Drought map failed for %s", req.district)
+        raise HTTPException(500, str(exc)) from exc
+
+@app.post("/api/drought/stats", tags=["analysis"])
+def drought_stats_endpoint(req: DroughtRequest):
+    _require_gee()
+    try:
+        return compute_drought_stats(
+            req.aoi, req.year,
+            reverse_sm=req.reverse_sm,
+            reverse_rf=req.reverse_rf,
+            reverse_ndvi=req.reverse_ndvi,
+            reverse_vci=req.reverse_vci,
+            reverse_lst=req.reverse_lst,
+            reverse_cdd=req.reverse_cdd,
+            reverse_evi=req.reverse_evi,
+        )
+    except Exception as exc:
+        logger.exception("Drought stats failed for %s", req.district)
+        raise HTTPException(500, str(exc)) from exc
+
+@app.post("/api/drought/classify", tags=["analysis"])
+def drought_classify_endpoint(req: DroughtRequest):
+    _require_gee()
+    try:
+        return compute_drought_classify(
+            req.aoi, req.year, req.n_classes,
+            reverse_sm=req.reverse_sm,
+            reverse_rf=req.reverse_rf,
+            reverse_ndvi=req.reverse_ndvi,
+            reverse_vci=req.reverse_vci,
+            reverse_lst=req.reverse_lst,
+            reverse_cdd=req.reverse_cdd,
+            reverse_evi=req.reverse_evi,
+            method=req.method, custom_labels=req.custom_labels
+        )
+    except Exception as exc:
+        logger.exception("Drought classify failed for %s", req.district)
+        raise HTTPException(500, str(exc)) from exc
+
+@app.post("/api/drought/export", tags=["analysis"])
+def drought_export_endpoint(req: DroughtRequest):
+    _require_gee()
+    try:
+        return compute_drought_export(
+            req.aoi, req.year,
+            reverse_sm=req.reverse_sm,
+            reverse_rf=req.reverse_rf,
+            reverse_ndvi=req.reverse_ndvi,
+            reverse_vci=req.reverse_vci,
+            reverse_lst=req.reverse_lst,
+            reverse_cdd=req.reverse_cdd,
+            reverse_evi=req.reverse_evi,
+        )
+    except Exception as exc:
+        logger.exception("Drought export failed for %s", req.district)
         raise HTTPException(500, str(exc)) from exc
 
 

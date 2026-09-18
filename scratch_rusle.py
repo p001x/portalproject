@@ -1,5 +1,14 @@
 import json
-"""RUSLE soil erosion analysis — refactored for decoupled API."""
+import re
+
+with open('backend/gee/rusle.py', 'r', encoding='utf-8') as f:
+    original = f.read()
+
+# We'll build the new file based on the old one.
+# It should include _build_rusle_images and the 4 new endpoints.
+# The structure will mirror landslide.py
+NEW_CODE = """import json
+\"\"\"RUSLE soil erosion analysis — refactored for decoupled API.\"\"\"
 import math
 import ee
 from cachetools import TTLCache
@@ -379,3 +388,7 @@ def compute_rusle_export(
     with _lock:
         _cache_export[cache_key] = result
     return result
+"""
+
+with open('backend/gee/rusle.py', 'w', encoding='utf-8') as f:
+    f.write(NEW_CODE)

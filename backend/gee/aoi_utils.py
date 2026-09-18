@@ -78,6 +78,43 @@ def get_aoi_geometry(aoi_config: dict) -> ee.Geometry:
         cell = aoi_config.get("cell")
         village = aoi_config.get("village")
 
+        # Use fast GAUL collections if we don't need micro-level geometry
+        has_micro = any(val and val != "none" for val in [sector, cell, village])
+        
+        if not has_micro:
+            # Country level
+            if not province or province == "none":
+                return ee.FeatureCollection("FAO/GAUL/2015/level0").filter(ee.Filter.eq("ADM0_NAME", "Rwanda")).geometry()
+            
+            # Province Mapping from Kinyarwanda to GAUL English
+            PROVINCE_MAPPING = {
+                "Amajyaruguru": "Northern",
+                "Amajyepfo": "Southern",
+                "Iburasirazuba": "Eastern",
+                "Iburengerazuba": "Western",
+                "Umujyi wa Kigali": "Kigali City"
+            }
+            gaul_province = PROVINCE_MAPPING.get(province, province)
+
+            # Province level
+            if not district or district == "none":
+                return ee.FeatureCollection("FAO/GAUL/2015/level1").filter(
+                    ee.Filter.And(
+                        ee.Filter.eq("ADM0_NAME", "Rwanda"),
+                        ee.Filter.eq("ADM1_NAME", gaul_province)
+                    )
+                ).geometry()
+            
+            # District level (districts match exactly)
+            return ee.FeatureCollection("FAO/GAUL/2015/level2").filter(
+                ee.Filter.And(
+                    ee.Filter.eq("ADM0_NAME", "Rwanda"),
+                    ee.Filter.eq("ADM1_NAME", gaul_province),
+                    ee.Filter.eq("ADM2_NAME", district)
+                )
+            ).geometry()
+
+        # Fallback to local shapefile for micro-level queries
         import geopandas as gpd
         from shapely.geometry import mapping
         

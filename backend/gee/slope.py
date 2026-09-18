@@ -10,25 +10,18 @@ _cache: TTLCache = TTLCache(maxsize=128, ttl=86400)
 _lock = Lock()
 
 
-def compute_slope(aoi_config: dict, n_classes: int = 5) -> dict:
-    cache_key = (json.dumps(aoi_config, sort_keys=True), n_classes)
-    with _lock:
-        if cache_key in _cache:
-            return _cache[cache_key]
-
+def _build_slope_base(aoi_config: dict):
     from gee.aoi_utils import get_aoi_geometry
     aoi = get_aoi_geometry(aoi_config)
-    # Calculate dynamic scale based on geometry size (sq km)
     area_sqkm = aoi.area().divide(1e6).getInfo()
     if area_sqkm > 10000:
-        dynamic_scale = 500   # Entire Country (High memory footprint)
+        dynamic_scale = 500
     elif area_sqkm > 2000:
-        dynamic_scale = 250   # Province
+        dynamic_scale = 250
     elif area_sqkm > 500:
-        dynamic_scale = 100   # Large District
+        dynamic_scale = 100
     else:
-        dynamic_scale = 30    # Sector or small polygon
-
+        dynamic_scale = 30
 
     dem = ee.Image("USGS/SRTMGL1_003").select("elevation").clip(aoi)
     terrain = ee.Terrain.products(dem)
@@ -36,15 +29,49 @@ def compute_slope(aoi_config: dict, n_classes: int = 5) -> dict:
     aspect = terrain.select("aspect").clip(aoi)
     hillshade = terrain.select("hillshade").clip(aoi)
 
-    slope_vis = {"min": 0, "max": 45,
-                 "palette": ["#2166ac", "#92c5de", "#f7f7f7", "#f4a582", "#d6604d", "#b2182b"]}
+    return aoi, dynamic_scale, dem, slope, aspect, hillshade
+
+def compute_slope_map(aoi_config: dict) -> dict:
+    cache_key = ("slope_map", json.dumps(aoi_config, sort_keys=True))
+    with _lock:
+        if cache_key in _cache:
+            return _cache[cache_key]
+
+    aoi, dynamic_scale, dem, slope, aspect, hillshade = _build_slope_base(aoi_config)
+
+    slope_vis = {"min": 0, "max": 45, "palette": ["#2166ac", "#92c5de", "#f7f7f7", "#f4a582", "#d6604d", "#b2182b"]}
     hillshade_vis = {"min": 0, "max": 255, "palette": ["#000000", "#ffffff"]}
-    aspect_vis = {"min": 0, "max": 360,
-                  "palette": ["#d53e4f", "#fc8d59", "#fee08b", "#e6f598", "#99d594", "#3288bd", "#d53e4f"]}
+    aspect_vis = {"min": 0, "max": 360, "palette": ["#d53e4f", "#fc8d59", "#fee08b", "#e6f598", "#99d594", "#3288bd", "#d53e4f"]}
 
     slope_map_id = slope.getMapId(slope_vis)
     hillshade_map_id = hillshade.getMapId(hillshade_vis)
     aspect_map_id = aspect.getMapId(aspect_vis)
+
+    bounds = aoi.bounds().getInfo()["coordinates"][0]
+    center = [(bounds[0][1] + bounds[2][1]) / 2, (bounds[0][0] + bounds[2][0]) / 2]
+
+    result = {
+        "slope_tile_url": slope_map_id["tile_fetcher"].url_format,
+        "slope_thumb_url": slope.getThumbURL({**slope_vis, "region": aoi.bounds(), "dimensions": 800, "format": "png"}),
+        "hillshade_tile_url": hillshade_map_id["tile_fetcher"].url_format,
+        "hillshade_thumb_url": hillshade.getThumbURL({**hillshade_vis, "region": aoi.bounds(), "dimensions": 800, "format": "png"}),
+        "aspect_tile_url": aspect_map_id["tile_fetcher"].url_format,
+        "aspect_thumb_url": aspect.getThumbURL({**aspect_vis, "region": aoi.bounds(), "dimensions": 800, "format": "png"}),
+        "center": center,
+        "bbox": bounds,
+        "district": aoi_config.get("district", aoi_config.get("name", "Custom AOI")),
+    }
+    with _lock:
+        _cache[cache_key] = result
+    return result
+
+def compute_slope_stats(aoi_config: dict) -> dict:
+    cache_key = ("slope_stats", json.dumps(aoi_config, sort_keys=True))
+    with _lock:
+        if cache_key in _cache:
+            return _cache[cache_key]
+
+    aoi, dynamic_scale, dem, slope, aspect, hillshade = _build_slope_base(aoi_config)
 
     combined_stats_img = slope.rename("slope").addBands(dem.rename("elevation"))
     classes = {
@@ -59,7 +86,7 @@ def compute_slope(aoi_config: dict, n_classes: int = 5) -> dict:
         [classes[lbl].multiply(ee.Image.pixelArea()).rename(f"c{i}") for i, lbl in enumerate(labels)]
     )
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         f_stats = executor.submit(
             lambda: combined_stats_img.reduceRegion(
                 reducer=ee.Reducer.mean()
@@ -69,47 +96,17 @@ def compute_slope(aoi_config: dict, n_classes: int = 5) -> dict:
                 geometry=aoi, scale=dynamic_scale, maxPixels=1e10,
             ).getInfo()
         )
-
         f_area = executor.submit(
             lambda: area_img.reduceRegion(
                 reducer=ee.Reducer.sum(), geometry=aoi, scale=dynamic_scale, maxPixels=1e10
             ).getInfo()
         )
-
-        f_classify = executor.submit(
-            lambda: quantile_classify(
-                layers=[
-                    {"name": "slope", "image": slope, "title": "Slope (°)"},
-                    {"name": "elevation", "image": dem, "title": "Elevation (m)"},
-                    {"name": "aspect", "image": aspect, "title": "Aspect (°)"},
-                ],
-                aoi=aoi, scale=dynamic_scale, n_classes=n_classes,
-            )
-        )
-
-        f_bounds = executor.submit(
-            lambda: aoi.bounds().getInfo()["coordinates"][0]
-        )
-
         combined_stats = f_stats.result()
         area_dict = f_area.result()
-        classify = f_classify.result()
-        bounds = f_bounds.result()
 
     class_areas = {lbl: round((area_dict.get(f"c{i}", 0) or 0) / 1e6, 2) for i, lbl in enumerate(labels)}
 
-    center = [(bounds[0][1] + bounds[2][1]) / 2, (bounds[0][0] + bounds[2][0]) / 2]
-
     result = {
-        "slope_tile_url": slope_map_id["tile_fetcher"].url_format,
-        "slope_thumb_url": slope.getThumbURL({**slope_vis, "region": aoi.bounds(), "dimensions": 800, "format": "png"}),
-        "slope_download_url": slope.getDownloadURL({"region": aoi.bounds(), "scale": 30, "format": "GEO_TIFF", "crs": "EPSG:4326"}),
-        "hillshade_tile_url": hillshade_map_id["tile_fetcher"].url_format,
-        "hillshade_thumb_url": hillshade.getThumbURL({**hillshade_vis, "region": aoi.bounds(), "dimensions": 800, "format": "png"}),
-        "hillshade_download_url": hillshade.getDownloadURL({"region": aoi.bounds(), "scale": 30, "format": "GEO_TIFF", "crs": "EPSG:4326"}),
-        "aspect_tile_url": aspect_map_id["tile_fetcher"].url_format,
-        "aspect_thumb_url": aspect.getThumbURL({**aspect_vis, "region": aoi.bounds(), "dimensions": 800, "format": "png"}),
-        "aspect_download_url": aspect.getDownloadURL({"region": aoi.bounds(), "scale": 30, "format": "GEO_TIFF", "crs": "EPSG:4326"}),
         "stats": {
             "Mean Slope (°)": round(combined_stats.get("slope_mean") or 0, 2),
             "Max Slope (°)": round(combined_stats.get("slope_max") or 0, 2),
@@ -120,10 +117,48 @@ def compute_slope(aoi_config: dict, n_classes: int = 5) -> dict:
             "Max Elevation (m)": round(combined_stats.get("elevation_max") or 0, 0),
         },
         "class_areas_km2": class_areas,
+    }
+    with _lock:
+        _cache[cache_key] = result
+    return result
+
+def compute_slope_classify(aoi_config: dict, n_classes: int = 5, method: str = "natural_breaks", custom_labels: list = None) -> dict:
+    cache_key = ("slope_classify", json.dumps(aoi_config, sort_keys=True), n_classes, method, tuple(custom_labels) if custom_labels else None)
+    with _lock:
+        if cache_key in _cache:
+            return _cache[cache_key]
+
+    aoi, dynamic_scale, dem, slope, aspect, hillshade = _build_slope_base(aoi_config)
+
+    classify = quantile_classify(
+        layers=[
+            {"name": "slope", "image": slope, "title": "Slope (°)"},
+            {"name": "elevation", "image": dem, "title": "Elevation (m)"},
+            {"name": "aspect", "image": aspect, "title": "Aspect (°)"},
+        ],
+        aoi=aoi, scale=dynamic_scale, n_classes=n_classes,
+        method=method, custom_labels=custom_labels
+    )
+
+    result = {
         "classify": classify,
-        "center": center,
-        "district": aoi_config.get("district", aoi_config.get("name", "Custom AOI")),
-        "bbox": bounds,
+    }
+    with _lock:
+        _cache[cache_key] = result
+    return result
+
+def compute_slope_export(aoi_config: dict) -> dict:
+    cache_key = ("slope_export", json.dumps(aoi_config, sort_keys=True))
+    with _lock:
+        if cache_key in _cache:
+            return _cache[cache_key]
+
+    aoi, dynamic_scale, dem, slope, aspect, hillshade = _build_slope_base(aoi_config)
+
+    result = {
+        "slope_download_url": slope.getDownloadURL({"region": aoi.bounds(), "scale": 30, "format": "GEO_TIFF", "crs": "EPSG:4326"}),
+        "hillshade_download_url": hillshade.getDownloadURL({"region": aoi.bounds(), "scale": 30, "format": "GEO_TIFF", "crs": "EPSG:4326"}),
+        "aspect_download_url": aspect.getDownloadURL({"region": aoi.bounds(), "scale": 30, "format": "GEO_TIFF", "crs": "EPSG:4326"}),
     }
     with _lock:
         _cache[cache_key] = result

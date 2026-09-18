@@ -43,22 +43,33 @@ function StatCard({ label, value }: { label: string; value: string | number }) {
 }
 
 export function UHIPage() {
-  const [aoi, setAoi] = useState<AOIConfig>({ type: "gaul2", country: "Rwanda", name: "Musanze", level1: "North/Amajyaruguru", level2: "Musanze" });
+  const [aoi, setAoi] = useState<AOIConfig>({ type: "rwanda", country: "Rwanda", name: "Rwanda" });
   const [startDate, setStartDate] = useState(sixMonthsAgo());
   const [endDate, setEndDate] = useState(today());
   const [gridSize, setGridSize] = useState(5);
   const [activeLayer, setActiveLayer] = useState<"lst" | "ndbi">("lst");
 
-  const { mutate, data, isPending, error } = useMutation<UHIResult, Error>({
-    mutationFn: () =>
-      api.uhi({
-        aoi,
-        start_date: startDate,
-        end_date: endDate,
-        grid_size: gridSize,
-      }),
+  const [method, setMethod] = useState("natural_breaks");
+  const [nClasses, setNClasses] = useState(5);
+
+  const mutation = useMutation({
+    mutationFn: () => api.uhi({ 
+      aoi, 
+      start_date: startDate, 
+      end_date: endDate, 
+      grid_size: gridSize, 
+      n_classes: nClasses, 
+      method 
+    }),
   });
 
+  const handleAnalyze = () => {
+    mutation.mutate();
+  };
+
+  const isPending = mutation.isPending;
+  const error = mutation.error;
+  const data = mutation.data;
 
   const tileUrl = data
     ? activeLayer === "lst"
@@ -115,9 +126,34 @@ export function UHIPage() {
           />
         </div>
 
+        <div className="space-y-2 pt-2 border-t mt-2">
+          <Label>Classification</Label>
+          <div className="flex flex-col gap-3">
+            <Select value={method} onValueChange={setMethod}>
+              <SelectTrigger className="w-full text-xs h-8">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="natural_breaks" className="text-xs">Natural Breaks (Jenks)</SelectItem>
+                <SelectItem value="equal_interval" className="text-xs">Equal Interval</SelectItem>
+                <SelectItem value="quantiles" className="text-xs">Quantiles</SelectItem>
+              </SelectContent>
+            </Select>
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-muted-foreground w-16">Classes: {nClasses}</span>
+              <Slider
+                min={3} max={10} step={1}
+                value={[nClasses]}
+                onValueChange={([v]) => setNClasses(v)}
+                className="flex-1"
+              />
+            </div>
+          </div>
+        </div>
+
         <Button
-          className="w-full gap-2"
-          onClick={() => mutate()}
+          className="w-full gap-2 mt-2"
+          onClick={handleAnalyze}
           disabled={isPending}
         >
           {isPending ? (
@@ -129,7 +165,7 @@ export function UHIPage() {
         </Button>
 
         {error && (
-          <p className="text-xs text-destructive bg-destructive/10 rounded p-2">
+          <p className="text-xs text-destructive bg-destructive/10 rounded p-2 mt-2">
             {error.message}
           </p>
         )}
@@ -343,7 +379,8 @@ export function UHIPage() {
                 downloadUrl={activeLayer === "lst" ? (data as any).lst_download_url : (data as any).ndbi_download_url}
                 district={data.district ?? (aoi.name || "Custom")}
                 title={activeLayer === "lst" ? "LST Map" : "NDBI Map"}
-                classAreas={data.class_areas_km2}
+                classAreas={data?.class_areas_km2}
+
               /></div>
             </TabsContent>
 
@@ -364,8 +401,8 @@ export function UHIPage() {
                   district={data.district ?? (aoi.name || "Custom")}
                   dateRange={`${data.start_date ?? startDate} to ${data.end_date ?? endDate}`}
                   stats={{
-                    "LST Mean": data.lst_stats.mean ?? 0,
-                    "NDBI Mean": data.ndbi_stats.mean ?? 0,
+                    "LST Mean": data.lst_stats["Mean (°C)"] ?? 0,
+                    "NDBI Mean": data.ndbi_stats["Mean"] ?? 0,
                     "R²": data.regression?.r2 ?? 0,
                     "Slope": data.regression?.slope ?? 0,
                   }}

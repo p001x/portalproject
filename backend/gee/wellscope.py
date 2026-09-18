@@ -174,156 +174,148 @@ def get_factor_images(aoi, dynamic_scale):
         "lulc": lulc_score,
     }
 
-def compute_wellscope(aoi_config: dict, custom_weights: dict = None) -> dict:
-    cache_key = json.dumps({"aoi": aoi_config, "weights": custom_weights, "module": "wellscope"}, sort_keys=True)
-    with _lock:
-        if cache_key in _cache_map:
-            return _cache_map[cache_key]
-
+def _build_wellscope_base(aoi_config: dict, custom_weights: dict = None):
     from gee.aoi_utils import get_aoi_geometry
     aoi = get_aoi_geometry(aoi_config)
-    # Calculate dynamic scale based on geometry size (sq km)
     area_sqkm = aoi.area().divide(1e6).getInfo()
     if area_sqkm > 10000:
-        dynamic_scale = 500   # Entire Country (High memory footprint)
+        dynamic_scale = 500
     elif area_sqkm > 2000:
-        dynamic_scale = 250   # Province
+        dynamic_scale = 250
     elif area_sqkm > 500:
-        dynamic_scale = 100   # Large District
+        dynamic_scale = 100
     else:
-        dynamic_scale = 30    # Sector or small polygon
-
+        dynamic_scale = 30
 
     weights = _normalize_weights(custom_weights)
-    ahp_data = compute_ahp_data({k: v * 100 for k, v in weights.items()})
-
     score_images = get_factor_images(aoi, dynamic_scale)
-    rain_score = score_images["rainfall"]
-    lith_score = score_images["lithology"]
-    slope_score = score_images["slope"]
-    twi_score = score_images["twi"]
-    drainage_score = score_images["drainage"]
-    dist_water_score = score_images["dist_water"]
-    lulc_score = score_images["lulc"]
-
-    # Weighted Sum
+    
     suitability = (
-        rain_score.multiply(weights["rainfall"])
-        .add(lith_score.multiply(weights["lithology"]))
-        .add(slope_score.multiply(weights["slope"]))
-        .add(twi_score.multiply(weights["twi"]))
-        .add(drainage_score.multiply(weights["drainage"]))
-        .add(dist_water_score.multiply(weights["dist_water"]))
-        .add(lulc_score.multiply(weights["lulc"]))
+        score_images["rainfall"].multiply(weights["rainfall"])
+        .add(score_images["lithology"].multiply(weights["lithology"]))
+        .add(score_images["slope"].multiply(weights["slope"]))
+        .add(score_images["twi"].multiply(weights["twi"]))
+        .add(score_images["drainage"].multiply(weights["drainage"]))
+        .add(score_images["dist_water"].multiply(weights["dist_water"]))
+        .add(score_images["lulc"].multiply(weights["lulc"]))
     )
 
     suitability_100 = suitability.subtract(1).divide(4).multiply(100).rename("GWP")
     
-    from gee.classify_utils import get_jenks_breaks
-    hist = suitability_100.reduceRegion(
-        reducer=ee.Reducer.autoHistogram(),
-        geometry=aoi,
-        scale=dynamic_scale,
-        maxPixels=1e9
-    ).getInfo()
-    
-    bands_img = ee.Image(3)
-    labels = ["Class 1 (Very Low)", "Class 2 (Low)", "Class 3 (Moderate)", "Class 4 (High)", "Class 5 (Very High)"]
-    
-    if hist and "GWP" in hist and hist["GWP"]:
-        bps = get_jenks_breaks(hist["GWP"], 5)
-        bps = list(sorted(set(bps)))
-        if len(bps) >= 2:
-            values = [1, 2, 3, 4, 5]
-            bands_img = ee.Image(values[-1])
-            for i in range(len(bps) - 1, -1, -1):
-                bands_img = bands_img.where(suitability_100.lt(bps[i]), values[min(i, 4)])
-            
-            # Form labels with breaks
-            labels = []
-            prev = 0
-            for i, bp in enumerate(bps):
-                labels.append(f"Class {i+1} ({prev:.1f}-{bp:.1f})")
-                prev = bp
-            labels.append(f"Class {len(bps)+1} ({prev:.1f}+)")
-            while len(labels) < 5: labels.append("N/A")
-            labels = labels[:5]
+    return aoi, dynamic_scale, weights, score_images, suitability_100
 
-    bands_img = bands_img.updateMask(suitability_100.mask()).toFloat().rename("Band")
+def compute_wellscope_map(aoi_config: dict, custom_weights: dict = None) -> dict:
+    cache_key = ("wellscope_map", json.dumps(aoi_config, sort_keys=True), json.dumps(custom_weights, sort_keys=True) if custom_weights else None)
+    with _lock:
+        if cache_key in _cache_map:
+            return _cache_map[cache_key]
 
-    area_img = ee.Image.cat(
-        [bands_img.eq(i+1).multiply(ee.Image.pixelArea()).rename(f"c{i}") for i in range(5)]
-    )
+    aoi, dynamic_scale, weights, score_images, suitability_100 = _build_wellscope_base(aoi_config, custom_weights)
+    ahp_data = compute_ahp_data({k: v * 100 for k, v in weights.items()})
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-        f_stats = executor.submit(
-            lambda: suitability_100.reduceRegion(
-                reducer=ee.Reducer.mean().combine(ee.Reducer.min(), sharedInputs=True).combine(ee.Reducer.max(), sharedInputs=True),
-                geometry=aoi,
-                scale=dynamic_scale,
-                maxPixels=1e10
-            ).getInfo()
-        )
-        f_area = executor.submit(
-            lambda: area_img.reduceRegion(
-                reducer=ee.Reducer.sum(),
-                geometry=aoi,
-                scale=dynamic_scale,
-                maxPixels=1e10
-            ).getInfo()
-        )
-        f_bounds = executor.submit(
-            lambda: aoi.bounds().getInfo()["coordinates"][0]
-        )
-        f_factors = executor.submit(
-            lambda: {k: _factor_urls(v, k, aoi) for k, v in score_images.items()}
-        )
+    bounds = aoi.bounds().getInfo()["coordinates"][0]
+    center = [(bounds[0][1] + bounds[2][1]) / 2, (bounds[0][0] + bounds[2][0]) / 2]
 
-        stats = f_stats.result()
-        area_dict = f_area.result()
-        bounds = f_bounds.result()
-        factor_maps = f_factors.result()
-
-    class_areas = {
-        labels[i]: round((area_dict.get(f"c{i}", 0) or 0) / 1e6, 2)
-        for i in range(5)
-    }
-
-    map_id = bands_img.getMapId(_SCORE_VIS)
-    thumb_url = bands_img.getThumbURL({
-        **_SCORE_VIS,
-        "region": aoi.bounds(),
-        "dimensions": 512,
-        "format": "png"
+    map_id = suitability_100.getMapId(_SUITABILITY_VIS)
+    thumb_url = suitability_100.getThumbURL({
+        **_SUITABILITY_VIS, "region": aoi.bounds(), "dimensions": 512, "format": "png"
     })
 
-    center_lon = (bounds[0][0] + bounds[2][0]) / 2
-    center_lat = (bounds[0][1] + bounds[2][1]) / 2
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        f_factors = executor.submit(lambda: {k: _factor_urls(v, k, aoi) for k, v in score_images.items()})
+        factor_maps = f_factors.result()
 
-    res = {
+    result = {
         "tile_url": map_id["tile_fetcher"].url_format,
         "thumb_url": thumb_url,
         "factor_maps": factor_maps,
         "ahp_data": ahp_data,
-        "center": [center_lat, center_lon],
+        "center": center,
         "bbox": bounds,
-        "stats": {
-            "Mean Suitability": round(stats.get("GWP_mean") or 0, 1),
-            "Min Suitability": round(stats.get("GWP_min") or 0, 1),
-            "Max Suitability": round(stats.get("GWP_max") or 0, 1),
-        },
-        "class_areas_km2": class_areas,
         "district": aoi_config.get("district", aoi_config.get("name", "Custom AOI")),
     }
-    
     with _lock:
-        _cache_map[cache_key] = res
-    return res
+        _cache_map[cache_key] = result
+    return result
+
+def compute_wellscope_stats(aoi_config: dict, custom_weights: dict = None) -> dict:
+    cache_key = ("wellscope_stats", json.dumps(aoi_config, sort_keys=True), json.dumps(custom_weights, sort_keys=True) if custom_weights else None)
+    with _lock:
+        if cache_key in _cache_map:
+            return _cache_map[cache_key]
+
+    aoi, dynamic_scale, _, _, suitability_100 = _build_wellscope_base(aoi_config, custom_weights)
+
+    stats = suitability_100.reduceRegion(
+        reducer=ee.Reducer.mean().combine(ee.Reducer.min(), sharedInputs=True).combine(ee.Reducer.max(), sharedInputs=True),
+        geometry=aoi,
+        scale=dynamic_scale,
+        maxPixels=1e10
+    ).getInfo()
+
+    result = {
+        "Mean Suitability": round(stats.get("GWP_mean") or 0, 1),
+        "Min Suitability": round(stats.get("GWP_min") or 0, 1),
+        "Max Suitability": round(stats.get("GWP_max") or 0, 1),
+    }
+    with _lock:
+        _cache_map[cache_key] = result
+    return result
+
+def compute_wellscope_classify(aoi_config: dict, custom_weights: dict = None, n_classes: int = 5, method: str = "natural_breaks", custom_labels: list = None) -> dict:
+    labels_tuple = tuple(custom_labels) if custom_labels else None
+    cache_key = ("wellscope_classify", json.dumps(aoi_config, sort_keys=True), json.dumps(custom_weights, sort_keys=True) if custom_weights else None, n_classes, method, labels_tuple)
+    with _lock:
+        if cache_key in _cache_map:
+            return _cache_map[cache_key]
+
+    aoi, dynamic_scale, _, _, suitability_100 = _build_wellscope_base(aoi_config, custom_weights)
+    from gee.classify_utils import quantile_classify
+    
+    classify_method = method if method != "continuous" else "natural_breaks"
+
+    classify = quantile_classify(
+        layers=[{"name": "GWP", "image": suitability_100, "title": "Groundwater Suitability"}],
+        aoi=aoi,
+        scale=dynamic_scale,
+        n_classes=n_classes,
+        reverse_palette=False,
+        method=classify_method,
+        custom_labels=custom_labels
+    )
+
+    raw_areas = classify.get("panels", [{}])[0].get("areas", {})
+    class_areas = {k: v for k, v in raw_areas.items()}
+
+    result = {
+        "classify": classify,
+        "class_areas_km2": class_areas,
+        "classified_areas_km2": raw_areas,
+    }
+    with _lock:
+        _cache_map[cache_key] = result
+    return result
+
+def compute_wellscope_export(aoi_config: dict, custom_weights: dict = None) -> dict:
+    cache_key = ("wellscope_export", json.dumps(aoi_config, sort_keys=True), json.dumps(custom_weights, sort_keys=True) if custom_weights else None)
+    with _lock:
+        if cache_key in _cache_map:
+            return _cache_map[cache_key]
+
+    aoi, _, _, _, suitability_100 = _build_wellscope_base(aoi_config, custom_weights)
+
+    result = {
+        "download_url": suitability_100.getDownloadURL({
+            "scale": 100, "region": aoi.bounds(), "format": "GEO_TIFF", "crs": "EPSG:4326"
+        })
+    }
+    with _lock:
+        _cache_map[cache_key] = result
+    return result
 
 def export_factor_map(aoi_config: dict, factor_key: str, palette: list = None) -> dict:
     from gee.aoi_utils import get_aoi_geometry
     aoi = get_aoi_geometry(aoi_config)
-    
     area_sqkm = aoi.area().divide(1e6).getInfo()
     if area_sqkm > 10000:
         dynamic_scale = 500
@@ -339,28 +331,10 @@ def export_factor_map(aoi_config: dict, factor_key: str, palette: list = None) -
         raise ValueError(f"Invalid factor key: {factor_key}")
         
     image = score_images[factor_key]
-    
-    if palette:
-        vis = {"min": 1, "max": 5, "palette": palette}
-    else:
-        vis = _SCORE_VIS
+    vis = {"min": 1, "max": 5, "palette": palette} if palette else _SCORE_VIS
         
-    thumb_url = image.getThumbURL({
-        **vis,
-        "region": aoi.bounds(),
-        "dimensions": 1024,
-        "format": "png"
-    })
-    
-    download_url = image.getDownloadURL({
-        "scale": 30,
-        "crs": "EPSG:4326",
-        "region": aoi,
-        "format": "GEO_TIFF"
-    })
-    
     return {
-        "thumb_url": thumb_url,
-        "download_url": download_url
+        "thumb_url": image.getThumbURL({**vis, "region": aoi.bounds(), "dimensions": 1024, "format": "png"}),
+        "download_url": image.getDownloadURL({"scale": 30, "crs": "EPSG:4326", "region": aoi, "format": "GEO_TIFF"})
     }
 

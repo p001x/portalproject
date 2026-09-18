@@ -215,12 +215,16 @@ class LSTRequest(BaseModel):
     district: str
     start_date: str
     end_date: str
-    n_classes: int = 5
+    n_classes: int = Field(5, ge=1, le=15)
+    method: Optional[str] = Field("natural_breaks")
+    custom_labels: Optional[list[str]] = Field(None)
 
 class RUSLERequest(BaseModel):
     district: str
     year: int = 2023
-    n_classes: int = 5
+    n_classes: int = Field(5, ge=1, le=15)
+    method: Optional[str] = Field("natural_breaks")
+    custom_labels: Optional[list[str]] = Field(None)
     reverse_r: bool = False
     reverse_k: bool = False
     reverse_ls: bool = False
@@ -229,11 +233,15 @@ class RUSLERequest(BaseModel):
 
 class SlopeRequest(BaseModel):
     district: str
-    n_classes: int = 5
+    n_classes: int = Field(5, ge=1, le=15)
+    method: Optional[str] = Field("natural_breaks")
+    custom_labels: Optional[list[str]] = Field(None)
 
 class LandfillRequest(BaseModel):
     district: str
-    n_classes: int = 5
+    n_classes: int = Field(5, ge=1, le=15)
+    method: Optional[str] = Field("natural_breaks")
+    custom_labels: Optional[list[str]] = Field(None)
     reverse_river: bool = False
     reverse_residential: bool = False
     reverse_slope: bool = False
@@ -245,13 +253,17 @@ class AirPollutionRequest(BaseModel):
     district: str
     start_date: str
     end_date: str
-    n_classes: int = 5
+    n_classes: int = Field(5, ge=1, le=15)
+    method: Optional[str] = Field("natural_breaks")
+    custom_labels: Optional[list[str]] = Field(None)
 
 class LandslideRequest(BaseModel):
     district: str
     start_year: int = 2015
     end_year: int = 2024
-    n_classes: int = 5
+    n_classes: int = Field(5, ge=1, le=15)
+    method: Optional[str] = Field("natural_breaks")
+    custom_labels: Optional[list[str]] = Field(None)
     reverse_slope: bool = False
     reverse_rainfall: bool = False
     reverse_litho: bool = False
@@ -269,7 +281,9 @@ class UHIRequest(BaseModel):
 class DroughtRequest(BaseModel):
     district: str
     year: int = 2023
-    n_classes: int = 5
+    n_classes: int = Field(5, ge=1, le=15)
+    method: Optional[str] = Field("natural_breaks")
+    custom_labels: Optional[list[str]] = Field(None)
     reverse_sm: bool = False
     reverse_rf: bool = False
     reverse_ndvi: bool = False
@@ -282,7 +296,9 @@ class FloodRequest(BaseModel):
     district: str
     start_year: int = 2015
     end_year: int = 2024
-    n_classes: int = 5
+    n_classes: int = Field(5, ge=1, le=15)
+    method: Optional[str] = Field("natural_breaks")
+    custom_labels: Optional[list[str]] = Field(None)
     reverse_rainfall: bool = False
     reverse_twi: bool = False
     reverse_lulc: bool = False
@@ -308,7 +324,11 @@ class IrrigationRequest(BaseModel):
     aoi: dict
     start_date: str
     end_date: str
+    planting_date: str
     crop_type: str
+    n_classes: int = 5
+    method: str = "continuous"
+    custom_labels: Optional[list] = None
 
 class WaterHarvestingRequest(BaseModel):
     aoi: dict
@@ -384,7 +404,7 @@ def irrigation_map_endpoint():
     if err: return err
     try:
         req = IrrigationRequest(**request.json)
-        res = compute_irrigation_map(req.aoi, req.start_date, req.end_date, req.crop_type)
+        res = compute_irrigation_map(req.aoi, req.start_date, req.end_date, req.planting_date, req.crop_type)
         return jsonify(res)
     except Exception as e:
         logger.exception("Irrigation map failed")
@@ -396,7 +416,7 @@ def irrigation_stats_endpoint():
     if err: return err
     try:
         req = IrrigationRequest(**request.json)
-        res = compute_irrigation_stats(req.aoi, req.start_date, req.end_date, req.crop_type)
+        res = compute_irrigation_stats(req.aoi, req.start_date, req.end_date, req.planting_date, req.crop_type)
         return jsonify(res)
     except Exception as e:
         logger.exception("Irrigation stats failed")
@@ -408,7 +428,7 @@ def irrigation_export_endpoint():
     if err: return err
     try:
         req = IrrigationRequest(**request.json)
-        res = compute_irrigation_export(req.aoi, req.start_date, req.end_date, req.crop_type)
+        res = compute_irrigation_export(req.aoi, req.start_date, req.end_date, req.planting_date, req.crop_type)
         return jsonify(res)
     except Exception as e:
         logger.exception("Irrigation export failed")
@@ -680,7 +700,9 @@ def flood_endpoint():
 class HabitatRequest(BaseModel):
     aoi: dict
     reverse_flags: dict = {}
-    n_classes: int = 5
+    n_classes: int = Field(5, ge=1, le=15)
+    method: Optional[str] = Field("natural_breaks")
+    custom_labels: Optional[list[str]] = Field(None)
     custom_weights: dict = None
 
 class HabitatAhpRequest(BaseModel):

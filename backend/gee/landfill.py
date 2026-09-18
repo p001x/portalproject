@@ -129,41 +129,20 @@ def _normalize_weights(custom: dict | None) -> dict:
     return {k: v / total for k, v in raw.items()}
 
 
-def compute_landfill_suitability(
-    aoi_config: dict,
-    reverse_river: bool = False,
-    reverse_residential: bool = False,
-    reverse_slope: bool = False,
-    reverse_road: bool = False,
-    reverse_lulc: bool = False,
-    n_classes: int = 5,
-    custom_weights: dict | None = None,
-) -> dict:
+def _build_landfill_base(
+    aoi_config: dict, reverse_river: bool, reverse_residential: bool,
+    reverse_slope: bool, reverse_road: bool, reverse_lulc: bool, custom_weights: dict | None
+):
+    from gee.aoi_utils import get_aoi_geometry
+    aoi = get_aoi_geometry(aoi_config)
     weights = _normalize_weights(custom_weights)
-    weights_tuple = tuple(round(weights[k], 6) for k in FACTOR_ORDER)
-
-    cache_key = (json.dumps(aoi_config, sort_keys=True),
-        reverse_river, reverse_residential, reverse_slope, reverse_road, reverse_lulc,
-        n_classes,
-        weights_tuple,
-    )
-    with _lock:
-        if cache_key in _cache:
-            return _cache[cache_key]
-
     reverse_flags = {
         "river": reverse_river, "residential": reverse_residential,
         "slope": reverse_slope, "road": reverse_road, "lulc": reverse_lulc,
     }
 
-    from gee.aoi_utils import get_aoi_geometry
-    aoi = get_aoi_geometry(aoi_config)
-
-
-    # ── Slope ──────────────────────────────────────────────────────────────────
     dem = ee.Image("USGS/SRTMGL1_003").select("elevation")
-    slope_deg = ee.Terrain.slope(dem)
-    slope_pct = slope_deg.multiply(math.pi / 180).tan().multiply(100)
+    slope_pct = ee.Terrain.slope(dem).multiply(math.pi / 180).tan().multiply(100)
     slope_score = (
         ee.Image(1)
         .where(slope_pct.gte(0).And(slope_pct.lt(2)), 5)
@@ -175,7 +154,6 @@ def compute_landfill_suitability(
     )
     slope_score = _apply_reverse(slope_score, reverse_flags["slope"]).rename("slope_score")
 
-    # ── Land cover & distances ─────────────────────────────────────────────────
     lc = ee.Image("ESA/WorldCover/v200/2021").select("Map").clip(aoi)
     gsw = ee.Image("JRC/GSW1_4/GlobalSurfaceWater").select("occurrence")
     water_mask = gsw.gte(50).unmask(0).Or(lc.eq(80)).Or(lc.eq(90))
@@ -202,7 +180,6 @@ def compute_landfill_suitability(
         "slope": slope_score, "road": road_score, "lulc": lulc_score,
     }
 
-    # ── Weighted overlay ───────────────────────────────────────────────────────
     suitability = (
         river_score.multiply(weights["river"])
         .add(residential_score.multiply(weights["residential"]))
@@ -211,62 +188,41 @@ def compute_landfill_suitability(
         .add(lulc_score.multiply(weights["lulc"]))
     ).rename("suitability")
 
-    map_id = suitability.getMapId(_SCORE_VIS)
+    raw_layers = {
+        "river_dist_km": river_dist_km,
+        "residential_dist_km": residential_dist_km,
+        "slope_pct": slope_pct,
+        "lc": lc
+    }
 
-    # Final map thumbnail for report
+    return aoi, suitability, score_images, raw_layers, weights, reverse_flags
+
+def compute_landfill_map(
+    aoi_config: dict,
+    reverse_river: bool = False, reverse_residential: bool = False,
+    reverse_slope: bool = False, reverse_road: bool = False, reverse_lulc: bool = False,
+    custom_weights: dict | None = None,
+) -> dict:
+    weights = _normalize_weights(custom_weights)
+    weights_tuple = tuple(round(weights[k], 6) for k in FACTOR_ORDER)
+    cache_key = ("landfill_map", json.dumps(aoi_config, sort_keys=True),
+        reverse_river, reverse_residential, reverse_slope, reverse_road, reverse_lulc, weights_tuple)
+    with _lock:
+        if cache_key in _cache:
+            return _cache[cache_key]
+
+    aoi, suitability, score_images, _, weights, reverse_flags = _build_landfill_base(
+        aoi_config, reverse_river, reverse_residential, reverse_slope, reverse_road, reverse_lulc, custom_weights
+    )
+    
+    map_id = suitability.getMapId(_SCORE_VIS)
     final_thumb_url = suitability.getThumbURL({
         **_SCORE_VIS, "region": aoi.bounds(), "dimensions": 512, "format": "png",
     })
 
-    # ── Class areas ────────────────────────────────────────────────────────────
-    classes = {
-        "Very Unsuitable (< 1.8)": suitability.lt(1.8),
-        "Unsuitable (1.8–2.6)": suitability.gte(1.8).And(suitability.lt(2.6)),
-        "Marginally Suitable (2.6–3.4)": suitability.gte(2.6).And(suitability.lt(3.4)),
-        "Moderately Suitable (3.4–4.2)": suitability.gte(3.4).And(suitability.lt(4.2)),
-        "Highly Suitable (> 4.2)": suitability.gte(4.2),
-    }
-    labels = list(classes.keys())
-    area_img = ee.Image.cat([
-        classes[lbl].multiply(ee.Image.pixelArea()).rename(f"c{i}")
-        for i, lbl in enumerate(labels)
-    ])
+    bounds = aoi.bounds().getInfo()["coordinates"][0]
+    center = [(bounds[0][1] + bounds[2][1]) / 2, (bounds[0][0] + bounds[2][0]) / 2]
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-        f_area = executor.submit(
-            lambda: area_img.reduceRegion(
-                reducer=ee.Reducer.sum(), geometry=aoi, scale=get_dynamic_scale(aoi), maxPixels=1e10
-            ).getInfo()
-        )
-
-        f_classify = executor.submit(
-            lambda: quantile_classify(
-                layers=[
-                    {"name": "suitability",    "image": suitability,               "title": "Suitability Index"},
-                    {"name": "river_score",    "image": river_dist_km,      "title": "River Distance (km)"},
-                    {"name": "resid_score",    "image": residential_dist_km,"title": "Residential Distance (km)"},
-                    {"name": "slope_score",    "image": slope_pct,      "title": "Slope (%)"},
-                    {"name": "road_score",     "image": residential_dist_km,       "title": "Road Accessibility (km)"},
-                    {"name": "lulc_score",     "image": lc,       "title": "Land Cover (Categorical)"},
-                ],
-                aoi=aoi, scale=get_dynamic_scale(aoi), n_classes=n_classes,
-            )
-        )
-
-        f_bounds = executor.submit(
-            lambda: aoi.bounds().getInfo()["coordinates"][0]
-        )
-
-        area_dict = f_area.result()
-        classify = f_classify.result()
-        bounds = f_bounds.result()
-
-    class_areas = {
-        lbl: round((area_dict.get(f"c{i}", 0) or 0) / 1e6, 2)
-        for i, lbl in enumerate(labels)
-    }
-
-    # ── Factor maps ────────────────────────────────────────────────────────────
     factor_maps = {}
     for key in FACTOR_ORDER:
         meta = FACTOR_META[key]
@@ -280,25 +236,11 @@ def compute_landfill_suitability(
             **urls,
         }
 
-    center = [(bounds[0][1] + bounds[2][1]) / 2, (bounds[0][0] + bounds[2][0]) / 2]
-
     ahp_data = compute_ahp_data(weights)
-
-    download_url = suitability.getDownloadURL({
-        "scale": 100, "region": aoi.bounds(), "format": "GEO_TIFF"
-    })
 
     result = {
         "tile_url": map_id["tile_fetcher"].url_format,
         "thumb_url": final_thumb_url,
-        "download_url": download_url,
-        "stats": {
-            "Total Area (km²)": round(sum(class_areas.values()), 2),
-            "Highly Suitable (km²)": class_areas.get("Highly Suitable (4–5)", 0),
-            "Unsuitable (km²)": class_areas.get("Unsuitable (<2)", 0),
-        },
-        "class_areas_km2": class_areas,
-        "classify": classify,
         "factor_maps": factor_maps,
         "reverse_flags": reverse_flags,
         "weights_used": {k: round(v, 4) for k, v in weights.items()},
@@ -306,6 +248,121 @@ def compute_landfill_suitability(
         "center": center,
         "district": aoi_config.get("district", aoi_config.get("name", "Custom AOI")),
         "bbox": bounds,
+    }
+    with _lock:
+        _cache[cache_key] = result
+    return result
+
+def compute_landfill_stats(
+    aoi_config: dict,
+    reverse_river: bool = False, reverse_residential: bool = False,
+    reverse_slope: bool = False, reverse_road: bool = False, reverse_lulc: bool = False,
+    custom_weights: dict | None = None,
+) -> dict:
+    weights = _normalize_weights(custom_weights)
+    weights_tuple = tuple(round(weights[k], 6) for k in FACTOR_ORDER)
+    cache_key = ("landfill_stats", json.dumps(aoi_config, sort_keys=True),
+        reverse_river, reverse_residential, reverse_slope, reverse_road, reverse_lulc, weights_tuple)
+    with _lock:
+        if cache_key in _cache:
+            return _cache[cache_key]
+
+    aoi, suitability, _, _, _, _ = _build_landfill_base(
+        aoi_config, reverse_river, reverse_residential, reverse_slope, reverse_road, reverse_lulc, custom_weights
+    )
+
+    classes = {
+        "Very Unsuitable (< 1.8)": suitability.lt(1.8),
+        "Unsuitable (1.8–2.6)": suitability.gte(1.8).And(suitability.lt(2.6)),
+        "Marginally Suitable (2.6–3.4)": suitability.gte(2.6).And(suitability.lt(3.4)),
+        "Moderately Suitable (3.4–4.2)": suitability.gte(3.4).And(suitability.lt(4.2)),
+        "Highly Suitable (> 4.2)": suitability.gte(4.2),
+    }
+    labels = list(classes.keys())
+    area_img = ee.Image.cat([
+        classes[lbl].multiply(ee.Image.pixelArea()).rename(f"c{i}")
+        for i, lbl in enumerate(labels)
+    ])
+
+    area_dict = area_img.reduceRegion(
+        reducer=ee.Reducer.sum(), geometry=aoi, scale=get_dynamic_scale(aoi), maxPixels=1e10
+    ).getInfo()
+
+    class_areas = {
+        lbl: round((area_dict.get(f"c{i}", 0) or 0) / 1e6, 2)
+        for i, lbl in enumerate(labels)
+    }
+
+    result = {
+        "stats": {
+            "Total Area (km²)": round(sum(class_areas.values()), 2),
+            "Highly Suitable (km²)": class_areas.get("Highly Suitable (> 4.2)", 0),
+            "Unsuitable (km²)": class_areas.get("Very Unsuitable (< 1.8)", 0) + class_areas.get("Unsuitable (1.8–2.6)", 0),
+        },
+        "class_areas_km2": class_areas,
+    }
+    with _lock:
+        _cache[cache_key] = result
+    return result
+
+def compute_landfill_classify(
+    aoi_config: dict,
+    reverse_river: bool = False, reverse_residential: bool = False,
+    reverse_slope: bool = False, reverse_road: bool = False, reverse_lulc: bool = False,
+    n_classes: int = 5, method: str = "natural_breaks", custom_labels: list = None,
+    custom_weights: dict | None = None,
+) -> dict:
+    weights = _normalize_weights(custom_weights)
+    weights_tuple = tuple(round(weights[k], 6) for k in FACTOR_ORDER)
+    cache_key = ("landfill_classify", json.dumps(aoi_config, sort_keys=True),
+        reverse_river, reverse_residential, reverse_slope, reverse_road, reverse_lulc,
+        n_classes, method, tuple(custom_labels) if custom_labels else None, weights_tuple)
+    with _lock:
+        if cache_key in _cache:
+            return _cache[cache_key]
+
+    aoi, suitability, _, raw_layers, _, _ = _build_landfill_base(
+        aoi_config, reverse_river, reverse_residential, reverse_slope, reverse_road, reverse_lulc, custom_weights
+    )
+
+    classify = quantile_classify(
+        layers=[
+            {"name": "suitability",    "image": suitability,               "title": "Suitability Index"},
+            {"name": "river_score",    "image": raw_layers["river_dist_km"],      "title": "River Distance (km)"},
+            {"name": "resid_score",    "image": raw_layers["residential_dist_km"],"title": "Residential Distance (km)"},
+            {"name": "slope_score",    "image": raw_layers["slope_pct"],      "title": "Slope (%)"},
+            {"name": "road_score",     "image": raw_layers["residential_dist_km"],       "title": "Road Accessibility (km)"},
+            {"name": "lulc_score",     "image": raw_layers["lc"],       "title": "Land Cover (Categorical)"},
+        ],
+        aoi=aoi, scale=get_dynamic_scale(aoi), n_classes=n_classes,
+        method=method, custom_labels=custom_labels
+    )
+    with _lock:
+        _cache[cache_key] = result = classify
+    return result
+
+def compute_landfill_export(
+    aoi_config: dict,
+    reverse_river: bool = False, reverse_residential: bool = False,
+    reverse_slope: bool = False, reverse_road: bool = False, reverse_lulc: bool = False,
+    custom_weights: dict | None = None,
+) -> dict:
+    weights = _normalize_weights(custom_weights)
+    weights_tuple = tuple(round(weights[k], 6) for k in FACTOR_ORDER)
+    cache_key = ("landfill_export", json.dumps(aoi_config, sort_keys=True),
+        reverse_river, reverse_residential, reverse_slope, reverse_road, reverse_lulc, weights_tuple)
+    with _lock:
+        if cache_key in _cache:
+            return _cache[cache_key]
+
+    aoi, suitability, _, _, _, _ = _build_landfill_base(
+        aoi_config, reverse_river, reverse_residential, reverse_slope, reverse_road, reverse_lulc, custom_weights
+    )
+
+    result = {
+        "download_url": suitability.getDownloadURL({
+            "scale": 100, "region": aoi.bounds(), "format": "GEO_TIFF"
+        })
     }
     with _lock:
         _cache[cache_key] = result

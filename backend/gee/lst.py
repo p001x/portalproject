@@ -68,8 +68,8 @@ def lst_image_and_aoi(aoi_config: dict, start_date: str, end_date: str):
     return lst_median, aoi
 
 
-def compute_lst(aoi_config: dict, start_date: str, end_date: str, n_classes: int = 5) -> dict:
-    cache_key = (json.dumps(aoi_config, sort_keys=True), start_date, end_date, n_classes)
+def compute_lst(aoi_config: dict, start_date: str, end_date: str, n_classes: int = 5, method: str = "natural_breaks", custom_labels: list = None) -> dict:
+    cache_key = (json.dumps(aoi_config, sort_keys=True), start_date, end_date, n_classes, method, tuple(custom_labels) if custom_labels else None)
     with _lock:
         if cache_key in _cache:
             return _cache[cache_key]
@@ -120,6 +120,7 @@ def compute_lst(aoi_config: dict, start_date: str, end_date: str, n_classes: int
             lambda: quantile_classify(
                 layers=[{"name": "LST", "image": lst, "title": "Land Surface Temperature (°C)"}],
                 aoi=aoi, scale=get_dynamic_scale(aoi), n_classes=n_classes,
+                method=method, custom_labels=custom_labels
             )
         )
 

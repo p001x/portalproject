@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import { ClassificationControls } from "@/components/ClassificationControls";
 import { StudyAreaSelector } from "@/components/StudyAreaSelector";
 import { useMutation } from "@tanstack/react-query";
 import {
@@ -10,7 +11,7 @@ import {
   ResponsiveContainer,
   Cell,
 } from "recharts";
-import { Loader2, Droplet, FileText } from "lucide-react";
+import { Loader2, Droplet, FileText , Tag, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
@@ -48,10 +49,44 @@ const YEARS = Array.from({ length: 2024 - 2013 + 1 }, (_, i) => 2013 + i);
 const DVI_COLORS = ["#1a9641", "#a6d96a", "#ffffbf", "#fdae61", "#d7191c"];
 const DVI_LABELS = ["Very Low", "Low", "Moderate", "High", "Very High"];
 
+
+const DEFAULT_PRESETS: Record<number, string[]> = {
+  1: ["Uniform / Full Area"],
+  2: ["Low", "High"],
+  3: ["Low", "Moderate", "High"],
+  4: ["Low", "Moderate", "High", "Very High"],
+  5: ["Very Low", "Low", "Moderate", "High", "Very High"],
+  6: ["Very Low", "Low", "Moderate", "High", "Very High", "Extreme"],
+  7: ["Extremely Low", "Very Low", "Low", "Moderate", "High", "Very High", "Extreme"],
+  8: ["Extremely Low", "Very Low", "Low", "Moderately Low", "Moderately High", "High", "Very High", "Extreme"],
+  9: ["Extremely Low", "Very Low", "Low", "Moderately Low", "Moderate", "Moderately High", "High", "Very High", "Extreme"],
+  10: ["Extremely Low", "Very Low", "Low", "Moderately Low", "Moderate", "Moderately High", "High", "Very High", "Extremely High", "Extreme"],
+};
+
+function getDefaultLabels(n: number): string[] {
+  if (DEFAULT_PRESETS[n]) return [...DEFAULT_PRESETS[n]];
+  return Array.from({ length: n }, (_, i) => `Class ${i + 1}`);
+}
+
 export function DroughtPage() {
-  const [aoi, setAoi] = useState<AOIConfig>({ type: "gaul2", country: "Rwanda", name: "Musanze", level1: "North/Amajyaruguru", level2: "Musanze" });
+  const [aoi, setAoi] = useState<AOIConfig>({ type: "rwanda", country: "Rwanda", name: "Rwanda" });
   const [year, setYear] = useState(2023);
   const [nClasses, setNClasses] = useState(5);
+  const [method, setMethod] = useState("natural_breaks");
+  const [customClassNames, setCustomClassNames] = useState<string[]>(() => getDefaultLabels(5));
+
+  useEffect(() => {
+    setCustomClassNames((prev) => {
+      if (prev.length === nClasses) return prev;
+      const next = getDefaultLabels(nClasses);
+      for (let i = 0; i < Math.min(prev.length, nClasses); i++) {
+        if (!DEFAULT_PRESETS[prev.length]?.includes(prev[i])) {
+          next[i] = prev[i];
+        }
+      }
+      return next;
+    });
+  }, [nClasses]);
   const [activeLayer, setActiveLayer] = useState<"continuous" | "classified">("continuous");
 
   // Factor reversal states
@@ -63,27 +98,60 @@ export function DroughtPage() {
   const [reverseCdd, setReverseCdd] = useState(false);
   const [reverseEvi, setReverseEvi] = useState(false);
 
-  const { mutate, data, isPending, error } = useMutation<DroughtResult, Error>({
-    mutationFn: () =>
-      api.drought({
-        aoi,
-                year,
-        n_classes: nClasses,
-        reverse_sm: reverseSm,
-        reverse_rf: reverseRf,
-        reverse_ndvi: reverseNdvi,
-        reverse_vci: reverseVci,
-        reverse_lst: reverseLst,
-        reverse_cdd: reverseCdd,
-        reverse_evi: reverseEvi,
-      }),
+  const mapMutation = useMutation({
+    mutationFn: () => api.drought.map({ aoi, year, reverse_sm: reverseSm, reverse_rf: reverseRf, reverse_ndvi: reverseNdvi, reverse_vci: reverseVci, reverse_lst: reverseLst, reverse_cdd: reverseCdd, reverse_evi: reverseEvi }),
   });
+  const statsMutation = useMutation({
+    mutationFn: () => api.drought.stats({ aoi, year, reverse_sm: reverseSm, reverse_rf: reverseRf, reverse_ndvi: reverseNdvi, reverse_vci: reverseVci, reverse_lst: reverseLst, reverse_cdd: reverseCdd, reverse_evi: reverseEvi }),
+  });
+  const classifyMutation = useMutation({
+    mutationFn: () => api.drought.classify({ aoi, year, n_classes: nClasses, method, custom_labels: customClassNames, reverse_sm: reverseSm, reverse_rf: reverseRf, reverse_ndvi: reverseNdvi, reverse_vci: reverseVci, reverse_lst: reverseLst, reverse_cdd: reverseCdd, reverse_evi: reverseEvi }),
+  });
+  const exportMutation = useMutation({
+    mutationFn: () => api.drought.export({ aoi, year, reverse_sm: reverseSm, reverse_rf: reverseRf, reverse_ndvi: reverseNdvi, reverse_vci: reverseVci, reverse_lst: reverseLst, reverse_cdd: reverseCdd, reverse_evi: reverseEvi }),
+  });
+
+  const handleAnalyze = () => {
+    mapMutation.mutate();
+    statsMutation.mutate();
+    classifyMutation.mutate();
+    exportMutation.mutate();
+  };
+
+  const isPending = mapMutation.isPending || statsMutation.isPending || classifyMutation.isPending || exportMutation.isPending;
+  const error = mapMutation.error || statsMutation.error || classifyMutation.error || exportMutation.error;
+  
+  const mapData = mapMutation.data;
+  const statsData = statsMutation.data;
+  const classifyData = classifyMutation.data;
+  const exportData = exportMutation.data;
+
+  const data = (mapData && statsData && classifyData && exportData) ? {
+    ...mapData,
+    ...statsData,
+    ...classifyData,
+    ...exportData
+  } : null;
 
   const currentTileUrl = data
     ? activeLayer === "continuous"
       ? data.dvi_tile_url
       : data.dvi_class_tile_url
     : undefined;
+
+  const activeAreas = useMemo(() => {
+    const rawAreas = data?.classify?.panels?.[0]?.class_areas || data?.class_areas_km2;
+    if (!rawAreas) return undefined;
+    const mapped: Record<string, number> = {};
+    const keys = Object.keys(rawAreas);
+    keys.forEach((oldKey, i) => {
+      const newKey = customClassNames[i] || oldKey;
+      mapped[newKey] = rawAreas[oldKey];
+    });
+    return mapped;
+  }, [data, customClassNames]);
+
+
 
   return (
     <ResizablePanelGroup direction="horizontal" className="h-full items-stretch">
@@ -115,16 +183,54 @@ export function DroughtPage() {
           </Select>
         </div>
 
-        <div className="space-y-2">
-          <Label>Classes: {nClasses}</Label>
-          <Slider
-            min={2}
-            max={10}
-            step={1}
-            value={[nClasses]}
-            onValueChange={([v]) => setNClasses(v)}
-          />
+        <ClassificationControls
+          method={method}
+          setMethod={setMethod}
+          nClasses={nClasses}
+          setNClasses={setNClasses}
+          minClasses={2}
+          maxClasses={10}
+        />
+
+        <div className="space-y-3 bg-muted/40 border rounded-lg p-3">
+          <div className="flex items-center justify-between">
+            <Label className="text-xs font-semibold flex items-center gap-1.5 text-foreground">
+              <Tag className="w-3.5 h-3.5 text-primary" />
+              Rename Classes ({nClasses})
+            </Label>
+            <button
+              type="button"
+              onClick={() => setCustomClassNames(getDefaultLabels(nClasses))}
+              className="text-[10px] text-muted-foreground hover:text-primary flex items-center gap-1 transition-colors"
+              title="Reset to default names"
+            >
+              <RotateCcw className="w-3 h-3" /> Reset
+            </button>
+          </div>
+
+          <div className="space-y-1.5 max-h-[200px] overflow-y-auto pr-1">
+            {Array.from({ length: nClasses }).map((_, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <span
+                  className="w-3.5 h-3.5 rounded-xs shrink-0 border border-black/15 shadow-2xs"
+                  style={{ background: DVI_COLORS[i % DVI_COLORS.length] }}
+                />
+                <input
+                  type="text"
+                  value={customClassNames[i] || ""}
+                  placeholder={`Class ${i + 1}`}
+                  onChange={(e) => {
+                    const next = [...customClassNames];
+                    next[i] = e.target.value;
+                    setCustomClassNames(next);
+                  }}
+                  className="flex-1 h-7 text-xs rounded border border-input bg-background px-2 text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+            ))}
+          </div>
         </div>
+
 
         {/* Factor Reversal Section */}
         <div className="space-y-2.5 pt-2 border-t">
@@ -164,8 +270,8 @@ export function DroughtPage() {
         </div>
 
         <Button
-          className="w-full gap-2"
-          onClick={() => mutate()}
+          className="w-full gap-2 mt-4"
+          onClick={handleAnalyze}
           disabled={isPending}
         >
           {isPending ? (
@@ -173,7 +279,7 @@ export function DroughtPage() {
           ) : (
             <Droplet className="w-4 h-4" />
           )}
-          {isPending ? "Computing…" : "Analyze Drought"}
+          {isPending ? "Computing DVI…" : "Analyze Drought"}
         </Button>
 
         {error && (
@@ -280,7 +386,7 @@ export function DroughtPage() {
                 <h3 className="font-medium mb-3">Drought Vulnerability Area (Season B {data.year})</h3>
                 <ResponsiveContainer width="100%" height={240}>
                   <BarChart
-                    data={Object.entries(data.class_areas_km2).map(([k, v], i) => ({
+                    data={Object.entries(activeAreas || {}).map(([k, v], i) => ({
                       name: k,
                       area: v,
                       fill: DVI_COLORS[i % DVI_COLORS.length],
@@ -305,7 +411,7 @@ export function DroughtPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {Object.entries(data.class_areas_km2).map(([cls, km2], i) => (
+                    {Object.entries(activeAreas || {}).map(([cls, km2], i) => (
                       <tr key={cls} className={i % 2 === 0 ? "bg-background" : "bg-muted/30"}>
                         <td className="px-3 py-1.5 flex items-center gap-2">
                           <span
@@ -401,7 +507,8 @@ export function DroughtPage() {
                 downloadUrl={activeLayer === "continuous" ? data.dvi_download_url : undefined}
                 district={aoi.name || "Custom"}
                 title={activeLayer === "continuous" ? `DVI Map (${data.year})` : `DVI Classes Map (${data.year})`}
-                classAreas={activeLayer === "classified" ? data.class_areas_km2 : undefined}
+                classAreas={activeAreas}
+
               />
               </div>
             </TabsContent>
