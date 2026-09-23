@@ -45,6 +45,7 @@ export const coreSpatialModules = [
   { path: "/change-detection", label: "Change Detection", icon: Activity, description: "NDVI Timelapse" },
   { path: "/lst", label: "LST", icon: Thermometer, description: "Land Surface Temp" },
   { path: "/slope", label: "Slope", icon: Mountain, description: "Topography" },
+  { path: "/earthwork", label: "Earthwork", icon: Mountain, description: "Cut & Fill Estimator", status: "PRO" },
   { path: "/accessibility", label: "Accessibility", icon: Navigation, description: "Facility Access" },
 ];
 

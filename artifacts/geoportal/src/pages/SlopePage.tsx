@@ -9,8 +9,11 @@ import {
   Tooltip,
   ResponsiveContainer,
   Cell,
+  LineChart,
+  Line,
+  CartesianGrid,
 } from "recharts";
-import { Loader2, Mountain, FileText , Play, Tag, RotateCcw } from "lucide-react";
+import { Loader2, Mountain, FileText , Play, Tag, RotateCcw, Activity, Droplets } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
@@ -22,7 +25,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { api, SlopeResult , AOIConfig} from "@/lib/api";
+import { api } from "@/lib/api";
+import type { SlopeResult, AOIConfig } from "@/lib/api";
 import { DistrictMap } from "@/components/DistrictMap";
 import { ReportDownloadButton } from "@/components/ReportDownloadButton";
 import { MapExportControls } from "@/components/MapExportControls";
@@ -49,6 +53,13 @@ const LAYER_OPTIONS = [
   { key: "slope", label: "Slope" },
   { key: "hillshade", label: "Hillshade" },
   { key: "aspect", label: "Aspect" },
+  { key: "tpi", label: "TPI (Position)" },
+  { key: "tri", label: "TRI (Ruggedness)" },
+  { key: "upa", label: "Flow Accumulation" },
+  { key: "dir", label: "Flow Direction" },
+  { key: "contours", label: "Contours (50m)" },
+  { key: "lsi", label: "Landslide Risk" },
+  { key: "solar", label: "Solar Insolation" },
 ];
 
 const palette = (n: number) => {
@@ -82,6 +93,7 @@ export function SlopePage() {
   const [aoi, setAoi] = useState<AOIConfig>({ type: "rwanda", country: "Rwanda", name: "Rwanda" });
   const [nClasses, setNClasses] = useState(5);
   const [method, setMethod] = useState("natural_breaks");
+  const [customBreaksStr, setCustomBreaksStr] = useState("");
   const [customClassNames, setCustomClassNames] = useState<string[]>(() => getDefaultLabels(5));
 
   useEffect(() => {
@@ -96,19 +108,92 @@ export function SlopePage() {
       return next;
     });
   }, [nClasses]);
+  
   const [activeLayer, setActiveLayer] = useState("slope");
+  const [inspectedData, setInspectedData] = useState<any>(null);
+  const [isInspecting, setIsInspecting] = useState(false);
+  const [inspectPos, setInspectPos] = useState<{lat: number, lon: number} | null>(null);
+
+  const [isDrawMode, setIsDrawMode] = useState(false);
+  const [profilePoints, setProfilePoints] = useState<{lat: number, lon: number}[]>([]);
+  const [profileData, setProfileData] = useState<any[] | null>(null);
+  const [isProfiling, setIsProfiling] = useState(false);
+
+  const [isWatershedMode, setIsWatershedMode] = useState(false);
+  const [watershedLevel, setWatershedLevel] = useState<number>(12);
+  const [isDelineating, setIsDelineating] = useState(false);
+  const [watershedData, setWatershedData] = useState<{ geojson: any, download_url: string, area_km2: number, river_geojson?: any, river_download_url?: string } | null>(null);
+
+
+  const handleMapClick = async (lat: number, lon: number) => {
+    if (isDrawMode) {
+      const newPoints = [...profilePoints, {lat, lon}];
+      if (newPoints.length === 1) {
+        setProfilePoints(newPoints);
+      } else if (newPoints.length === 2) {
+        setProfilePoints(newPoints);
+        setIsProfiling(true);
+        try {
+          const data = await api.slope.profile({ line: [[newPoints[0].lon, newPoints[0].lat], [newPoints[1].lon, newPoints[1].lat]], aoi });
+          setProfileData(data);
+        } catch (err) {
+          console.error("Profile error:", err);
+          setProfileData(null);
+        } finally {
+          setIsProfiling(false);
+          setIsDrawMode(false);
+        }
+      }
+      return;
+    }
+
+    if (isWatershedMode) {
+      setIsDelineating(true);
+      setWatershedData(null);
+      try {
+        const data = await api.slope.watershed({ lat, lon, level: watershedLevel });
+        setWatershedData(data);
+      } catch (err) {
+        console.error("Watershed error:", err);
+      } finally {
+        setIsDelineating(false);
+        setIsWatershedMode(false);
+      }
+      return;
+    }
+
+
+    setIsInspecting(true);
+    setInspectPos({ lat, lon });
+    try {
+      const data = await api.slope.inspect({ lat, lon, aoi });
+      setInspectedData(data);
+    } catch (err) {
+      console.error("Inspect error:", err);
+      setInspectedData(null);
+    } finally {
+      setIsInspecting(false);
+    }
+  };
+
+
+  const getCustomBreaks = () => {
+    if (method !== "custom_breaks" || !customBreaksStr.trim()) return undefined;
+    const vals = customBreaksStr.split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n));
+    return vals.length > 0 ? vals : undefined;
+  };
 
   const mapMutation = useMutation({
-    mutationFn: () => api.slope.map({ aoi, n_classes: nClasses, method, custom_labels: customClassNames }),
+    mutationFn: () => api.slope.map({ aoi, n_classes: nClasses, method, custom_labels: customClassNames, custom_breaks: getCustomBreaks() }),
   });
   const statsMutation = useMutation({
-    mutationFn: () => api.slope.stats({ aoi, n_classes: nClasses, method, custom_labels: customClassNames }),
+    mutationFn: () => api.slope.stats({ aoi, n_classes: nClasses, method, custom_labels: customClassNames, custom_breaks: getCustomBreaks() }),
   });
   const classifyMutation = useMutation({
-    mutationFn: () => api.slope.classify({ aoi, n_classes: nClasses, method, custom_labels: customClassNames }),
+    mutationFn: () => api.slope.classify({ aoi, n_classes: nClasses, method, custom_labels: customClassNames, custom_breaks: getCustomBreaks() }),
   });
   const exportMutation = useMutation({
-    mutationFn: () => api.slope.export({ aoi, n_classes: nClasses, method, custom_labels: customClassNames }),
+    mutationFn: () => api.slope.export({ aoi, n_classes: nClasses, method, custom_labels: customClassNames, custom_breaks: getCustomBreaks() }),
   });
 
   const handleAnalyze = () => {
@@ -119,6 +204,31 @@ export function SlopePage() {
   };
 
   const isPending = mapMutation.isPending || statsMutation.isPending || classifyMutation.isPending || exportMutation.isPending;
+
+  const [loadingMessage, setLoadingMessage] = useState("Connecting to Earth Engine...");
+
+  useEffect(() => {
+    if (!isPending) return;
+    const messages = [
+      "Connecting to Earth Engine...",
+      "Processing Digital Elevation Model...",
+      "Computing Hydrology and Flow...",
+      "Calculating Classification Statistics...",
+      "Rendering Maps...",
+    ];
+    let step = 0;
+    setLoadingMessage(messages[step]);
+    
+    const interval = setInterval(() => {
+      step = (step + 1) % messages.length;
+      setLoadingMessage(messages[step]);
+      if (step === messages.length - 1) {
+        clearInterval(interval);
+      }
+    }, 4500);
+
+    return () => clearInterval(interval);
+  }, [isPending]);
   const error = mapMutation.error || statsMutation.error || classifyMutation.error || exportMutation.error;
   
   const mapData = mapMutation.data;
@@ -138,6 +248,11 @@ export function SlopePage() {
     if (!data) return "";
     if (activeLayer === "hillshade") return data.hillshade_tile_url;
     if (activeLayer === "aspect") return data.aspect_tile_url;
+    if (activeLayer === "tpi") return data.tpi_tile_url;
+    if (activeLayer === "tri") return data.tri_tile_url;
+    if (activeLayer === "upa") return data.upa_tile_url;
+    if (activeLayer === "dir") return data.dir_tile_url;
+    if (activeLayer === "contours") return data.contours_tile_url;
     return data.slope_tile_url;
   };
 
@@ -180,6 +295,20 @@ export function SlopePage() {
           minClasses={2}
           maxClasses={10}
         />
+
+        {method === "custom_breaks" && (
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold text-slate-500">Custom Breakpoints (comma separated)</Label>
+            <input
+              type="text"
+              value={customBreaksStr}
+              onChange={(e) => setCustomBreaksStr(e.target.value)}
+              placeholder="e.g. 5, 10, 15, 20"
+              className="w-full h-8 text-xs rounded border border-input bg-background px-2 text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+            <p className="text-[10px] text-muted-foreground">Enter {nClasses - 1} numeric breakpoints.</p>
+          </div>
+        )}
 
         <div className="space-y-3 bg-muted/40 border rounded-lg p-3">
           <div className="flex items-center justify-between">
@@ -265,8 +394,8 @@ export function SlopePage() {
         {isPending && (
           <div className="h-full flex flex-col items-center justify-center gap-3 text-muted-foreground">
             <Loader2 className="w-8 h-8 animate-spin text-primary" />
-            <p>Analyzing terrain for {aoi.name || 'Custom'}…</p>
-            <p className="text-xs">GEE analysis typically takes 15–60 seconds.</p>
+            <p className="text-lg font-medium text-foreground">{loadingMessage}</p>
+            <p className="text-xs">Analyzing terrain for {aoi.name || 'Custom'} (typically takes 15–60 seconds).</p>
           </div>
         )}
 
@@ -282,23 +411,203 @@ export function SlopePage() {
 
             {/* Map */}
             <TabsContent value="map" className="flex-1 min-h-[500px] space-y-3">
-              <div className="flex flex-wrap gap-2">
-                {LAYER_OPTIONS.map(({ key, label }) => (
-                  <button
-                    key={key}
-                    onClick={() => setActiveLayer(key)}
-                    className={`px-3 py-1 rounded text-xs font-medium border transition-colors ${
-                      activeLayer === key
-                        ? "bg-primary text-primary-foreground border-primary"
-                        : "bg-card border-input hover:bg-muted"
-                    }`}
+              <div className="flex items-center justify-between">
+                <div className="flex flex-wrap gap-2">
+                  {LAYER_OPTIONS.map(({ key, label }) => (
+                    <button
+                      key={key}
+                      onClick={() => setActiveLayer(key)}
+                      className={`px-3 py-1 rounded text-xs font-medium border transition-colors ${
+                        activeLayer === key
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-card border-input hover:bg-muted"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <div className="flex gap-1 items-center">
+                    {isWatershedMode && (
+                      <select 
+                        value={watershedLevel} 
+                        onChange={(e) => setWatershedLevel(Number(e.target.value))}
+                        className="bg-card border-input border rounded px-2 py-1 text-xs h-8"
+                      >
+                        <option value={12}>Level 12 (Local)</option>
+                        <option value={10}>Level 10 (Sub-basin)</option>
+                        <option value={8}>Level 8 (Basin)</option>
+                        <option value={6}>Level 6 (Region)</option>
+                      </select>
+                    )}
+                    <Button 
+                      variant={isWatershedMode ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => {
+                        setIsWatershedMode(!isWatershedMode);
+                        setIsDrawMode(false);
+                        setWatershedData(null);
+                      }}
+                      className="gap-2 text-xs"
+                    >
+                      <Droplets className="w-4 h-4" />
+                      {isWatershedMode ? "Click pour point..." : "Watershed"}
+                    </Button>
+                  </div>
+                  <Button 
+                    variant={isDrawMode ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => {
+                      setIsDrawMode(!isDrawMode);
+                      setIsWatershedMode(false);
+                      setProfilePoints([]);
+                      setProfileData(null);
+                    }}
+                    className="gap-2 text-xs"
                   >
-                    {label}
-                  </button>
-                ))}
+                    <Activity className="w-4 h-4" />
+                    {isDrawMode ? (profilePoints.length === 1 ? "Click end point..." : "Click start point...") : "Profile"}
+                  </Button>
+                </div>
               </div>
-              <div className="h-[520px] rounded-lg overflow-hidden border">
-                <DistrictMap center={data.center} tileUrl={getActiveTileUrl()} />
+              <div className="h-[520px] rounded-lg overflow-hidden border relative">
+                <DistrictMap 
+                  center={data.center} 
+                  tileUrl={getActiveTileUrl()} 
+                  onMapClick={handleMapClick} 
+                  proposedFacilities={
+                    profilePoints.length > 0 ? profilePoints.map(p => [p.lon, p.lat] as [number, number]) : undefined
+                  }
+                  customGeojson={watershedData?.geojson}
+                  customGeojsonStyle={{ color: "#3b82f6", weight: 3, fillOpacity: 0.3 }}
+                  riverGeojson={watershedData?.river_geojson}
+                />
+                
+                {/* Floating Inspector Panel */}
+                {(isInspecting || inspectedData) && (
+                  <div className="absolute top-4 right-4 z-[1000] bg-background/90 backdrop-blur-md p-4 rounded-xl shadow-lg border border-primary/20 text-sm max-w-[250px]">
+                    <div className="flex justify-between items-center mb-2">
+                      <h4 className="font-bold text-foreground">Terrain Inspector</h4>
+                      <button onClick={() => { setInspectedData(null); setInspectPos(null); setIsInspecting(false); }} className="text-muted-foreground hover:text-foreground">✕</button>
+                    </div>
+                    {inspectPos && (
+                      <p className="text-xs text-muted-foreground mb-3">{inspectPos.lat.toFixed(5)}, {inspectPos.lon.toFixed(5)}</p>
+                    )}
+                    {isInspecting ? (
+                      <div className="flex items-center gap-2 text-primary">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Inspecting point...</span>
+                      </div>
+                    ) : inspectedData ? (
+                      <div className="space-y-1">
+                        <div className="flex justify-between"><span className="text-muted-foreground">Elevation:</span> <span className="font-medium">{inspectedData.elevation?.toFixed(1) ?? 'N/A'} m</span></div>
+                        <div className="flex justify-between"><span className="text-muted-foreground">Slope:</span> <span className="font-medium">{inspectedData.slope?.toFixed(1) ?? 'N/A'} °</span></div>
+                        <div className="flex justify-between"><span className="text-muted-foreground">Aspect:</span> <span className="font-medium">{inspectedData.aspect?.toFixed(1) ?? 'N/A'} °</span></div>
+                        <div className="flex justify-between"><span className="text-muted-foreground">TPI:</span> <span className="font-medium">{inspectedData.tpi?.toFixed(2) ?? 'N/A'}</span></div>
+                        <div className="flex justify-between"><span className="text-muted-foreground">TRI:</span> <span className="font-medium">{inspectedData.tri?.toFixed(2) ?? 'N/A'}</span></div>
+                        <div className="flex justify-between"><span className="text-muted-foreground">Flow Acc.:</span> <span className="font-medium">{inspectedData.upa?.toFixed(2) ?? 'N/A'} km²</span></div>
+                      </div>
+                    ) : (
+                      <p className="text-destructive">Failed to inspect point</p>
+                    )}
+                  </div>
+                )}
+                
+                {/* Elevation Profile Panel */}
+                {(isProfiling || profileData) && (
+                  <div className="absolute bottom-4 left-4 right-4 z-[1000] bg-background/95 backdrop-blur-md p-4 rounded-xl shadow-lg border border-primary/20">
+                    <div className="flex justify-between items-center mb-4">
+                      <h4 className="font-bold text-foreground">Elevation Profile</h4>
+                      <button onClick={() => { setProfileData(null); setProfilePoints([]); setIsProfiling(false); }} className="text-muted-foreground hover:text-foreground">✕</button>
+                    </div>
+                    {isProfiling ? (
+                      <div className="flex items-center justify-center gap-2 text-primary h-40">
+                        <Loader2 className="w-6 h-6 animate-spin" />
+                        <span>Generating profile...</span>
+                      </div>
+                    ) : profileData ? (
+                      <div className="h-40 w-full">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={profileData} margin={{ top: 5, right: 20, bottom: 5, left: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="currentColor" opacity={0.1} />
+                            <XAxis 
+                              dataKey="distance" 
+                              tickFormatter={(val) => `${(val / 1000).toFixed(1)}km`}
+                              stroke="currentColor" 
+                              fontSize={10} 
+                            />
+                            <YAxis 
+                              domain={['auto', 'auto']}
+                              tickFormatter={(val) => `${val}m`}
+                              stroke="currentColor" 
+                              fontSize={10} 
+                            />
+                            <Tooltip 
+                              contentStyle={{ backgroundColor: 'hsl(var(--background))', borderColor: 'hsl(var(--border))', borderRadius: '8px' }}
+                              labelFormatter={(val) => `Distance: ${(Number(val) / 1000).toFixed(2)} km`}
+                            />
+                            <Line 
+                              type="monotone" 
+                              dataKey="elevation" 
+                              stroke="hsl(var(--primary))" 
+                              strokeWidth={2} 
+                              dot={false}
+                              name="Elevation (m)" 
+                            />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+                    ) : (
+                      <p className="text-destructive text-center p-4">Failed to load profile.</p>
+                    )}
+                  </div>
+                )}
+
+                {/* Watershed Panel */}
+                {(isDelineating || watershedData) && (
+                  <div className="absolute top-4 left-4 z-[1000] bg-background/95 backdrop-blur-md p-4 rounded-xl shadow-lg border border-primary/20 min-w-[200px]">
+                    <div className="flex justify-between items-center mb-3">
+                      <h4 className="font-bold text-foreground flex items-center gap-2"><Droplets className="w-4 h-4 text-primary" /> Watershed</h4>
+                      <button onClick={() => { setWatershedData(null); setIsDelineating(false); }} className="text-muted-foreground hover:text-foreground">✕</button>
+                    </div>
+                    {isDelineating ? (
+                      <div className="flex items-center gap-2 text-primary text-sm py-2">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Delineating basin...</span>
+                      </div>
+                    ) : watershedData ? (
+                      <div className="space-y-3">
+                        <div className="flex justify-between text-sm">
+                          <span className="text-muted-foreground">Catchment Area:</span> 
+                          <span className="font-medium">{watershedData.area_km2.toLocaleString()} km²</span>
+                        </div>
+                        <Button 
+                          className="w-full text-xs gap-2" 
+                          size="sm"
+                          onClick={() => window.open(watershedData.download_url, '_blank')}
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                          Download Basin SHP
+                        </Button>
+                        {watershedData.river_download_url && (
+                          <Button 
+                            className="w-full text-xs gap-2" 
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => window.open(watershedData.river_download_url, '_blank')}
+                          >
+                            <FileText className="w-3.5 h-3.5" />
+                            Download Rivers SHP
+                          </Button>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-destructive text-sm text-center py-2">Failed to delineate.</p>
+                    )}
+                  </div>
+                )}
+
               </div>
               <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
                 <span>
@@ -309,6 +618,21 @@ export function SlopePage() {
                 </span>
                 <span>
                   <strong className="text-foreground">Aspect:</strong> circular color wheel (N/E/S/W)
+                </span>
+                <span>
+                  <strong className="text-foreground">TPI:</strong> blue (valleys) → red (ridges)
+                </span>
+                <span>
+                  <strong className="text-foreground">TRI:</strong> light (flat) → dark blue (rugged)
+                </span>
+                <span>
+                  <strong className="text-foreground">Flow Accumulation:</strong> light blue → dark blue (high flow)
+                </span>
+                <span>
+                  <strong className="text-foreground">Flow Direction:</strong> categorical colors (8 directions)
+                </span>
+                <span>
+                  <strong className="text-foreground">Contours:</strong> 50m intervals
                 </span>
               </div>
             </TabsContent>
@@ -335,8 +659,8 @@ export function SlopePage() {
               </div>
               <MapExportControls
                 tileUrl={getActiveTileUrl()!}
-                thumbUrl={activeLayer === "slope" ? (data as any).slope_thumb_url : activeLayer === "hillshade" ? (data as any).hillshade_thumb_url : (data as any).aspect_thumb_url}
-                downloadUrl={activeLayer === "slope" ? (data as any).slope_download_url : activeLayer === "hillshade" ? (data as any).hillshade_download_url : (data as any).aspect_download_url}
+                thumbUrl={activeLayer === "slope" ? (data as any).slope_thumb_url : activeLayer === "hillshade" ? (data as any).hillshade_thumb_url : activeLayer === "aspect" ? (data as any).aspect_thumb_url : activeLayer === "tpi" ? (data as any).tpi_thumb_url : activeLayer === "tri" ? (data as any).tri_thumb_url : activeLayer === "upa" ? (data as any).upa_thumb_url : activeLayer === "dir" ? (data as any).dir_thumb_url : (data as any).contours_thumb_url}
+                downloadUrl={activeLayer === "slope" ? (data as any).slope_download_url : activeLayer === "hillshade" ? (data as any).hillshade_download_url : activeLayer === "aspect" ? (data as any).aspect_download_url : activeLayer === "tpi" ? (data as any).tpi_download_url : activeLayer === "tri" ? (data as any).tri_download_url : activeLayer === "upa" ? (data as any).upa_download_url : activeLayer === "dir" ? (data as any).dir_download_url : (data as any).contours_download_url}
                 district={aoi.name || "Custom"}
                 title={LAYER_OPTIONS.find(l => l.key === activeLayer)?.label || "Terrain Map"}
                 classAreas={activeLayer === "slope" ? data.class_areas_km2 : undefined}

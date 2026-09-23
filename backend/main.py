@@ -836,12 +836,41 @@ class RUSLERequest(BaseModel):
     reverse_p: bool = False
 
 
+class SlopeInspectRequest(BaseModel):
+    aoi: dict
+    lat: float
+    lon: float
+
+class SlopeProfileRequest(BaseModel):
+    aoi: dict
+    line: list[list[float]]
+
+class SlopeWatershedRequest(BaseModel):
+    lat: float
+    lon: float
+    level: int = 12
+
+class SlopeEarthworkRequest(BaseModel):
+    polygon: list[list[float]]
+    target_elevation: float
+
+class EarthworkAdvancedRequest(BaseModel):
+    polygon: list[list[float]]
+    target_elevation: float = None
+    swell_factor: float = 1.0
+    shrink_factor: float = 1.0
+    slope_grade: float = 0.0
+    slope_angle: float = 0.0
+    topsoil_depth: float = 0.0
+    strata_layers: list = None
+
 class SlopeRequest(BaseModel):
     aoi: dict = Field(default_factory=dict, description="AOI Configuration object")
     district: Optional[str] = Field(None, examples=["Musanze"])
     n_classes: int = Field(5, ge=1, le=15)
     method: Optional[str] = Field("natural_breaks", description="Classification method")
     custom_labels: Optional[list[str]] = Field(None, description="Custom class names/labels")
+    custom_breaks: Optional[list[float]] = Field(None, description="Custom breakpoints")
 
 
 class LandfillRequest(BaseModel):
@@ -906,6 +935,8 @@ class AccessibilityRequest(BaseModel):
     method: Optional[str] = Field("natural_breaks", description="Classification method")
     custom_labels: Optional[list[str]] = Field(None, description="Custom class names/labels")
     service_threshold_mins: int = Field(30, ge=5, le=120)
+    proposed_facilities: Optional[list[list[float]]] = Field(None, description="List of [lon, lat] points for proposed facilities")
+    transport_mode: Optional[str] = Field("walking", description="Transport mode: walking, bicycle, or driving")
 
 
 class UHIRequest(BaseModel):
@@ -966,6 +997,8 @@ class ReportRequest(BaseModel):
     maps: list[tuple] | list[list] | None = None
     agency_template: str = "STANDARD"
     include_action_matrix: bool = True
+    proposed_facilities: Optional[list[list[float]]] = None
+    delta_stats: Optional[dict] = None
 
 
 class StaticMapRequest(BaseModel):
@@ -985,6 +1018,7 @@ class StaticMapRequest(BaseModel):
     scale_pos: str = 'lower left'
     north_arrow_pos: str = 'top right'
     output_format: str = 'PNG'
+    proposed_facilities: Optional[list[list[float]]] = None
 
 
 # ── Analysis endpoints ───────────────────────────────────────────────────────
@@ -1002,6 +1036,8 @@ def generate_report(req: ReportRequest):
             maps=req.maps,
             agency_template=req.agency_template,
             include_action_matrix=req.include_action_matrix,
+            proposed_facilities=req.proposed_facilities,
+            delta_stats=req.delta_stats,
         )
         return Response(
             pdf_bytes,
@@ -1051,7 +1087,8 @@ def static_map_endpoint(req: StaticMapRequest):
             show_legend=req.show_legend, show_scale=req.show_scale, show_compass=req.show_compass,
             size_multiplier=req.size_multiplier,
             legend_pos=req.legend_pos, scale_pos=req.scale_pos, north_arrow_pos=req.north_arrow_pos,
-            output_format=req.output_format
+            output_format=req.output_format,
+            proposed_facilities=req.proposed_facilities
         )
         
         ext = "png"
@@ -1523,7 +1560,7 @@ def slope_stats_endpoint(req: SlopeRequest):
 def slope_classify_endpoint(req: SlopeRequest):
     _require_gee()
     try:
-        return compute_slope_classify(req.aoi, req.n_classes, method=req.method, custom_labels=req.custom_labels)
+        return compute_slope_classify(req.aoi, req.n_classes, method=req.method, custom_labels=req.custom_labels, custom_breaks=req.custom_breaks)
     except Exception as exc:
         logger.exception("Slope classify failed for %s", req.district)
         raise HTTPException(500, str(exc)) from exc
@@ -1535,6 +1572,70 @@ def slope_export_endpoint(req: SlopeRequest):
         return compute_slope_export(req.aoi)
     except Exception as exc:
         logger.exception("Slope export failed for %s", req.district)
+        raise HTTPException(500, str(exc)) from exc
+
+from gee.slope import inspect_slope_point
+
+@app.post("/api/slope/inspect", tags=["analysis"])
+def slope_inspect_endpoint(req: SlopeInspectRequest):
+    _require_gee()
+    try:
+        return inspect_slope_point(req.lat, req.lon, req.aoi)
+    except Exception as exc:
+        logger.exception("Slope inspect failed")
+        raise HTTPException(500, str(exc)) from exc
+
+from gee.slope import profile_slope_line
+
+@app.post("/api/slope/profile", tags=["analysis"])
+def slope_profile_endpoint(req: SlopeProfileRequest):
+    _require_gee()
+    try:
+        return profile_slope_line(req.line, req.aoi)
+    except Exception as exc:
+        logger.exception("Slope profile failed")
+        raise HTTPException(500, str(exc)) from exc
+
+from gee.slope import delineate_watershed
+
+@app.post("/api/slope/watershed", tags=["analysis"])
+def slope_watershed_endpoint(req: SlopeWatershedRequest):
+    _require_gee()
+    try:
+        return delineate_watershed(req.lat, req.lon, req.level)
+    except Exception as exc:
+        logger.exception("Watershed delineation failed")
+        raise HTTPException(500, str(exc)) from exc
+
+from gee.slope import compute_earthwork
+
+@app.post("/api/slope/earthwork", tags=["analysis"])
+def slope_earthwork_endpoint(req: SlopeEarthworkRequest):
+    _require_gee()
+    try:
+        return compute_earthwork(req.polygon, req.target_elevation)
+    except Exception as exc:
+        logger.exception("Earthwork computation failed")
+        raise HTTPException(500, str(exc)) from exc
+
+from gee.earthwork import analyze_earthwork
+
+@app.post("/api/earthwork/analyze", tags=["analysis"])
+def api_earthwork_analyze(req: EarthworkAdvancedRequest):
+    _require_gee()
+    try:
+        return analyze_earthwork(
+            polygon_coords=req.polygon,
+            target_elevation=req.target_elevation,
+            swell_factor=req.swell_factor,
+            shrink_factor=req.shrink_factor,
+            slope_grade=req.slope_grade,
+            slope_angle=req.slope_angle,
+            topsoil_depth=req.topsoil_depth,
+            strata_layers=req.strata_layers
+        )
+    except Exception as exc:
+        logger.exception("Advanced earthwork computation failed")
         raise HTTPException(500, str(exc)) from exc
 
 
@@ -1728,7 +1829,7 @@ def landslide_export_endpoint(req: LandslideRequest):
 def accessibility_map_endpoint(req: AccessibilityRequest):
     _require_gee()
     try:
-        return compute_accessibility_map(req.aoi, req.amenities, req.dest_amenities, req.n_classes, req.service_threshold_mins)
+        return compute_accessibility_map(req.aoi, req.amenities, req.dest_amenities, req.n_classes, req.service_threshold_mins, method=req.method, proposed_facilities=req.proposed_facilities, transport_mode=req.transport_mode)
     except Exception as exc:
         logger.exception("Accessibility map failed for %s", req.district)
         raise HTTPException(500, str(exc)) from exc
@@ -1737,7 +1838,7 @@ def accessibility_map_endpoint(req: AccessibilityRequest):
 def accessibility_stats_endpoint(req: AccessibilityRequest):
     _require_gee()
     try:
-        return compute_accessibility_stats(req.aoi, req.amenities, req.dest_amenities, req.n_classes, req.service_threshold_mins)
+        return compute_accessibility_stats(req.aoi, req.amenities, req.dest_amenities, req.n_classes, req.service_threshold_mins, proposed_facilities=req.proposed_facilities, transport_mode=req.transport_mode)
     except Exception as exc:
         logger.exception("Accessibility stats failed for %s", req.district)
         raise HTTPException(500, str(exc)) from exc
@@ -1746,7 +1847,7 @@ def accessibility_stats_endpoint(req: AccessibilityRequest):
 def accessibility_classify_endpoint(req: AccessibilityRequest):
     _require_gee()
     try:
-        return compute_accessibility_classify(req.aoi, req.amenities, req.dest_amenities, req.n_classes, req.service_threshold_mins, method=req.method, custom_labels=req.custom_labels)
+        return compute_accessibility_classify(req.aoi, req.amenities, req.dest_amenities, req.n_classes, req.service_threshold_mins, method=req.method, custom_labels=req.custom_labels, proposed_facilities=req.proposed_facilities, transport_mode=req.transport_mode)
     except Exception as exc:
         logger.exception("Accessibility classify failed for %s", req.district)
         raise HTTPException(500, str(exc)) from exc
@@ -1755,7 +1856,7 @@ def accessibility_classify_endpoint(req: AccessibilityRequest):
 def accessibility_export_endpoint(req: AccessibilityRequest):
     _require_gee()
     try:
-        return compute_accessibility_export(req.aoi, req.amenities, req.dest_amenities, req.n_classes, req.service_threshold_mins)
+        return compute_accessibility_export(req.aoi, req.amenities, req.dest_amenities, req.n_classes, req.service_threshold_mins, proposed_facilities=req.proposed_facilities, transport_mode=req.transport_mode)
     except Exception as exc:
         logger.exception("Accessibility export failed for %s", req.district)
         raise HTTPException(500, str(exc)) from exc
