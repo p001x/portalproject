@@ -241,11 +241,14 @@ def fetch_local_points(amenities: list[str], bbox: list[float]) -> tuple[list[ee
     return features, raw_points
 
 
-def _build_accessibility_images(aoi_config: dict, amenities: list[str], dest_amenities: list[str] = None, n_classes: int = 4, service_threshold_mins: int = 30):
+def _build_accessibility_images(aoi_config: dict, amenities: list[str], dest_amenities: list[str] = None, n_classes: int = 4, service_threshold_mins: int = 30, proposed_facilities: list = None, transport_mode: str = "walking"):
     from gee.aoi_utils import get_aoi_geometry
     aoi = get_aoi_geometry(aoi_config)
 
-    bounds = aoi.bounds().getInfo()["coordinates"][0]
+    bounds_info = aoi.bounds().getInfo()
+    if not bounds_info or "coordinates" not in bounds_info:
+        raise ValueError("Could not calculate bounds for the selected study area. The area might be empty or missing from the geographic dataset.")
+    bounds = bounds_info["coordinates"][0]
     
     lons = [p[0] for p in bounds]
     lats = [p[1] for p in bounds]
@@ -256,6 +259,12 @@ def _build_accessibility_images(aoi_config: dict, amenities: list[str], dest_ame
     target_amenities = dest_amenities if dest_amenities and len(dest_amenities) > 0 else amenities
     
     points, raw_points = fetch_local_points(target_amenities, bbox)
+
+    if proposed_facilities:
+        for pf in proposed_facilities:
+            pt = ee.Geometry.Point([pf[0], pf[1]])
+            points.append(ee.Feature(pt, {"name": "Proposed Facility"}))
+            raw_points.append({"lon": pf[0], "lat": pf[1], "name": "Proposed Facility", "type": "proposed"})
 
     if not points:
         debug_info = ""
@@ -288,9 +297,22 @@ def _build_accessibility_images(aoi_config: dict, amenities: list[str], dest_ame
 
     # Tobler's: v = 6 * exp(-3.5 * abs(S + 0.05)) (in km/h)
     abs_term = S.add(0.05).abs()
-    v_kmh = ee.Image(6).multiply(ee.Image(-3.5).multiply(abs_term).exp())
-    # Cap walking speed to realistic minimum (0.1 km/h) to avoid infinite cost
-    v_kmh = v_kmh.max(0.1)
+    v_kmh_walking = ee.Image(6).multiply(ee.Image(-3.5).multiply(abs_term).exp()).max(0.1)
+    
+    if transport_mode == "bicycle":
+        # Bicycles are faster but highly sensitive to slope
+        v_kmh = v_kmh_walking.multiply(2.0).max(0.1)
+        road_speed_kmh = 15.0
+        offroad_penalty = 2.0
+    elif transport_mode == "driving":
+        # Driving offroad is very slow/hard
+        v_kmh = v_kmh_walking.multiply(0.5).max(0.1)
+        road_speed_kmh = 40.0
+        offroad_penalty = 5.0
+    else: # walking
+        v_kmh = v_kmh_walking
+        road_speed_kmh = 5.0
+        offroad_penalty = 1.0
     
     # pace (seconds per meter) = 3.6 / v
     base_cost = ee.Image(3.6).divide(v_kmh).rename("cost")
@@ -302,15 +324,17 @@ def _build_accessibility_images(aoi_config: dict, amenities: list[str], dest_ame
         .where(lc.eq(10), 1.5) # Trees
         .where(lc.eq(90), 5.0) # Wetlands
         .where(lc.eq(80), 20.0) # Water bodies (high friction)
-    )
+    ).multiply(offroad_penalty)
+    
     base_cost = base_cost.multiply(lc_multiplier)
     
     # Roads GRIP4 Africa
     roads = ee.FeatureCollection("projects/sat-io/open-datasets/GRIP4/Africa").filterBounds(aoi)
-    # Driving speed: 40 km/h -> 11.1 m/s -> 0.09 seconds per meter
-    roads_raster = ee.Image(1).paint(roads, 0.09)
+    # road pace (seconds per meter)
+    road_pace = 3.6 / road_speed_kmh
+    roads_raster = ee.Image(1).paint(roads, road_pace)
     
-    # Combine (road speed where roads exist, else walking speed)
+    # Combine (road speed where roads exist, else offroad speed)
     cost = base_cost.where(roads_raster.neq(1), roads_raster).rename("cost")
     
     # 3. Compute cumulative cost (travel time in seconds)
@@ -394,9 +418,19 @@ def _get_nearest_farthest(aoi, raw_points, origin_raw_points=None):
         
         return nearest, farthest
     else:
-        # Fallback to centroid
-        centroid = aoi.centroid(maxError=100).coordinates().getInfo()
-        c_lon, c_lat = centroid[0], centroid[1]
+        # Fallback to centroid safely
+        try:
+            centroid_info = aoi.centroid(maxError=100).coordinates().getInfo()
+            if not centroid_info or len(centroid_info) < 2:
+                # Ultimate fallback if GEE fails
+                bounds = aoi.bounds().getInfo().get("coordinates", [[[0,0]]])[0]
+                c_lon = sum(p[0] for p in bounds) / len(bounds)
+                c_lat = sum(p[1] for p in bounds) / len(bounds)
+            else:
+                c_lon, c_lat = centroid_info[0], centroid_info[1]
+        except Exception:
+            c_lon, c_lat = 30.0, -2.0 # Fallback central Rwanda
+
 
         # Make a copy so we don't mutate the original list elements for other uses
         pts = [p.copy() for p in raw_points]
@@ -469,51 +503,64 @@ def fetch_osrm_route(start_lon, start_lat, end_lon, end_lat):
         if response.status_code == 200:
             res = response.json()
             if res.get("code") == "Ok" and res.get("routes"):
-                return res["routes"][0]["geometry"]
+                return res["routes"][0]
         else:
             logger.warning(f"OSRM request failed with status: {response.status_code}")
     except Exception as e:
         logger.warning(f"OSRM request failed, falling back to straight line: {e}")
         
     # Fallback to straight line (Euclidean) path if OSRM fails
+    dist = haversine(start_lon, start_lat, end_lon, end_lat)
     return {
-        "type": "LineString",
-        "coordinates": [[start_lon, start_lat], [end_lon, end_lat]]
+        "geometry": {
+            "type": "LineString",
+            "coordinates": [[start_lon, start_lat], [end_lon, end_lat]]
+        },
+        "distance": dist * 1000,
+        "duration": dist / (40 / 3.6) # Approx duration at 40km/h
     }
 
-def compute_accessibility_map(aoi_config: dict, amenities: list[str], dest_amenities: list[str] = None, n_classes: int = 4, service_threshold_mins: int = 30) -> dict:
+def compute_accessibility_map(aoi_config: dict, amenities: list[str], dest_amenities: list[str] = None, n_classes: int = 4, service_threshold_mins: int = 30, method: str = "natural_breaks", proposed_facilities: list = None, transport_mode: str = "walking") -> dict:
     dest_am = dest_amenities or []
-    cache_key = (json.dumps(aoi_config, sort_keys=True), "-".join(sorted(amenities)), "-".join(sorted(dest_am)), n_classes, service_threshold_mins, "v10")
+    cache_key = (json.dumps(aoi_config, sort_keys=True), "-".join(sorted(amenities)), "-".join(sorted(dest_am)), n_classes, service_threshold_mins, method, transport_mode, "v12")
     with _lock:
         if cache_key in _cache_map:
             return _cache_map[cache_key]
 
-    aoi, travel_time, acc_class, factors = _build_accessibility_images(aoi_config, amenities, dest_amenities, n_classes, service_threshold_mins)
+    aoi, travel_time, acc_class, factors = _build_accessibility_images(aoi_config, amenities, dest_amenities, n_classes, service_threshold_mins, proposed_facilities=proposed_facilities, transport_mode=transport_mode)
     
     roads = factors.get("roads")
     raw_points = factors.get("raw_points", [])
     
-    from gee.classify_utils import class_palette
-    pal = class_palette(n_classes)
+    from gee.classify_utils import quantile_classify
     
-    ACCESSIBILITY_VIS = {
-        "min": 1,
-        "max": n_classes,
-        "palette": pal
-    }
+    # We use reverse_labels=True because low travel time = High accessibility, and the palette is already green to red.
+    classify = quantile_classify(
+        layers=[{"name": "TravelTime", "image": travel_time, "title": "Travel Time (seconds)"}],
+        aoi=aoi, scale=get_dynamic_scale(aoi), n_classes=n_classes,
+        method=method, reverse_labels=True
+    )
+    
+    acc_class_tile_url = classify["panels"][0]["tile_url"]
 
     travel_time_vis = {"min": 0, "max": 3600, "palette": ["#ffffff", "#f5e6ce", "#d4b179", "#a16b38", "#572b0c"]}
     travel_time_map_id = travel_time.getMapId(travel_time_vis)
     
-    acc_class_map_id = acc_class.getMapId(ACCESSIBILITY_VIS)
-    
     roads_map_id = ee.Image().byte().paint(roads, 1, 1).getMapId({"palette": ["#FF0000"]}) if roads else {"tile_fetcher": type('obj', (object,), {'url_format': ''})}
 
-    centroid = aoi.centroid(maxError=100).coordinates().getInfo()
-    bounds = aoi.bounds().getInfo()["coordinates"][0]
+    centroid_info = aoi.centroid(maxError=100).coordinates().getInfo()
+    bounds_info = aoi.bounds().getInfo()
+    if not bounds_info or "coordinates" not in bounds_info:
+        raise ValueError("AOI geometry is invalid or empty.")
+    bounds = bounds_info["coordinates"][0]
     lons = [p[0] for p in bounds]
     lats = [p[1] for p in bounds]
     bbox = [min(lons), min(lats), max(lons), max(lats)]
+
+    if centroid_info and len(centroid_info) >= 2:
+        centroid = centroid_info
+    else:
+        centroid = [sum(lons)/len(lons), sum(lats)/len(lats)]
 
     origin_raw_points = factors.get("origin_raw_points", [])
     nearest, farthest = _get_nearest_farthest(aoi, raw_points, origin_raw_points)
@@ -526,7 +573,7 @@ def compute_accessibility_map(aoi_config: dict, amenities: list[str], dest_ameni
     if farthest and roads:
         farthest_road_geojson = _get_closest_road_geojson(roads, farthest['lon'], farthest['lat'])
 
-        routes = []
+    routes = []
     # Use origin amenities if present, otherwise sample population
     incidents = origin_raw_points if len(origin_raw_points) > 0 else fetch_sample_population(bbox)
     
@@ -536,37 +583,42 @@ def compute_accessibility_map(aoi_config: dict, amenities: list[str], dest_ameni
              incidents = incidents[:25]
              
         for inc in incidents:
-            nearest_fac = None
-            min_dist = float('inf')
-            for fac in raw_points:
-                dist = haversine(inc["lon"], inc["lat"], fac["lon"], fac["lat"])
-                if dist > 0.001 and dist < min_dist:
-                    min_dist = dist
-                    nearest_fac = fac
+            pts_sorted = sorted(raw_points, key=lambda f: haversine(inc["lon"], inc["lat"], f["lon"], f["lat"]))
+            candidates = pts_sorted[:3] # Route to the 3 nearest by straight line
             
-            if nearest_fac:
-                route_geom = fetch_osrm_route(inc["lon"], inc["lat"], nearest_fac["lon"], nearest_fac["lat"])
-                if route_geom:
-                    def _get_name(pt, default_type):
-                        n = pt.get("name", "Unnamed")
-                        if n.startswith("Unnamed"):
-                            id_part = n.replace("Unnamed", "")
-                            res = f"{pt.get('type', default_type)}{id_part}"
-                            if "Sector" not in res:
-                                res += " Location"
-                            return res
-                        return n
-                        
-                    routes.append({
-                        "geometry": route_geom,
-                        "incident_name": _get_name(inc, "Origin"),
-                        "facility_name": _get_name(nearest_fac, "Destination"),
-                        "distance_km": round(min_dist, 2)
-                    })
+            best_route = None
+            best_duration = float('inf')
+            best_fac = None
+            
+            for fac in candidates:
+                route = fetch_osrm_route(inc["lon"], inc["lat"], fac["lon"], fac["lat"])
+                if route and "duration" in route and route["duration"] < best_duration:
+                    best_duration = route["duration"]
+                    best_route = route
+                    best_fac = fac
+            
+            if best_route and best_fac:
+                def _get_name(pt, default_type):
+                    n = pt.get("name", "Unnamed")
+                    if n.startswith("Unnamed"):
+                        id_part = n.replace("Unnamed", "")
+                        res = f"{pt.get('type', default_type)}{id_part}"
+                        if "Sector" not in res:
+                            res += " Location"
+                        return res
+                    return n
+                    
+                routes.append({
+                    "geometry": best_route.get("geometry", best_route),
+                    "incident_name": _get_name(inc, "Origin"),
+                    "facility_name": _get_name(best_fac, "Destination"),
+                    "distance_km": round(best_route.get("distance", 0) / 1000, 2),
+                    "duration_mins": round(best_route.get("duration", 0) / 60, 2)
+                })
 
     result = {
         "travel_time_tile_url": travel_time_map_id["tile_fetcher"].url_format,
-        "acc_class_tile_url": acc_class_map_id["tile_fetcher"].url_format,
+        "acc_class_tile_url": acc_class_tile_url,
         "roads_tile_url": roads_map_id["tile_fetcher"].url_format,
         "center": [centroid[1], centroid[0]],
         "bbox": bounds,
@@ -583,117 +635,115 @@ def compute_accessibility_map(aoi_config: dict, amenities: list[str], dest_ameni
     return result
 
 
-def compute_accessibility_stats(aoi_config: dict, amenities: list[str], dest_amenities: list[str] = None, n_classes: int = 4, service_threshold_mins: int = 30) -> dict:
+def compute_accessibility_stats(aoi_config: dict, amenities: list[str], dest_amenities: list[str] = None, n_classes: int = 4, service_threshold_mins: int = 30, proposed_facilities: list = None, transport_mode: str = "walking") -> dict:
     dest_am = dest_amenities or []
-    cache_key = (json.dumps(aoi_config, sort_keys=True), "-".join(sorted(amenities)), "-".join(sorted(dest_am)), n_classes, service_threshold_mins, "v10")
+    cache_key = (json.dumps(aoi_config, sort_keys=True), "-".join(sorted(amenities)), "-".join(sorted(dest_am)), n_classes, service_threshold_mins, transport_mode, "v12")
     with _lock:
         if cache_key in _cache_stats:
             return _cache_stats[cache_key]
 
-    aoi, travel_time, acc_class, factors = _build_accessibility_images(aoi_config, amenities, dest_amenities, n_classes, service_threshold_mins)
-
-    class_area_bands = ee.Image.cat(
-        [acc_class.eq(i + 1).multiply(ee.Image.pixelArea()).rename(f"c{i}") for i in range(n_classes)]
-    )
-
-    # Calculate Population Served
-    worldpop = ee.ImageCollection("WorldPop/GP/100m/pop").filter(ee.Filter.inList('year', [2020])).first().clip(aoi)
-    served_mask = travel_time.lte(service_threshold_mins * 60)
+    aoi, travel_time, acc_class, factors = _build_accessibility_images(aoi_config, amenities, dest_amenities, n_classes, service_threshold_mins, proposed_facilities=proposed_facilities, transport_mode=transport_mode)
     
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-        f_stats = executor.submit(
-            lambda: travel_time.reduceRegion(
-                reducer=ee.Reducer.mean().combine(ee.Reducer.min(), sharedInputs=True)
-                .combine(ee.Reducer.max(), sharedInputs=True).combine(ee.Reducer.stdDev(), sharedInputs=True),
-                geometry=aoi, scale=get_dynamic_scale(aoi), maxPixels=1e10,
-            ).getInfo()
-        )
-        f_area = executor.submit(
-            lambda: class_area_bands.reduceRegion(
-                reducer=ee.Reducer.sum(), geometry=aoi, scale=get_dynamic_scale(aoi), maxPixels=1e10,
-            ).getInfo()
-        )
-        f_served = executor.submit(
-            lambda: ee.Image.pixelArea().updateMask(served_mask).reduceRegion(
-                reducer=ee.Reducer.sum(), geometry=aoi, scale=get_dynamic_scale(aoi), maxPixels=1e10,
-            ).getInfo()
-        )
-        f_pop = executor.submit(
-            lambda: worldpop.updateMask(served_mask).reduceRegion(
-                reducer=ee.Reducer.sum(), geometry=aoi, scale=get_dynamic_scale(aoi), maxPixels=1e10,
-            ).getInfo()
-        )
-        f_total_pop = executor.submit(
-            lambda: worldpop.reduceRegion(
-                reducer=ee.Reducer.sum(), geometry=aoi, scale=get_dynamic_scale(aoi), maxPixels=1e10,
-            ).getInfo()
-        )
+    baseline_futures = None
+    if proposed_facilities:
+        _, base_travel_time, base_acc_class, _ = _build_accessibility_images(aoi_config, amenities, dest_amenities, n_classes, service_threshold_mins, proposed_facilities=None, transport_mode=transport_mode)
+
+    def _submit_jobs(executor, t_time, a_class, area_of_interest):
+        c_bands = ee.Image.cat([a_class.eq(i + 1).multiply(ee.Image.pixelArea()).rename(f"c{i}") for i in range(n_classes)])
+        s_mask = t_time.lte(service_threshold_mins * 60)
+        pop_img = ee.ImageCollection("WorldPop/GP/100m/pop").filter(ee.Filter.inList('year', [2020])).first().clip(area_of_interest)
+        sc = get_dynamic_scale(area_of_interest)
         
-        stats_raw = f_stats.result()
-        class_area_dict = f_area.result()
-        served_area_dict = f_served.result()
-        served_pop_dict = f_pop.result()
-        total_pop_dict = f_total_pop.result()
+        return {
+            'stats': executor.submit(lambda: t_time.reduceRegion(
+                reducer=ee.Reducer.mean().combine(ee.Reducer.min(), sharedInputs=True).combine(ee.Reducer.max(), sharedInputs=True).combine(ee.Reducer.stdDev(), sharedInputs=True),
+                geometry=area_of_interest, scale=sc, maxPixels=1e10).getInfo()),
+            'area': executor.submit(lambda: c_bands.reduceRegion(reducer=ee.Reducer.sum(), geometry=area_of_interest, scale=sc, maxPixels=1e10).getInfo()),
+            'served': executor.submit(lambda: ee.Image.pixelArea().updateMask(s_mask).reduceRegion(reducer=ee.Reducer.sum(), geometry=area_of_interest, scale=sc, maxPixels=1e10).getInfo()),
+            'pop': executor.submit(lambda: pop_img.updateMask(s_mask).reduceRegion(reducer=ee.Reducer.sum(), geometry=area_of_interest, scale=sc, maxPixels=1e10).getInfo()),
+            'total_pop': executor.submit(lambda: pop_img.reduceRegion(reducer=ee.Reducer.sum(), geometry=area_of_interest, scale=sc, maxPixels=1e10).getInfo())
+        }
+        
+    def _resolve_jobs(futures):
+        from gee.classify_utils import class_labels
+        lbls = class_labels(n_classes)
+        interval = 3600 / n_classes
+        c_areas = {}
+        c_dict = futures['area'].result()
+        for i, lbl in enumerate(lbls):
+            lower_min = int((i * interval) / 60)
+            upper_min = int(((i + 1) * interval) / 60)
+            label = f"{lbl} ({lower_min}-{upper_min}m)" if i < n_classes - 1 else f"{lbl} (>{lower_min}m)"
+            c_areas[label] = round((c_dict.get(f"c{i}", 0) or 0) / 1e6, 2)
+            
+        s_raw = futures['stats'].result()
+        s_area = round((list(futures['served'].result().values())[0] or 0) / 1e6, 2)
+        s_pop = int(list(futures['pop'].result().values())[0] or 0)
+        t_pop = int(list(futures['total_pop'].result().values())[0] or 0)
+        
+        return {
+            "stats": {
+                "Mean Time (min)": round((s_raw.get("travel_time_mean") or 0) / 60, 2),
+                "Min Time (min)": round((s_raw.get("travel_time_min") or 0) / 60, 2),
+                "Max Time (min)": round((s_raw.get("travel_time_max") or 0) / 60, 2),
+                "Std Dev (min)": round((s_raw.get("travel_time_stdDev") or 0) / 60, 2),
+            },
+            "served": {
+                "threshold_mins": service_threshold_mins,
+                "area_km2": s_area,
+                "population": s_pop,
+                "total_population": t_pop,
+                "pop_percent": round(s_pop / t_pop * 100, 1) if t_pop > 0 else 0
+            },
+            "class_areas_km2": c_areas
+        }
 
-    from gee.classify_utils import class_labels
-    lbls = class_labels(n_classes)
-    
-    interval = 3600 / n_classes
-    class_areas = {}
-    for i, lbl in enumerate(lbls):
-        lower_min = int((i * interval) / 60)
-        upper_min = int(((i + 1) * interval) / 60)
-        # Combine label with time range
-        label_with_range = f"{lbl} ({lower_min}-{upper_min}m)" if i < n_classes - 1 else f"{lbl} (>{lower_min}m)"
-        class_areas[label_with_range] = round((class_area_dict.get(f"c{i}", 0) or 0) / 1e6, 2)
-    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        active_futures = _submit_jobs(executor, travel_time, acc_class, aoi)
+        if proposed_facilities:
+            baseline_futures = _submit_jobs(executor, base_travel_time, base_acc_class, aoi)
+            
+        active_results = _resolve_jobs(active_futures)
+        baseline_results = _resolve_jobs(baseline_futures) if baseline_futures else None
+
     raw_points = factors.get("raw_points", [])
     origin_raw_points = factors.get("origin_raw_points", [])
     nearest, farthest = _get_nearest_farthest(aoi, raw_points, origin_raw_points)
 
-    served_area_km2 = round((list(served_area_dict.values())[0] or 0) / 1e6, 2)
-    served_pop = int(list(served_pop_dict.values())[0] or 0)
-    total_pop = int(list(total_pop_dict.values())[0] or 0)
-
-    # Convert seconds to minutes for readability in stats
     result = {
-        "stats": {
-            "Mean Time (min)": round((stats_raw.get("travel_time_mean") or 0) / 60, 2),
-            "Min Time (min)": round((stats_raw.get("travel_time_min") or 0) / 60, 2),
-            "Max Time (min)": round((stats_raw.get("travel_time_max") or 0) / 60, 2),
-            "Std Dev (min)": round((stats_raw.get("travel_time_stdDev") or 0) / 60, 2),
-        },
-        "served": {
-            "threshold_mins": service_threshold_mins,
-            "area_km2": served_area_km2,
-            "population": served_pop,
-            "total_population": total_pop,
-            "pop_percent": round(served_pop / total_pop * 100, 1) if total_pop > 0 else 0
-        },
-        "class_areas_km2": class_areas,
+        "stats": active_results["stats"],
+        "served": active_results["served"],
+        "class_areas_km2": active_results["class_areas_km2"],
         "nearest_facility": nearest,
         "farthest_facility": farthest
     }
+    
+    if baseline_results:
+        result["delta_stats"] = {
+            "population_served": active_results["served"]["population"] - baseline_results["served"]["population"],
+            "area_km2_served": round(active_results["served"]["area_km2"] - baseline_results["served"]["area_km2"], 2),
+            "mean_time_min": round(active_results["stats"]["Mean Time (min)"] - baseline_results["stats"]["Mean Time (min)"], 2),
+        }
     with _lock:
         _cache_stats[cache_key] = result
     return result
 
 
-def compute_accessibility_classify(aoi_config: dict, amenities: list[str], dest_amenities: list[str] = None, n_classes: int = 4, service_threshold_mins: int = 30, method: str = "natural_breaks", custom_labels: list = None) -> dict:
+def compute_accessibility_classify(aoi_config: dict, amenities: list[str], dest_amenities: list[str] = None, n_classes: int = 4, service_threshold_mins: int = 30, method: str = "natural_breaks", custom_labels: list[str] = None, proposed_facilities: list = None, transport_mode: str = "walking") -> dict:
     dest_am = dest_amenities or []
-    cache_key = (json.dumps(aoi_config, sort_keys=True), "-".join(sorted(amenities)), "-".join(sorted(dest_am)), n_classes, service_threshold_mins, method, tuple(custom_labels) if custom_labels else None)
+    cache_key = (json.dumps(aoi_config, sort_keys=True), "-".join(sorted(amenities)), "-".join(sorted(dest_am)), n_classes, service_threshold_mins, method, tuple(custom_labels) if custom_labels else None, transport_mode, "v12")
     with _lock:
         if cache_key in _cache_classify:
             return _cache_classify[cache_key]
 
-    aoi, travel_time, acc_class, factors = _build_accessibility_images(aoi_config, amenities, dest_amenities, n_classes, service_threshold_mins)
+    aoi, travel_time, acc_class, factors = _build_accessibility_images(aoi_config, amenities, dest_amenities, n_classes, service_threshold_mins, proposed_facilities=proposed_facilities, transport_mode=transport_mode)
 
     classify = quantile_classify(
         layers=[
             {"name": "TravelTime", "image": travel_time, "title": "Travel Time (seconds)"},
         ],
         aoi=aoi, scale=get_dynamic_scale(aoi), n_classes=n_classes,
-        method=method, custom_labels=custom_labels
+        method=method, custom_labels=custom_labels, reverse_labels=True
     )
 
     result = {
@@ -704,14 +754,14 @@ def compute_accessibility_classify(aoi_config: dict, amenities: list[str], dest_
     return result
 
 
-def compute_accessibility_export(aoi_config: dict, amenities: list[str], dest_amenities: list[str] = None, n_classes: int = 4, service_threshold_mins: int = 30) -> dict:
+def compute_accessibility_export(aoi_config: dict, amenities: list[str], dest_amenities: list[str] = None, n_classes: int = 4, service_threshold_mins: int = 30, proposed_facilities: list = None, transport_mode: str = "walking") -> dict:
     dest_am = dest_amenities or []
-    cache_key = (json.dumps(aoi_config, sort_keys=True), "-".join(sorted(amenities)), "-".join(sorted(dest_am)), n_classes, service_threshold_mins)
+    cache_key = (json.dumps(aoi_config, sort_keys=True), "-".join(sorted(amenities)), "-".join(sorted(dest_am)), n_classes, service_threshold_mins, transport_mode, "v12")
     with _lock:
         if cache_key in _cache_export:
             return _cache_export[cache_key]
 
-    aoi, travel_time, acc_class, factors = _build_accessibility_images(aoi_config, amenities, dest_amenities, n_classes, service_threshold_mins)
+    aoi, travel_time, acc_class, factors = _build_accessibility_images(aoi_config, amenities, dest_amenities, n_classes, service_threshold_mins, proposed_facilities=proposed_facilities, transport_mode=transport_mode)
     
     raw_points = factors.get("raw_points", [])
     if raw_points:

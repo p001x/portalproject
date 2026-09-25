@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { api, AOIConfig } from "@/lib/api";
+import { api } from "@/lib/api";
+import type { AOIConfig } from "@/lib/api";
 import { DistrictMap, LegendItem } from "@/components/DistrictMap";
 import { StudyAreaSelector } from "@/components/StudyAreaSelector";
 import { ReportDownloadButton } from "@/components/ReportDownloadButton";
@@ -504,3 +505,4 @@ export function BiomassPage() {
     </div>
   );
 }
+

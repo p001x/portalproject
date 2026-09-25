@@ -22,7 +22,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { api, LandslideMapResult, LandslideStatsResult, LandslideClassifyResult, LandslideExportResult, AOIConfig } from "@/lib/api";
+import { api } from "@/lib/api";
+import type { LandslideMapResult, LandslideStatsResult, LandslideClassifyResult, LandslideExportResult, AOIConfig } from "@/lib/api";
 import { DistrictMap } from "@/components/DistrictMap";
 import { ReportDownloadButton } from "@/components/ReportDownloadButton";
 import { MapExportControls } from "@/components/MapExportControls";
@@ -730,3 +731,4 @@ export function LandslidePage() {
     </ResizablePanelGroup>
   );
 }
+

@@ -14,7 +14,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { api, LandfillResult , AOIConfig} from "@/lib/api";
+import { api } from "@/lib/api";
+import type { LandfillResult , AOIConfig } from "@/lib/api";
 import { DistrictMap, LegendItem } from "@/components/DistrictMap";
 import { StudyAreaSelector } from "@/components/StudyAreaSelector";
 import { MapExportControls } from "@/components/MapExportControls";
@@ -1058,6 +1059,7 @@ export function LandfillPage() {
     </ResizablePanelGroup>
   );
 }
+
 
 
 

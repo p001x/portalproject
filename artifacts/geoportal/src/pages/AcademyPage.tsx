@@ -16,7 +16,8 @@ import 'react-pdf/dist/esm/Page/TextLayer.css';
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 import { useAuth } from "@/hooks/use-auth";
 import { useNotifications } from "@/hooks/use-notifications";
-import { api, BASE, fetchAITakeaways } from "@/lib/api";
+import { api } from "@/lib/api";
+import { BASE, fetchAITakeaways } from "@/lib/api";
 
 export function AcademyPage() {
   const [activeTab, setActiveTab] = useState("videos");
@@ -1701,3 +1702,5 @@ export function AcademyPage() {
     </div>
   );
 }
+
+

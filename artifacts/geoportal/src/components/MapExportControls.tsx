@@ -32,9 +32,11 @@ interface MapExportControlsProps {
   classAreas?: Record<string, number>;
   downloadUrl?: string;
   bbox?: number[];
+  proposedFacilities?: [number, number][];
+  overridePalette?: string[];
 }
 
-export function MapExportControls({ tileUrl, thumbUrl, district, title, classAreas, downloadUrl, bbox }: MapExportControlsProps) {
+export function MapExportControls({ tileUrl, thumbUrl, district, title, classAreas, downloadUrl, bbox, proposedFacilities, overridePalette }: MapExportControlsProps) {
   const [mode, setMode] = useState<"static" | "canva">("static");
   const [selectedPalette, setSelectedPalette] = useState("default");
   const [customColors, setCustomColors] = useState<string[]>([]);
@@ -74,6 +76,8 @@ export function MapExportControls({ tileUrl, thumbUrl, district, title, classAre
   const paletteObj = PALETTES.find((p) => p.value === selectedPalette);
   const resolvedPalette = selectedPalette === "custom"
     ? customColors
+    : selectedPalette === "default" && overridePalette
+    ? overridePalette
     : (paletteObj && paletteObj.hexes.length > 0 ? paletteObj.hexes : undefined);
 
   // Fetch rendered static map from backend
@@ -81,6 +85,11 @@ export function MapExportControls({ tileUrl, thumbUrl, district, title, classAre
     const targetUrl = thumbUrl || tileUrl;
     if (!targetUrl) {
       setError("No valid map source URL available for preview.");
+      setIsGenerating(false);
+      return;
+    }
+    if (targetUrl.includes("{z}")) {
+      setError("Static preview unavailable (GEE timeout). Try a smaller study area.");
       setIsGenerating(false);
       return;
     }
@@ -115,6 +124,8 @@ export function MapExportControls({ tileUrl, thumbUrl, district, title, classAre
           show_title: mode === "canva" ? false : true,
           size_multiplier: parseFloat(sizeMultiplier),
           output_format: exportFormat,
+          bbox: bbox,
+          proposed_facilities: proposedFacilities,
         }),
         signal: abortController.signal
       })
@@ -125,7 +136,11 @@ export function MapExportControls({ tileUrl, thumbUrl, district, title, classAre
              let parsedMsg = errText;
              try {
                const jsonErr = JSON.parse(errText);
-               parsedMsg = jsonErr.detail || errText;
+               if (Array.isArray(jsonErr.detail)) {
+                 parsedMsg = jsonErr.detail.map((e: any) => `${e.loc?.join(".") || "Field"}: ${e.msg}`).join(" | ");
+               } else {
+                 parsedMsg = jsonErr.detail || errText;
+               }
              } catch {}
              throw new Error(parsedMsg);
           }
@@ -171,6 +186,7 @@ export function MapExportControls({ tileUrl, thumbUrl, district, title, classAre
     sizeMultiplier,
     exportFormat,
     retryCount,
+    proposedFacilities,
   ]);
 
   const handleDownload = async () => {

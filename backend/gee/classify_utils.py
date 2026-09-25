@@ -23,9 +23,9 @@ def rgb_to_hex(rgb):
         max(0, min(255, int(round(rgb[2]))))
     )
 
-def class_palette(n: int) -> list:
-    """Return n hex colours spanning green → yellow → red smoothly for 1 to 15 classes."""
-    stops = [
+def class_palette(n: int, custom_stops: list = None) -> list:
+    """Return n hex colours spanning smoothly for 1 to 15 classes."""
+    stops = custom_stops if custom_stops else [
         "#1a9850", "#66bd63", "#a6d96a", "#d9ef8b", "#ffffbf",
         "#fee08b", "#fdae61", "#f46d43", "#d73027", "#a50026",
     ]
@@ -54,8 +54,8 @@ def class_palette(n: int) -> list:
             result.append(rgb_to_hex(interp))
     return result
 
-def class_labels(n: int) -> list:
-    """Descriptive labels (low → high) for n classes."""
+def class_labels(n: int, reverse: bool = False) -> list:
+    """Descriptive labels (low → high) for n classes. If reverse=True, returns high → low."""
     presets = {
         1: ["Uniform / Full Area"],
         2: ["Low", "High"],
@@ -69,7 +69,13 @@ def class_labels(n: int) -> list:
         10: ["Extremely Low", "Very Low", "Low", "Moderately Low", "Moderate", "Moderately High", "High", "Very High", "Extremely High", "Extreme"],
     }
     if n in presets:
-        return presets[n]
+        labels = presets[n].copy()
+        if reverse:
+            return labels[::-1]
+        return labels
+        
+    if reverse:
+        return [f"Class {n - i}" for i in range(n)]
     return [f"Class {i + 1}" for i in range(n)]
 
 def add_legend_to_image(thumb_url: str, labels: list, palette: list) -> str:
@@ -172,17 +178,17 @@ def get_quantile_breaks(hist, n_classes):
             target += target_step
     return sorted(list(set(breaks)))
 
-def quantile_classify(layers: list, aoi, scale: int, n_classes: int, reverse_palette: bool = False, custom_labels: list = None, method: str = "natural_breaks") -> dict:
+def quantile_classify(layers: list, aoi, scale: int, n_classes: int, reverse_palette: bool = False, custom_labels: list = None, method: str = "natural_breaks", reverse_labels: bool = False, custom_breaks: dict = None, water_mask: ee.Image = None, custom_palette: list = None, add_legend: bool = False) -> dict:
     """
     Classify each layer into n_classes using Natural Breaks (Jenks 1D KMeans approximation)
     computed within `aoi`. All breakpoints and all class areas are fetched in exactly 
     two GEE round-trips.
     """
     n = max(1, min(n_classes, 15))
-    pal  = class_palette(n)
+    pal  = class_palette(n, custom_palette)
     if reverse_palette:
         pal = pal[::-1]
-    lbls = custom_labels if custom_labels and len(custom_labels) == n else class_labels(n)
+    lbls = custom_labels if custom_labels and len(custom_labels) == n else class_labels(n, reverse_labels)
     vis  = {"min": 1, "max": n, "palette": pal}
 
     names  = [lay["name"]  for lay in layers]
@@ -202,7 +208,9 @@ def quantile_classify(layers: list, aoi, scale: int, n_classes: int, reverse_pal
     area_bands = []
     for j, (nm, img) in enumerate(zip(names, images)):
         band_hist = hist_raw.get(nm) or []
-        if n == 1:
+        if custom_breaks and nm in custom_breaks:
+            bps = custom_breaks[nm]
+        elif n == 1:
             bps = []
         elif method == "equal_interval":
             bps = get_equal_interval_breaks(band_hist, n)
@@ -222,7 +230,7 @@ def quantile_classify(layers: list, aoi, scale: int, n_classes: int, reverse_pal
         cls = ee.Image(1)
         for i, bp in enumerate(bps):
             cls = cls.where(img.gt(bp), i + 2)
-        cls = cls.clip(aoi)
+        cls = cls.updateMask(img.mask()).clip(aoi)
         classified.append({"bps": bps, "cls": cls})
         for ci in range(n):
             area_bands.append(
@@ -239,12 +247,20 @@ def quantile_classify(layers: list, aoi, scale: int, n_classes: int, reverse_pal
     
     def process_panel(j, nm, title, bps, cls):
         print(f"[{nm}] process_panel start")
-        tile_url  = cls.getMapId(vis)["tile_fetcher"].url_format
-        print(f"[{nm}] getMapId done")
-        thumb_url = cls.getThumbURL({
-            **vis, "region": aoi.bounds(), "dimensions": 1024, "format": "png",
-        })
-        print(f"[{nm}] getThumbURL done")
+        if water_mask is not None:
+            cls_rgb = cls.visualize(**vis)
+            water_rgb = water_mask.updateMask(water_mask).visualize(palette=["#08306b"])
+            final_panel = ee.ImageCollection([cls_rgb, water_rgb]).mosaic().clip(aoi)
+            tile_url = final_panel.getMapId()["tile_fetcher"].url_format
+            thumb_url = final_panel.getThumbURL({
+                "region": aoi.bounds(), "dimensions": 1024, "format": "png",
+            })
+        else:
+            tile_url  = cls.getMapId(vis)["tile_fetcher"].url_format
+            thumb_url = cls.getThumbURL({
+                **vis, "region": aoi.bounds(), "dimensions": 1024, "format": "png",
+            })
+        print(f"[{nm}] getMapId and getThumbURL done")
         try:
             print(f"[{nm}] getDownloadURL start")
             download_url = cls.getDownloadURL({"scale": scale, "region": aoi.bounds(), "format": "GEO_TIFF"}) if hasattr(cls, "getDownloadURL") else None
@@ -253,10 +269,11 @@ def quantile_classify(layers: list, aoi, scale: int, n_classes: int, reverse_pal
             print(f"[{nm}] getDownloadURL error:", e)
             download_url = None
             
-        print(f"[{nm}] add_legend_to_image start")
-        # Add legend to the downloaded static map
-        thumb_url_with_legend = add_legend_to_image(thumb_url, lbls, pal)
-        print(f"[{nm}] add_legend_to_image done")
+        # Add legend to the downloaded static map only if requested
+        if add_legend:
+            thumb_url_with_legend = add_legend_to_image(thumb_url, lbls, pal)
+        else:
+            thumb_url_with_legend = thumb_url
 
         areas = {}
         for ci, lbl in enumerate(lbls):

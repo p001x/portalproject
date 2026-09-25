@@ -2,6 +2,17 @@
 import json
 import math
 import ee
+import concurrent.futures
+from threading import Lock
+from cachetools import TTLCache
+
+from gee.classify_utils import (
+    quantile_classify,
+    get_jenks_breaks,
+    get_equal_interval_breaks,
+    get_quantile_breaks,
+    class_palette,
+)
 
 def get_dynamic_scale(geom):
     try:
@@ -13,19 +24,11 @@ def get_dynamic_scale(geom):
     except:
         return 250
 
-from cachetools import TTLCache
-from threading import Lock
-import concurrent.futures
-from gee.classify_utils import quantile_classify
-
-_cache_map: TTLCache = TTLCache(maxsize=64, ttl=3600)
-_cache_stats: TTLCache = TTLCache(maxsize=64, ttl=3600)
-_cache_classify: TTLCache = TTLCache(maxsize=64, ttl=3600)
-_cache_export: TTLCache = TTLCache(maxsize=64, ttl=3600)
+_cache_unified: TTLCache = TTLCache(maxsize=64, ttl=3600)
 _cache_build: TTLCache = TTLCache(maxsize=64, ttl=3600)
 _lock = Lock()
 
-# Default AHP weights matching the poster
+# Default AHP weights matching scientific crane conservation literature
 DEFAULT_WEIGHTS = {
     "wetlands": 0.22,
     "water": 0.16,
@@ -57,6 +60,29 @@ FACTOR_META = {
     "temperature": {"label": "Mean Annual Temperature",   "weight_pct": 4,  "normal_desc": "Optimal temps = more suitable", "reversed_desc": "Extreme temps = more suitable (reversed)"},
 }
 
+DEFAULT_LANDCOVER_SCORES = {
+    "10": 2, # Trees
+    "20": 2, # Shrubland
+    "30": 5, # Grassland
+    "40": 4, # Cropland
+    "50": 1, # Built-up
+    "60": 1, # Bare / sparse vegetation
+    "70": 2, # Snow and ice
+    "80": 5, # Permanent water bodies
+    "90": 5, # Herbaceous wetland
+    "95": 5, # Mangroves
+    "100": 1 # Moss and lichen
+}
+
+def get_habitat_config():
+    return {
+        "factors": FACTOR_ORDER,
+        "factor_meta": FACTOR_META,
+        "default_weights": DEFAULT_WEIGHTS,
+        "default_landcover_scores": DEFAULT_LANDCOVER_SCORES,
+        "available_years": [2020, 2021, 2022, 2023]
+    }
+
 _SCORE_VIS = {"min": 1, "max": 5, "palette": ["#d7191c", "#fdae61", "#ffffbf", "#a6d96a", "#1a9641"]}
 _RI = {1: 0.0, 2: 0.0, 3: 0.58, 4: 0.90, 5: 1.12, 6: 1.24, 7: 1.32, 8: 1.41, 9: 1.45, 10: 1.49}
 
@@ -85,19 +111,22 @@ def compute_ahp_data(weights: dict) -> dict:
     }
 
 
-def _distance_km(mask, aoi, scale=None):
+def _true_vector_euclidean_distance(mask, aoi, scale=None):
     if scale is None: scale = get_dynamic_scale(aoi)
-    # fastDistanceTransform computes distance to zero pixels. 
-    # Target feature should be 0, background should be 1.
-    target = mask.unmask(0).Not()
+    # fastDistanceTransform calculates distance to the nearest non-zero pixel.
+    # mask has 1 on target features and 0 on background.
+    # Therefore target is mask.unmask(0) directly without inversion.
+    target = mask.unmask(0)
     distance_m = (
-        target.fastDistanceTransform(256, "pixels", "squared_euclidean")
+        target.fastDistanceTransform(512, "pixels", "squared_euclidean")
         .sqrt().multiply(ee.Image.pixelArea().sqrt()).clip(aoi)
     )
     return distance_m.divide(1000)
 
+
 def _apply_reverse(score_img, flag):
     return ee.Image(6).subtract(score_img) if flag else score_img
+
 
 def _normalize_weights(custom: dict | None) -> dict:
     if not custom:
@@ -106,10 +135,9 @@ def _normalize_weights(custom: dict | None) -> dict:
     total = sum(raw.values())
     return {k: v / total for k, v in raw.items()}
 
-from gee.classify_utils import get_jenks_breaks, get_equal_interval_breaks, get_quantile_breaks
 
 def _classify_all_raw_images(raw_dict: dict, aoi: ee.Geometry, scale: int, n_classes: int = 5, method: str = "natural_breaks") -> tuple[dict, dict]:
-    if not raw_dict: return {}
+    if not raw_dict: return {}, {}
     names = list(raw_dict.keys())
     images = list(raw_dict.values())
     
@@ -117,11 +145,11 @@ def _classify_all_raw_images(raw_dict: dict, aoi: ee.Geometry, scale: int, n_cla
     all_bands = ee.Image.cat([img.rename(nm) for nm, img in zip(names, images)])
     hist_raw = all_bands.reduceRegion(
         reducer=ee.Reducer.autoHistogram(maxBuckets=100),
-        geometry=aoi, scale=scale, maxPixels=10000, bestEffort=True
+        geometry=aoi, scale=scale, maxPixels=20000, bestEffort=True
     ).getInfo()
     
     if not hist_raw:
-        return {nm: ee.Image(1).clip(aoi) for nm in names}
+        hist_raw = {}
         
     classified = {}
     breaks_dict = {}
@@ -137,6 +165,12 @@ def _classify_all_raw_images(raw_dict: dict, aoi: ee.Geometry, scale: int, n_cla
         while len(bps) < n_classes - 1:
             bps.append(bps[-1] + 0.001 if bps else 1.0)
         bps = bps[:n_classes-1]
+        
+        # Ensure breaks are strictly monotonically increasing
+        for i in range(1, len(bps)):
+            if bps[i] <= bps[i-1]:
+                bps[i] = bps[i-1] + 0.001
+                
         breaks_dict[nm] = bps
         
         cls = ee.Image(1)
@@ -147,11 +181,22 @@ def _classify_all_raw_images(raw_dict: dict, aoi: ee.Geometry, scale: int, n_cla
     return classified, breaks_dict
 
 
-def _build_habitat_images(aoi_config: dict, reverse_flags: dict, custom_weights: dict | None = None):
+def _build_habitat_images(
+    aoi_config: dict,
+    reverse_flags: dict,
+    custom_weights: dict | None = None,
+    year: int = 2021,
+    landcover_scores: dict | None = None,
+    method: str = "natural_breaks"
+):
     weights = _normalize_weights(custom_weights)
     weights_tuple = tuple(round(weights[k], 6) for k in FACTOR_ORDER)
     rev_tuple = tuple(reverse_flags.get(k, False) for k in FACTOR_ORDER)
-    cache_key = (json.dumps(aoi_config, sort_keys=True), rev_tuple, weights_tuple)
+    
+    lc_scores = landcover_scores or DEFAULT_LANDCOVER_SCORES
+    lc_scores_tuple = tuple((k, lc_scores[k]) for k in sorted(lc_scores.keys()))
+    
+    cache_key = (json.dumps(aoi_config, sort_keys=True), rev_tuple, weights_tuple, year, lc_scores_tuple, method)
     
     with _lock:
         if cache_key in _cache_build:
@@ -159,63 +204,68 @@ def _build_habitat_images(aoi_config: dict, reverse_flags: dict, custom_weights:
             
         from gee.aoi_utils import get_aoi_geometry
         aoi = get_aoi_geometry(aoi_config)
-    
-        # Calculate raw images first
-        lc = ee.Image("ESA/WorldCover/v200/2021").select("Map").clip(aoi)
-        wetlands_mask = lc.eq(90).Or(lc.eq(95))
-        wetlands_dist = _distance_km(wetlands_mask, aoi)
-        water_mask = lc.eq(80)
-        water_dist = _distance_km(water_mask, aoi)
-        buildings_mask = lc.eq(50)
-        buildings_dist = _distance_km(buildings_mask, aoi)
-        irrigated_mask = lc.eq(40)
-        irrigated_dist = _distance_km(irrigated_mask, aoi)
+        scale = get_dynamic_scale(aoi)
         
-        roads = ee.FeatureCollection("projects/sat-io/open-datasets/GRIP4/Africa").filterBounds(aoi)
-        roads_mask = ee.Image(0).paint(roads, 1).clip(aoi)
-        roads_dist_km = _distance_km(roads_mask, aoi)
+        # 20 km buffer to prevent boundary edge distortion in distance calculations
+        aoi_buffer = aoi.buffer(20000)
+    
+        # Calculate raw images
+        # Map year to WorldCover version (2020 v100, 2021 v200)
+        wc_asset = "ESA/WorldCover/v100/2020" if year <= 2020 else "ESA/WorldCover/v200/2021"
+        lc_buffered = ee.Image(wc_asset).select("Map").clip(aoi_buffer)
+        lc = lc_buffered.clip(aoi)
+        
+        wetlands_mask = lc_buffered.eq(90).Or(lc_buffered.eq(95))
+        wetlands_dist = _true_vector_euclidean_distance(wetlands_mask, aoi, scale)
+        water_mask = lc_buffered.eq(80)
+        water_dist = _true_vector_euclidean_distance(water_mask, aoi, scale)
+        buildings_mask = lc_buffered.eq(50)
+        buildings_dist = _true_vector_euclidean_distance(buildings_mask, aoi, scale)
+        irrigated_mask = lc_buffered.eq(40)
+        irrigated_dist = _true_vector_euclidean_distance(irrigated_mask, aoi, scale)
+        
+        # True Euclidean distance for vector features (roads) with fallback unmask
+        roads = ee.FeatureCollection("projects/sat-io/open-datasets/GRIP4/Africa").filterBounds(aoi_buffer)
+        roads_dist_km = roads.distance(searchRadius=50000, maxError=50).unmask(50000).divide(1000).clip(aoi)
         
         dem = ee.Image("USGS/SRTMGL1_003").select("elevation").clip(aoi)
-        slope_pct = ee.Terrain.slope(dem).multiply(math.pi / 180).tan().multiply(100)
+        slope_deg = ee.Terrain.slope(dem).clip(aoi)
         
-        rainfall = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY").filterDate("2020-01-01", "2023-12-31").sum().divide(4).clip(aoi)
-        lst = ee.ImageCollection("MODIS/061/MOD11A1").filterDate("2020-01-01", "2020-12-31").select("LST_Day_1km").mean().multiply(0.02).subtract(273.15).clip(aoi)
+        rainfall = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY").filterDate(f"{year}-01-01", f"{year+1}-01-01").sum().clip(aoi)
+        lst_coll = ee.ImageCollection("MODIS/061/MOD11A1").filterDate(f"{year}-01-01", f"{year+1}-01-01").select("LST_Day_1km")
+        lst = lst_coll.mean().multiply(0.02).subtract(273.15).unmask(22.0).clip(aoi)
     
         raw_images = {
             "wetlands": wetlands_dist, "water": water_dist, "landcover": lc,
             "rainfall": rainfall, "buildings": buildings_dist, "irrigated": irrigated_dist,
-            "slope": slope_pct, "roads": roads_dist_km, "elevation": dem, "temperature": lst
+            "slope": slope_deg, "roads": roads_dist_km, "elevation": dem, "temperature": lst
         }
 
-
-        # Land Cover is categorical, so we classify it manually
-        landcover_score = (
-            ee.Image(1) # Urban (50), Bare (60)
-            .where(lc.eq(10).Or(lc.eq(20)).Or(lc.eq(70)), 2) # Trees/Shrubs
-            .where(lc.eq(40), 4) # Cropland
-            .where(lc.eq(30).Or(lc.eq(90)).Or(lc.eq(80)), 5) # Grassland/Wetland/Water
-            .clip(aoi)
-        )
+        # Land Cover is categorical, so we classify it dynamically based on landcover_scores
+        landcover_score = ee.Image(1).clip(aoi)
+        for lc_class, score in lc_scores.items():
+            landcover_score = landcover_score.where(lc.eq(int(lc_class)), score)
+            
         landcover_score = _apply_reverse(landcover_score, reverse_flags.get("landcover", False)).rename("landcover_score")
     
-        # Classify all continuous factors dynamically using Natural Breaks
+        # Classify all continuous factors into 5 standardized AHP suitability scores (1-5)
         continuous_keys = [k for k in FACTOR_ORDER if k != "landcover"]
         continuous_raw = {k: raw_images[k] for k in continuous_keys}
         
-        # We default to Natural Breaks for AHP scores unless the user explicitly requested something else
-        classified_continuous, _ = _classify_all_raw_images(continuous_raw, aoi, get_dynamic_scale(aoi), 5, "natural_breaks")
+        # AHP standard scale is always 5 classes (1: Very Low to 5: Very High)
+        classified_continuous, actual_breaks = _classify_all_raw_images(continuous_raw, aoi, scale, n_classes=5, method=method)
     
-        # Define polarities: True means we must invert the Natural Breaks result (6 - cls)
+        # Polarities: True means closer/lower is more suitable (invert raw break order 6 - cls)
         polarity_invert = {
-            "wetlands": True,   # near is good (low dist = high score)
-            "water": True,      # near is good
-            "rainfall": False,  # high rainfall is good (high val = high score)
-            "buildings": False, # far is good (high dist = high score)
-            "irrigated": True,  # near is good
-            "slope": True,      # low slope is good
-            "roads": False,     # far is good
-            "elevation": True,  # low elevation is good
-            "temperature": True # cooler is good (low temp = high score)
+            "wetlands": True,   # closer to wetlands = more suitable (low dist = high score)
+            "water": True,      # closer to water = more suitable
+            "rainfall": False,  # higher rainfall = more suitable (high val = high score)
+            "buildings": False, # farther from buildings = more suitable (high dist = high score)
+            "irrigated": True,  # closer to irrigated land = more suitable
+            "slope": True,      # gentler slope = more suitable (low deg = high score)
+            "roads": False,     # farther from roads = more suitable (high dist = high score)
+            "elevation": True,  # lower elevation = more suitable
+            "temperature": True # cooler/moderate temps = more suitable
         }
     
         score_images = {"landcover": landcover_score}
@@ -226,42 +276,62 @@ def _build_habitat_images(aoi_config: dict, reverse_flags: dict, custom_weights:
             # Apply user UI reverse override
             score_images[k] = _apply_reverse(cls, reverse_flags.get(k, False)).rename(f"{k}_score")
 
-        # Weighted Overlay
+        # Weighted Overlay (Sum of weights = 1.0, scores = 1 to 5 -> Suitability = 1.0 to 5.0)
         suitability = ee.Image(0).rename("suitability")
         for factor in FACTOR_ORDER:
             suitability = suitability.add(score_images[factor].multiply(weights[factor]))
     
-        result = (aoi, suitability, score_images, raw_images, weights)
+        result = (aoi, suitability, score_images, raw_images, weights, actual_breaks, scale)
         _cache_build[cache_key] = result
         return result
 
 
-_cache_unified = TTLCache(maxsize=64, ttl=3600)
-
 def compute_habitat(
-    aoi_config: dict, reverse_flags: dict, n_classes: int = 5, custom_weights: dict | None = None, method: str = "natural_breaks", custom_labels: list = None
+    aoi_config: dict,
+    reverse_flags: dict,
+    n_classes: int = 5,
+    custom_weights: dict | None = None,
+    method: str = "natural_breaks",
+    custom_labels: list = None,
+    year: int = 2021,
+    landcover_scores: dict | None = None
 ) -> dict:
     weights = _normalize_weights(custom_weights)
     weights_tuple = tuple(round(weights[k], 6) for k in FACTOR_ORDER)
     rev_tuple = tuple(reverse_flags.get(k, False) for k in FACTOR_ORDER)
-    cache_key = (json.dumps(aoi_config, sort_keys=True), rev_tuple, n_classes, weights_tuple, method, tuple(custom_labels) if custom_labels else None)
+    
+    lc_scores = landcover_scores or DEFAULT_LANDCOVER_SCORES
+    lc_scores_tuple = tuple((k, lc_scores[k]) for k in sorted(lc_scores.keys()))
+    
+    cache_key = (json.dumps(aoi_config, sort_keys=True), rev_tuple, n_classes, weights_tuple, method, tuple(custom_labels) if custom_labels else None, year, lc_scores_tuple)
     
     with _lock:
         if cache_key in _cache_unified:
             return _cache_unified[cache_key]
 
-    aoi, suitability, score_images, raw_images, _ = _build_habitat_images(aoi_config, reverse_flags, custom_weights)
-    scale = get_dynamic_scale(aoi)
+    aoi, suitability, score_images, raw_images, _, export_breaks, scale = _build_habitat_images(
+        aoi_config, reverse_flags, custom_weights, year, landcover_scores, method
+    )
 
-    # 1. Map Data
+    # 1. Map Data (Parallelized factor tile fetch)
     map_id = suitability.getMapId(_SCORE_VIS)
+    
+    def get_factor_map(k, img):
+        return k, {"tile_url": img.getMapId(_SCORE_VIS)["tile_fetcher"].url_format}
+
     factor_maps = {}
-    for key, img in score_images.items():
-        factor_maps[key] = {
-            "tile_url": img.getMapId(_SCORE_VIS)["tile_fetcher"].url_format
-        }
-    centroid = aoi.centroid(maxError=100).coordinates().getInfo()
-    bounds = aoi.bounds().getInfo()["coordinates"][0]
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        f_map_futures = [executor.submit(get_factor_map, k, img) for k, img in score_images.items()]
+        for f in concurrent.futures.as_completed(f_map_futures):
+            k, map_dict = f.result()
+            factor_maps[k] = map_dict
+        
+    geom_info = ee.Dictionary({
+        "centroid": aoi.centroid(maxError=100).coordinates(),
+        "bounds": aoi.bounds().coordinates().get(0)
+    }).getInfo()
+    centroid = geom_info.get("centroid", [30.0, -1.9])
+    bounds = geom_info.get("bounds", [])
 
     # 2. Stats Data
     classes = {
@@ -275,20 +345,13 @@ def compute_habitat(
     area_img = ee.Image.cat([classes[lbl].multiply(ee.Image.pixelArea()).rename(f"c{i}") for i, lbl in enumerate(stat_labels)])
     area_dict = area_img.reduceRegion(
         reducer=ee.Reducer.sum(), geometry=aoi, scale=scale, maxPixels=1e10
-    ).getInfo()
+    ).getInfo() or {}
     class_areas = {lbl: round((area_dict.get(f"c{i}") or 0) / 1e6, 2) for i, lbl in enumerate(stat_labels)}
 
-    # 3. Classify Data
-    classify = quantile_classify(
-        layers=[{"name": "suitability", "image": suitability, "title": "Habitat Suitability"}] + 
-               [{"name": f"{k}_score", "image": v, "title": FACTOR_META[k]["label"]} for k,v in score_images.items()],
-        aoi=aoi, scale=scale, n_classes=n_classes, method=method, custom_labels=custom_labels
-    )
-
-    # 4. Export Data
+    # 3 & 4. Classify and Export Data (Parallelized with ThreadPoolExecutor for rapid response)
     def safe_url(img, name):
         try:
-            return img.getDownloadURL({"scale": 100, "region": aoi.bounds(), "format": "GEO_TIFF"})
+            return img.getDownloadURL({"scale": max(scale, 100), "region": aoi.bounds(), "format": "GEO_TIFF", "name": name})
         except Exception:
             return None
 
@@ -300,14 +363,14 @@ def compute_habitat(
         except Exception:
             return None
 
-    final_thumb_url = safe_thumb(suitability, _SCORE_VIS["palette"], n_classes)
-    download_url = safe_url(suitability, "Habitat_Suitability")
-
-    from gee.classify_utils import class_palette
-    
-    continuous_keys = [k for k in FACTOR_ORDER if k != "landcover"]
-    continuous_raw = {k: raw_images[k] for k in continuous_keys}
-    classified_continuous_export, export_breaks = _classify_all_raw_images(continuous_raw, aoi, scale, n_classes, method)
+    def run_classify():
+        try:
+            return quantile_classify(
+                layers=[{"name": "suitability", "image": suitability, "title": "Habitat Suitability"}],
+                aoi=aoi, scale=max(scale, 100), n_classes=n_classes, method=method, custom_labels=custom_labels
+            )
+        except Exception:
+            return None
 
     polarity_invert = {
         "wetlands": True, "water": True, "rainfall": False, "buildings": False,
@@ -315,56 +378,65 @@ def compute_habitat(
     }
 
     factors = {}
-    for k in FACTOR_ORDER:
-        is_reversed = bool(reverse_flags.get(k, False))
-        if k == "landcover":
+    with concurrent.futures.ThreadPoolExecutor(max_workers=14) as executor:
+        f_classify = executor.submit(run_classify)
+        f_main_thumb = executor.submit(safe_thumb, suitability, _SCORE_VIS["palette"], 5)
+        f_main_download = executor.submit(safe_url, suitability, "Habitat_Suitability")
+        
+        factor_futures = {}
+        for k in FACTOR_ORDER:
+            is_reversed = bool(reverse_flags.get(k, False))
             img_to_export = score_images[k]
-            k_n_classes = 5
-            lbls = ["Built-up/Bare", "Trees/Shrubs", "Mixed/Other", "Cropland", "Water/Wetlands"]
-            if is_reversed:
-                lbls.reverse()
-        else:
-            cls = classified_continuous_export[k]
-            bps = export_breaks[k]
-            should_invert = polarity_invert[k]
-            if is_reversed:
-                should_invert = not should_invert
-                
-            if should_invert:
-                img_to_export = ee.Image(n_classes + 1).subtract(cls)
+            
+            if k == "landcover":
+                lbls = ["Built-up/Bare", "Trees/Shrubs", "Mixed/Other", "Cropland", "Water/Wetlands"]
+                if is_reversed:
+                    lbls.reverse()
             else:
-                img_to_export = cls
-                
-            k_n_classes = n_classes
-            
-            unit = ""
-            if k in ["wetlands", "water", "buildings", "irrigated", "roads"]: unit = " km"
-            elif k == "rainfall": unit = " mm"
-            elif k == "temperature": unit = " °C"
-            elif k == "elevation": unit = " m"
-            elif k == "slope": unit = "°"
-            
-            lbls = []
-            for i in range(n_classes):
-                if i == 0:
-                    lbls.append(f"< {bps[0]:.1f}{unit}")
-                elif i == n_classes - 1:
-                    lbls.append(f"> {bps[-1]:.1f}{unit}")
-                else:
-                    lbls.append(f"{bps[i-1]:.1f} - {bps[i]:.1f}{unit}")
+                bps = export_breaks.get(k, [])
+                should_invert = polarity_invert[k]
+                if is_reversed:
+                    should_invert = not should_invert
                     
-            if should_invert:
-                lbls.reverse()
+                unit = ""
+                if k in ["wetlands", "water", "buildings", "irrigated", "roads"]: unit = " km"
+                elif k == "rainfall": unit = " mm"
+                elif k == "temperature": unit = " °C"
+                elif k == "elevation": unit = " m"
+                elif k == "slope": unit = "°"
                 
-        factors[k] = {
-            "label": FACTOR_META[k]["label"],
-            "weight_pct": weights[k] * 100,
-            "reversed": is_reversed,
-            "description": FACTOR_META[k]["reversed_desc"] if is_reversed else FACTOR_META[k]["normal_desc"],
-            "thumb_url": safe_thumb(img_to_export, class_palette(k_n_classes), k_n_classes),
-            "download_url": safe_url(raw_images[k], f"Habitat_{k}_Raw"),
-            "labels": lbls
-        }
+                if bps and len(bps) == 4:
+                    lbls = [
+                        f"< {bps[0]:.1f}{unit}",
+                        f"{bps[0]:.1f} - {bps[1]:.1f}{unit}",
+                        f"{bps[1]:.1f} - {bps[2]:.1f}{unit}",
+                        f"{bps[2]:.1f} - {bps[3]:.1f}{unit}",
+                        f"> {bps[3]:.1f}{unit}"
+                    ]
+                else:
+                    lbls = [f"Class {i+1}" for i in range(5)]
+                    
+                if should_invert:
+                    lbls.reverse()
+                    
+            f_thumb = executor.submit(safe_thumb, img_to_export, _SCORE_VIS["palette"], 5)
+            f_dl = executor.submit(safe_url, raw_images[k], f"Habitat_{k}_Raw")
+            factor_futures[k] = (is_reversed, lbls, f_thumb, f_dl)
+            
+        final_thumb_url = f_main_thumb.result()
+        download_url = f_main_download.result()
+        classify_res = f_classify.result()
+        
+        for k, (is_reversed, lbls, f_thumb, f_dl) in factor_futures.items():
+            factors[k] = {
+                "label": FACTOR_META[k]["label"],
+                "weight_pct": round(weights[k] * 100, 2),
+                "reversed": is_reversed,
+                "description": FACTOR_META[k]["reversed_desc"] if is_reversed else FACTOR_META[k]["normal_desc"],
+                "thumb_url": f_thumb.result(),
+                "download_url": f_dl.result(),
+                "labels": lbls
+            }
 
     result = {
         "tile_url": map_id["tile_fetcher"].url_format,
@@ -372,7 +444,7 @@ def compute_habitat(
         "center": [centroid[1], centroid[0]],
         "bbox": bounds,
         "class_areas_km2": class_areas,
-        "classify": classify,
+        "classify": classify_res,
         "thumb_url": final_thumb_url,
         "download_url": download_url,
         "factors": factors,

@@ -33,6 +33,7 @@ export function ClassificationControls({
             <SelectItem value="natural_breaks" className="text-xs">Natural Breaks (Jenks)</SelectItem>
             <SelectItem value="equal_interval" className="text-xs">Equal Interval</SelectItem>
             <SelectItem value="quantiles" className="text-xs">Quantiles</SelectItem>
+            <SelectItem value="custom_breaks" className="text-xs">Custom Breaks</SelectItem>
           </SelectContent>
         </Select>
       </div>

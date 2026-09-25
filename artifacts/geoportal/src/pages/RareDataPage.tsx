@@ -6,7 +6,8 @@ import { Loader2, Trash2, Download, Upload, Link as LinkIcon, Database, Lock, Co
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { api, DatasetRecord } from "@/lib/api";
+import { api } from "@/lib/api";
+import type { DatasetRecord } from "@/lib/api";
 import { BASE } from "@/lib/api";
 import { DatasetColabDialog } from "@/components/DatasetColabDialog";
 
@@ -111,7 +112,7 @@ function DatasetList({
                   target="_blank"
                   rel="noopener noreferrer"
                 >
-                  <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" title="Download dataset">
+                  <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" title="Download dataset" aria-label="Download dataset">
                     <Download className="w-3.5 h-3.5" />
                   </Button>
                 </a>
@@ -124,6 +125,7 @@ function DatasetList({
                     className="h-7 w-7 text-destructive hover:text-destructive"
                     onClick={() => onDelete(r.id, r.source ?? source)}
                     title="Delete dataset"
+                    aria-label="Delete dataset"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </Button>
@@ -543,3 +545,4 @@ export function RareDataPage() {
     </div>
   );
 }
+

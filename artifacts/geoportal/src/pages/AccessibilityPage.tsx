@@ -22,7 +22,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { api, AccessibilityMapResult, AccessibilityStatsResult, AccessibilityClassifyResult, AccessibilityExportResult, AOIConfig } from "@/lib/api";
+import { api } from "@/lib/api";
+import type { AccessibilityMapResult, AccessibilityStatsResult, AccessibilityClassifyResult, AccessibilityExportResult, AOIConfig } from "@/lib/api";
 import { DistrictMap } from "@/components/DistrictMap";
 import { ReportDownloadButton } from "@/components/ReportDownloadButton";
 import { MapExportControls } from "@/components/MapExportControls";
@@ -66,8 +67,12 @@ function getDefaultLabels(n: number): string[] {
 export function AccessibilityPage() {
   const [aoi, setAoi] = useState<AOIConfig>({ type: "rwanda", country: "Rwanda", name: "Rwanda" });
   const [selectedAmenities, setSelectedAmenities] = useState<string[]>(["primary_school"]);
+  const [selectedDestAmenities, setSelectedDestAmenities] = useState<string[]>([]);
+  const [proposedFacilities, setProposedFacilities] = useState<[number, number][]>([]);
+  const [drawMode, setDrawMode] = useState(false);
   const [nClasses, setNClasses] = useState(4);
   const [method, setMethod] = useState("natural_breaks");
+  const [transportMode, setTransportMode] = useState("walking");
   const [customClassNames, setCustomClassNames] = useState<string[]>(() => getDefaultLabels(5));
 
   useEffect(() => {
@@ -93,11 +98,30 @@ export function AccessibilityPage() {
     }
   };
 
+  const handleDestAmenityChange = (id: string, checked: boolean) => {
+    if (checked) {
+      setSelectedDestAmenities((prev) => [...prev, id]);
+    } else {
+      setSelectedDestAmenities((prev) => prev.filter((a) => a !== id));
+    }
+  };
+
+  const handleMapClick = (lat: number, lon: number) => {
+    if (drawMode) {
+      setProposedFacilities(prev => [...prev, [lon, lat]]);
+    }
+  };
+
   const getReq = () => {
     return {
       aoi,
       amenities: selectedAmenities,
-      n_classes: nClasses
+      dest_amenities: selectedDestAmenities,
+      n_classes: nClasses,
+      method: method,
+      custom_labels: customClassNames,
+      proposed_facilities: proposedFacilities.length > 0 ? proposedFacilities : undefined,
+      transport_mode: transportMode,
     };
   };
 
@@ -176,28 +200,80 @@ export function AccessibilityPage() {
 
         <StudyAreaSelector value={aoi} onChange={setAoi} />
 
-        <div className="space-y-2">
-          <Label>Amenities to Include</Label>
-          <div className="space-y-2 text-sm border rounded-md p-3 max-h-48 overflow-y-auto">
-            {AMENITY_OPTIONS.map((opt) => (
-              <div key={opt.id} className="flex items-center space-x-2">
-                <Checkbox
-                  id={opt.id}
-                  checked={selectedAmenities.includes(opt.id)}
-                  onCheckedChange={(checked) => handleAmenityChange(opt.id, checked as boolean)}
-                />
-                <label
-                  htmlFor={opt.id}
-                  className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
-                >
-                  {opt.label}
-                </label>
-              </div>
-            ))}
+        <div className="space-y-4">
+          <div className="space-y-1.5 border-b pb-4">
+            <Label className="text-xs text-muted-foreground">Transport Mode</Label>
+            <Select value={transportMode} onValueChange={setTransportMode}>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Select Transport Mode" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="walking">Walking (Tobler's Hiking)</SelectItem>
+                <SelectItem value="bicycle">Bicycle</SelectItem>
+                <SelectItem value="driving">Motorized (Driving)</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
-          {selectedAmenities.length === 0 && (
-            <p className="text-xs text-destructive">Select at least one amenity.</p>
-          )}
+
+          <div className="space-y-2">
+            <Label>Starting Origins (Tier 1)</Label>
+            <div className="space-y-2 text-sm border rounded-md p-3 max-h-48 overflow-y-auto bg-muted/50">
+              {AMENITY_OPTIONS.map((opt) => (
+                <div key={opt.id} className="flex items-center space-x-2">
+                  <Checkbox
+                    id={`orig-${opt.id}`}
+                    checked={selectedAmenities.includes(opt.id)}
+                    onCheckedChange={(checked) => handleAmenityChange(opt.id, checked as boolean)}
+                  />
+                  <label htmlFor={`orig-${opt.id}`} className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                    {opt.label}
+                  </label>
+                </div>
+              ))}
+            </div>
+            <p className="text-[10px] text-muted-foreground">If empty, pop. density is used as origin.</p>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Target Destinations (Tier 2)</Label>
+            <div className="space-y-2 text-sm border rounded-md p-3 max-h-48 overflow-y-auto bg-muted/50">
+              {AMENITY_OPTIONS.map((opt) => (
+                <div key={opt.id} className="flex items-center space-x-2">
+                  <Checkbox
+                    id={`dest-${opt.id}`}
+                    checked={selectedDestAmenities.includes(opt.id)}
+                    onCheckedChange={(checked) => handleDestAmenityChange(opt.id, checked as boolean)}
+                  />
+                  <label htmlFor={`dest-${opt.id}`} className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                    {opt.label}
+                  </label>
+                </div>
+              ))}
+            </div>
+            <p className="text-[10px] text-muted-foreground">If empty, routes to Origins.</p>
+          </div>
+          
+          <div className="space-y-2">
+            <Label>Proposed Facilities (What-If)</Label>
+            <div className="flex items-center gap-2">
+              <Button 
+                variant={drawMode ? "default" : "outline"}
+                size="sm"
+                onClick={() => setDrawMode(!drawMode)}
+                className="flex-1"
+              >
+                {drawMode ? "Draw Mode Active" : "Click to Propose"}
+              </Button>
+              <Button 
+                variant="destructive"
+                size="sm"
+                onClick={() => setProposedFacilities([])}
+                disabled={proposedFacilities.length === 0}
+              >
+                Clear ({proposedFacilities.length})
+              </Button>
+            </div>
+          </div>
         </div>
 
         <div className="space-y-1.5 pt-4 border-t">
@@ -377,6 +453,8 @@ export function AccessibilityPage() {
                       farthestRoadGeojson={mapData.farthest_road_geojson}
                       incidents={mapData.incidents}
                       routes={mapData.routes}
+                      onMapClick={handleMapClick}
+                      proposedFacilities={proposedFacilities}
                     />
                   </div>
                   <div className="mt-3 flex flex-wrap gap-3 text-xs">
@@ -410,12 +488,53 @@ export function AccessibilityPage() {
                   </div>
 
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-                    {Object.entries(statsData.stats).map(([label, val]) => (
-                      <div key={label} className="bg-card border rounded-lg p-4">
-                        <p className="text-xs text-muted-foreground mb-1">{label}</p>
-                        <p className="text-2xl font-bold text-primary">{val}</p>
+                    {/* Population Served */}
+                    <div className="bg-card border rounded-lg p-4">
+                      <p className="text-xs text-muted-foreground mb-1">Pop Served (&lt;{statsData.served?.threshold_mins}m)</p>
+                      <div className="flex items-end gap-2">
+                        <p className="text-2xl font-bold text-primary">{statsData.served?.population.toLocaleString()}</p>
+                        {statsData.delta_stats && (
+                          <span className={`text-sm font-medium mb-1 ${statsData.delta_stats.population_served > 0 ? 'text-emerald-500' : 'text-muted-foreground'}`}>
+                            {statsData.delta_stats.population_served > 0 ? '↑' : ''}
+                            {statsData.delta_stats.population_served > 0 ? '+' : ''}{statsData.delta_stats.population_served.toLocaleString()}
+                          </span>
+                        )}
                       </div>
-                    ))}
+                    </div>
+                    
+                    {/* Area Served */}
+                    <div className="bg-card border rounded-lg p-4">
+                      <p className="text-xs text-muted-foreground mb-1">Area Served (km²)</p>
+                      <div className="flex items-end gap-2">
+                        <p className="text-2xl font-bold text-primary">{statsData.served?.area_km2}</p>
+                        {statsData.delta_stats && (
+                          <span className={`text-sm font-medium mb-1 ${statsData.delta_stats.area_km2_served > 0 ? 'text-emerald-500' : 'text-muted-foreground'}`}>
+                            {statsData.delta_stats.area_km2_served > 0 ? '↑' : ''}
+                            {statsData.delta_stats.area_km2_served > 0 ? '+' : ''}{statsData.delta_stats.area_km2_served}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Mean Time */}
+                    <div className="bg-card border rounded-lg p-4">
+                      <p className="text-xs text-muted-foreground mb-1">Mean Time (min)</p>
+                      <div className="flex items-end gap-2">
+                        <p className="text-2xl font-bold text-primary">{statsData.stats['Mean Time (min)']}</p>
+                        {statsData.delta_stats && (
+                          <span className={`text-sm font-medium mb-1 ${statsData.delta_stats.mean_time_min < 0 ? 'text-emerald-500' : 'text-destructive'}`}>
+                            {statsData.delta_stats.mean_time_min < 0 ? '↓' : '↑'}
+                            {statsData.delta_stats.mean_time_min > 0 ? '+' : ''}{statsData.delta_stats.mean_time_min}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {/* Max Time */}
+                    <div className="bg-card border rounded-lg p-4">
+                      <p className="text-xs text-muted-foreground mb-1">Max Time (min)</p>
+                      <p className="text-2xl font-bold text-primary">{statsData.stats['Max Time (min)']}</p>
+                    </div>
                   </div>
 
                   {(statsData.nearest_facility || statsData.farthest_facility) && (
@@ -527,7 +646,8 @@ export function AccessibilityPage() {
                     district={mapData.district || aoi.name || "Custom"}
                     title={activeLayer === "continuous" ? "Travel Time Continuous Map" : "Accessibility Classes Map"}
                     classAreas={activeLayer === "classified" ? statsData?.class_areas_km2 : undefined}
-
+                    bbox={mapData?.bbox || undefined}
+                    proposedFacilities={proposedFacilities.length > 0 ? proposedFacilities : undefined}
                   />
                 </div>
               ) : (
@@ -553,8 +673,13 @@ export function AccessibilityPage() {
                     stats={statsData.stats as Record<string, number>}
                     classAreas={statsData.class_areas_km2}
                     extraNotes={`Accessibility mapped for ${selectedAmenities.join(", ")}.`}
-                    maps={[]}
+                    maps={[
+                      exportData.travel_time_thumb_url ? ["Travel Time Continuous Map", exportData.travel_time_thumb_url] : undefined,
+                      exportData.acc_class_thumb_url ? ["Accessibility Classes Map", exportData.acc_class_thumb_url] : undefined
+                    ].filter(Boolean) as Array<[string, string]>}
                     filename={`Accessibility_${mapData.district}.pdf`}
+                    proposedFacilities={proposedFacilities.length > 0 ? proposedFacilities : undefined}
+                    deltaStats={statsData?.delta_stats || undefined}
                   />
                 ) : (
                   <div className="text-sm text-muted-foreground">Report data is unavailable. Please try analyzing again.</div>
@@ -568,3 +693,4 @@ export function AccessibilityPage() {
     </ResizablePanelGroup>
   );
 }
+

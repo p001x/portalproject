@@ -23,7 +23,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { api, AOIConfig, AirPollutionMapResult, AirPollutionStatsResult, AirPollutionClassifyResult, AirPollutionTimeseriesResult, AirPollutionExportResult } from "@/lib/api";
+import { api } from "@/lib/api";
+import type { AOIConfig, AirPollutionMapResult, AirPollutionStatsResult, AirPollutionClassifyResult, AirPollutionTimeseriesResult, AirPollutionExportResult } from "@/lib/api";
 import { DistrictMap } from "@/components/DistrictMap";
 import { ReportDownloadButton } from "@/components/ReportDownloadButton";
 import { MapExportControls } from "@/components/MapExportControls";
@@ -454,3 +455,4 @@ export function AirPollutionPage() {
     </ResizablePanelGroup>
   );
 }
+

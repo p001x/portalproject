@@ -30,7 +30,7 @@ def ndbi_image_and_aoi(aoi_config: dict, start_date: str, end_date: str):
         ndbi = image.normalizedDifference(["SR_B6", "SR_B5"]).rename("NDBI")
         return ndbi.copyProperties(image, ["system:time_start"])
 
-    collection = get_harmonized_landsat_collection(start_date, end_date, aoi, max_cloud_cover=20) \
+    collection = get_harmonized_landsat_collection(start_date, end_date, aoi, max_cloud_cover=80) \
         .map(apply_scale_factors) \
         .map(compute_ndbi)
     

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { MapContainer, TileLayer, useMap, CircleMarker, Popup, GeoJSON } from "react-leaflet";
+import { MapContainer, TileLayer, useMap, CircleMarker, Popup, GeoJSON, useMapEvents, Polygon } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 
@@ -41,6 +41,21 @@ interface Props {
   routes?: { geometry: any; incident_name: string; facility_name: string; distance_km: number }[];
   aoi?: any;
   basemap?: string;
+  onMapClick?: (lat: number, lon: number) => void;
+  proposedFacilities?: [number, number][];
+  customGeojson?: any;
+  customGeojsonStyle?: any;
+  riverGeojson?: any;
+  earthworkPolygon?: [number, number][];
+}
+
+function MapEvents({ onClick }: { onClick?: (lat: number, lon: number) => void }) {
+  useMapEvents({
+    click(e) {
+      if (onClick) onClick(e.latlng.lat, e.latlng.lng);
+    }
+  });
+  return null;
 }
 
 /** Updates the GEE tile layer when tileUrl changes. */
@@ -140,6 +155,12 @@ export function DistrictMap({
   incidents,
   routes,
   basemap: initialBasemap = "dark",
+  onMapClick,
+  proposedFacilities,
+  customGeojson,
+  customGeojsonStyle,
+  riverGeojson,
+  earthworkPolygon,
 }: Props) {
   const [activeBasemap, setActiveBasemap] = useState(initialBasemap);
 
@@ -151,6 +172,7 @@ export function DistrictMap({
         style={{ height: "100%", width: "100%", borderRadius: "0.5rem" }}
         scrollWheelZoom
       >
+        <MapEvents onClick={onMapClick} />
         {activeBasemap === "light" && (
           <TileLayer
             url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
@@ -209,6 +231,30 @@ export function DistrictMap({
             </CircleMarker>
           );
         })}
+        {proposedFacilities && proposedFacilities.map((pf, i) => (
+          <CircleMarker
+            key={`pf-${i}`}
+            center={[pf[1], pf[0]]}
+            radius={6}
+            color="#0ea5e9"
+            weight={2}
+            fillColor="#38bdf8"
+            fillOpacity={1}
+          >
+            <Popup>
+              <div className="text-sm font-semibold text-sky-600">Proposed Facility</div>
+            </Popup>
+          </CircleMarker>
+        ))}
+        {earthworkPolygon && earthworkPolygon.length > 2 && (
+          <Polygon 
+            positions={earthworkPolygon} 
+            color="#ef4444" 
+            weight={3} 
+            fillColor="#f87171" 
+            fillOpacity={0.4} 
+          />
+        )}
         {nearestRoadGeojson && (
           <GeoJSON 
             data={nearestRoadGeojson} 
@@ -255,6 +301,20 @@ export function DistrictMap({
             </Popup>
           </CircleMarker>
         ))}
+        {customGeojson && (
+          <GeoJSON 
+            key={JSON.stringify(customGeojson).length}
+            data={customGeojson} 
+            style={customGeojsonStyle || { color: "#3b82f6", weight: 2, fillOpacity: 0.2 }}
+          />
+        )}
+        {riverGeojson && (
+          <GeoJSON 
+            key={`river-${JSON.stringify(riverGeojson).length}`}
+            data={riverGeojson} 
+            style={{ color: "#38bdf8", weight: 2, opacity: 0.9 }}
+          />
+        )}
         <FlyTo center={center} zoom={zoom} bbox={bbox} />
         <ScaleBar />
       </MapContainer>

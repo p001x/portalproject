@@ -6,6 +6,11 @@ import ee
 
 # --- Workaround for Google API ConnectionResetError on Windows (IPv6 / Proxies) ---
 os.environ["NO_PROXY"] = "*"
+if os.name == 'nt' and os.path.exists(r"C:\Program Files\QGIS 3.40.11\bin"):
+    try:
+        os.add_dll_directory(r"C:\Program Files\QGIS 3.40.11\bin")
+    except Exception:
+        pass
 try:
     import socket
     import urllib3.util.connection as urllib3_cn

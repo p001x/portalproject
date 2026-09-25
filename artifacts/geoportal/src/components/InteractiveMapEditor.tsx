@@ -974,8 +974,8 @@ export function InteractiveMapEditor({
 
         {/* Group Tools */}
         <div className="flex items-center gap-1 border-r pr-2 mr-2">
-          <Button variant="ghost" size="icon" className="h-8 w-8" disabled={selectedIds.length < 2} onClick={handleGroup} title="Group (Ctrl+G)"><Group className="w-4 h-4" /></Button>
-          <Button variant="ghost" size="icon" className="h-8 w-8" disabled={selectedIds.length === 0} onClick={handleUngroup} title="Ungroup (Ctrl+Shift+G)"><Ungroup className="w-4 h-4" /></Button>
+          <Button variant="ghost" size="icon" className="h-8 w-8" disabled={selectedIds.length < 2} onClick={handleGroup} title="Group (Ctrl+G)" aria-label="Group selected elements"><Group className="w-4 h-4" /></Button>
+          <Button variant="ghost" size="icon" className="h-8 w-8" disabled={selectedIds.length === 0} onClick={handleUngroup} title="Ungroup (Ctrl+Shift+G)" aria-label="Ungroup selected elements"><Ungroup className="w-4 h-4" /></Button>
         </div>
 
         <Button variant="ghost" size="sm" onClick={deleteSelected} disabled={selectedIds.length === 0} className="text-red-600 hover:text-red-700 hover:bg-red-50">

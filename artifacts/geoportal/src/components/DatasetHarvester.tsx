@@ -37,7 +37,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { MapContainer, TileLayer, ImageOverlay, GeoJSON, Rectangle as LeafletRectangle, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import * as turf from "@turf/turf";
-import { api, BASE } from "@/lib/api";
+import { api } from "@/lib/api";
+import { BASE } from "@/lib/api";
 import { useHarvesterStore, HarvesterItem } from "@/lib/harvesterStore";
 import { DatasetColabDialog } from "@/components/DatasetColabDialog";
 
@@ -943,3 +944,5 @@ export function DatasetHarvester({
     </div>
   );
 }
+
+

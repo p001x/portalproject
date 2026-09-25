@@ -213,6 +213,12 @@ def _build_action_matrix(module_name: str, stats: dict, class_areas: dict, agenc
         actions.append(["Preserve urban wetland reserves to act as natural evaporative cooling sinks.", "High"])
         actions.append(["Mandate cool roof / reflective materials on commercial and public buildings.", "Medium"])
         
+    elif "habitat" in module_lower or "crane" in module_lower:
+        actions.append(["Establish protected buffer zones around identified high-suitability wetlands.", "Immediate"])
+        actions.append(["Restrict agricultural expansion and pesticide use in 'Very High' suitability areas.", "High"])
+        actions.append(["Implement community-led monitoring programs for Grey Crowned Crane nesting sites.", "High"])
+        actions.append(["Restore degraded moderate-suitability wetlands to expand potential habitat.", "Medium"])
+        
     else:
         actions.append(["Conduct ground-truth verification on high-risk sectors identified by satellite.", "High"])
         actions.append(["Integrate findings into District Development Plan (DDP) environmental annex.", "Medium"])
@@ -249,6 +255,8 @@ def build_report(
     maps: list[tuple[str, str]] = None,
     agency_template: str = "STANDARD",
     include_action_matrix: bool = True,
+    proposed_facilities: list = None,
+    delta_stats: dict = None,
 ) -> bytes:
     """Generic PDF report for any analysis module (no embedded maps)."""
     buffer = io.BytesIO()
@@ -276,6 +284,25 @@ def build_report(
         story.append(Paragraph("Notes & Interpretation", st_styles["section"]))
         story.append(Paragraph(extra_notes, st_styles["body"]))
         story.append(Spacer(1, 0.3 * cm))
+    
+    if proposed_facilities and delta_stats:
+        story.append(Paragraph("Scenario Planning (Proposed Facilities)", st_styles["section"]))
+        scenario_text = (
+            f"This analysis includes {len(proposed_facilities)} proposed facility/facilities. "
+            f"Compared to the baseline, the proposed facilities resulted in the following impacts: "
+        )
+        impacts = []
+        for k, v in delta_stats.items():
+            if v > 0:
+                impacts.append(f"{k} increased by {v:,.2f}")
+            elif v < 0:
+                impacts.append(f"{k} decreased by {abs(v):,.2f}")
+            else:
+                impacts.append(f"{k} remained unchanged")
+                
+        scenario_text += ", ".join(impacts) + "."
+        story.append(Paragraph(scenario_text, st_styles["body"]))
+        story.append(Spacer(1, 0.3 * cm))
     if include_action_matrix:
         story.extend(_build_action_matrix(module_name, stats, class_areas, agency_key, st_styles))
     if maps:
@@ -291,7 +318,13 @@ def build_report(
             if buf:
                 # Enhance the raw thumbnail with cartographic elements
                 try:
-                    carto_buf = enhance_map_cartography(buf.read(), district, title, map_class_areas)
+                    carto_buf = enhance_map_cartography(
+                        buf.read(), 
+                        district, 
+                        title, 
+                        class_areas=map_class_areas, 
+                        proposed_facilities=proposed_facilities
+                    )
                     story.extend(_rl_image(carto_buf, PAGE_W, title, st_styles))
                 except Exception as e:
                     # Fallback to raw image if cartography fails

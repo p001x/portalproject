@@ -21,7 +21,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { api, NDVIResult, AOIConfig } from "@/lib/api";
+import { api } from "@/lib/api";
+import type { NDVIResult, AOIConfig } from "@/lib/api";
 import { DistrictMap } from "@/components/DistrictMap";
 import { ReportDownloadButton } from "@/components/ReportDownloadButton";
 import { MapExportControls } from "@/components/MapExportControls";
@@ -375,7 +376,7 @@ export function NDVIPage() {
         <main id="report-container" className="h-full flex flex-col flex-1 md:overflow-y-auto p-4 md:p-6 bg-background">
         {!data && !isPending && (
           <div className="h-full relative bg-muted/20 rounded-lg overflow-hidden border">
-            <DistrictMap aoi={aoi} basemap="satellite" />
+            <DistrictMap aoi={aoi} customGeojson={aoi.type === "custom" && aoi.geojson ? JSON.parse(aoi.geojson) : undefined} basemap="satellite" />
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-4 z-[1000]">
               <div className="bg-background/80 backdrop-blur-md p-6 rounded-2xl shadow-xl border border-primary/20 text-center max-w-sm pointer-events-none transition-all hover:scale-105 duration-300">
                 <h3 className="text-xl font-bold mb-2 text-foreground">Analysis Configuration</h3>
@@ -677,3 +678,4 @@ export function NDVIPage() {
     </ResizablePanelGroup>
   );
 }
+

@@ -1,0 +1,3 @@
+[MISSING ALT] c:/Users/user/Documents/blacportal/artifacts/geoportal/src\pages\RUSLEPage.tsx:
+<img
+                        src={classifyData.panels.find((p:any) =>

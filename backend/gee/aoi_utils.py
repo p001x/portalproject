@@ -50,13 +50,27 @@ def get_district_geometry(district_name: str) -> ee.Geometry:
         else:
             raise ValueError("Custom Study Area boundary file not found.")
 
-    rwanda = ee.FeatureCollection("FAO/GAUL/2015/level2").filter(
-        ee.Filter.And(
-            ee.Filter.eq("ADM0_NAME", "Rwanda"),
-            ee.Filter.eq("ADM2_NAME", district_name),
-        )
-    )
-    return rwanda.geometry()
+    # Backward compatibility: query the shapefile for the given district name
+    import geopandas as gpd
+    from shapely.geometry import mapping
+    
+    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    shp_path = os.path.join(base_dir, "sectrstu", "villages.shp")
+    gdf = gpd.read_file(shp_path)
+    if gdf.crs != "EPSG:4326": gdf = gdf.to_crs("EPSG:4326")
+    
+    filtered = gdf[gdf["NAME_2"] == district_name]
+    if len(filtered) == 0:
+        raise ValueError(f"District {district_name} not found in local shapefile.")
+        
+    if hasattr(filtered.geometry, "union_all"):
+        boundary = filtered.geometry.union_all()
+    else:
+        boundary = filtered.geometry.unary_union
+        
+    boundary_simplified = boundary.simplify(0.001, preserve_topology=True)
+    geojson = mapping(boundary_simplified)
+    return parse_geojson_to_ee_geometry(geojson)
 
 def get_aoi_geometry(aoi_config: dict) -> ee.Geometry:
     aoi_type = aoi_config.get("type")
@@ -78,23 +92,24 @@ def get_aoi_geometry(aoi_config: dict) -> ee.Geometry:
         cell = aoi_config.get("cell")
         village = aoi_config.get("village")
 
-        # Use fast GAUL collections if we don't need micro-level geometry
-        has_micro = any(val and val != "none" for val in [sector, cell, village])
+        # Use fast GAUL collections only for Country and Province level.
+        # Districts, Sectors, Cells, and Villages use the local shapefile
+        has_micro = any(val and val != "none" for val in [district, sector, cell, village])
         
         if not has_micro:
             # Country level
             if not province or province == "none":
                 return ee.FeatureCollection("FAO/GAUL/2015/level0").filter(ee.Filter.eq("ADM0_NAME", "Rwanda")).geometry()
             
-            # Province Mapping from Kinyarwanda to GAUL English
-            PROVINCE_MAPPING = {
-                "Amajyaruguru": "Northern",
-                "Amajyepfo": "Southern",
-                "Iburasirazuba": "Eastern",
-                "Iburengerazuba": "Western",
-                "Umujyi wa Kigali": "Kigali City"
+            # Province Mapping from frontend (English) or Kinyarwanda to exact GAUL ADM1_NAME
+            GAUL_PROVINCE_MAPPING = {
+                "Northern": "North/Amajyaruguru", "Amajyaruguru": "North/Amajyaruguru",
+                "Southern": "South/Amajyepfo", "Amajyepfo": "South/Amajyepfo",
+                "Eastern": "East/Iburasirazuba", "Iburasirazuba": "East/Iburasirazuba",
+                "Western": "West/Iburengerazuba", "Iburengerazuba": "West/Iburengerazuba",
+                "Kigali City": "Kigali City/Umujyi wa Kigali", "Umujyi wa Kigali": "Kigali City/Umujyi wa Kigali"
             }
-            gaul_province = PROVINCE_MAPPING.get(province, province)
+            gaul_province = GAUL_PROVINCE_MAPPING.get(province, province)
 
             # Province level
             if not district or district == "none":
@@ -124,8 +139,19 @@ def get_aoi_geometry(aoi_config: dict) -> ee.Geometry:
         if gdf.crs != "EPSG:4326": gdf = gdf.to_crs("EPSG:4326")
         
         filtered = gdf
+        
+        # Local shapefile uses Kinyarwanda names
+        LOCAL_PROVINCE_MAPPING = {
+            "Northern": "Amajyaruguru", "North/Amajyaruguru": "Amajyaruguru",
+            "Southern": "Amajyepfo", "South/Amajyepfo": "Amajyepfo",
+            "Eastern": "Iburasirazuba", "East/Iburasirazuba": "Iburasirazuba",
+            "Western": "Iburengerazuba", "West/Iburengerazuba": "Iburengerazuba",
+            "Kigali City": "Umujyi wa Kigali", "Kigali City/Umujyi wa Kigali": "Umujyi wa Kigali"
+        }
+        
         if province and province != "none":
-            filtered = filtered[filtered["NAME_1"] == province]
+            local_province = LOCAL_PROVINCE_MAPPING.get(province, province)
+            filtered = filtered[filtered["NAME_1"] == local_province]
         if district and district != "none":
             filtered = filtered[filtered["NAME_2"] == district]
         if sector and sector != "none":

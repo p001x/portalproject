@@ -67,6 +67,7 @@ from gee.biomass import (
 )
 from gee.aoi_utils import RWANDA_DISTRICTS
 from gee.ndvi import compute_ndvi
+# Trigger hot reload for Option A+C LST Mono-Window engine
 from gee.lst import compute_lst
 from gee.rusle import compute_rusle_map, compute_rusle_stats, compute_rusle_classify, compute_rusle_export
 from gee.slope import (
@@ -117,8 +118,9 @@ from gee.flood import (
     compute_flood_classify,
     compute_flood_export,
 )
-from gee.change_detection import compute_change_detection
+from gee.change_detection import compute_change_detection, inspect_change_point
 from reports.cartography import enhance_map_cartography
+
 
 from storage.dataset_storage import (
     load_metadata, delete_record, download_dataset_bytes,
@@ -810,6 +812,22 @@ class ChangeDetectionRequest(BaseModel):
     before_end: str = Field(..., examples=["2023-06-30"])
     after_start: str = Field(..., examples=["2024-01-01"])
     after_end: str = Field(..., examples=["2024-06-30"])
+    index_type: Optional[str] = Field("NDVI", description="Index: NDVI, NDBI, NDWI, BSI")
+    mask_water: Optional[bool] = Field(True, description="Mask permanent water bodies")
+    threshold: Optional[float] = Field(None, description="Custom sensitivity threshold")
+
+
+class ChangeDetectionPointRequest(BaseModel):
+    aoi: dict = Field(default_factory=dict, description="AOI Configuration object")
+    district: Optional[str] = Field(None, examples=["Gasabo"])
+    before_start: str = Field(..., examples=["2023-01-01"])
+    before_end: str = Field(..., examples=["2023-06-30"])
+    after_start: str = Field(..., examples=["2024-01-01"])
+    after_end: str = Field(..., examples=["2024-06-30"])
+    lat: float
+    lng: float
+    index_type: Optional[str] = Field("NDVI", description="Index: NDVI, NDBI, NDWI, BSI")
+
 
 
 class LSTRequest(BaseModel):
@@ -820,6 +838,13 @@ class LSTRequest(BaseModel):
     n_classes: int = Field(5, ge=1, le=15)
     method: Optional[str] = Field("natural_breaks", description="Classification method")
     custom_labels: Optional[list[str]] = Field(None, description="Custom class names/labels")
+
+class LSTPointRequest(BaseModel):
+    aoi: dict = Field(default_factory=dict, description="AOI Configuration object")
+    start_date: str
+    end_date: str
+    lat: float
+    lng: float
 
 
 class RUSLERequest(BaseModel):
@@ -854,15 +879,26 @@ class SlopeEarthworkRequest(BaseModel):
     polygon: list[list[float]]
     target_elevation: float
 
-class EarthworkAdvancedRequest(BaseModel):
+class GradingZone(BaseModel):
     polygon: list[list[float]]
     target_elevation: float = None
+    auto_balance: bool = False
+
+class EarthworkAdvancedRequest(BaseModel):
+    polygon: list[list[float]] = None
+    zones: list[GradingZone] = None
+    target_elevation: float = None
+    auto_balance: bool = False
     swell_factor: float = 1.0
     shrink_factor: float = 1.0
     slope_grade: float = 0.0
     slope_angle: float = 0.0
     topsoil_depth: float = 0.0
+    batter_ratio: float = 3.0
     strata_layers: list = None
+    water_table_depth: float = 0.0
+    boreholes: list = None
+    custom_dem_id: Optional[str] = None
 
 class SlopeRequest(BaseModel):
     aoi: dict = Field(default_factory=dict, description="AOI Configuration object")
@@ -893,6 +929,8 @@ class HabitatRequest(BaseModel):
     custom_labels: Optional[list[str]] = Field(None, description="Custom class names/labels")
     classify_method: str = "natural_breaks"
     custom_weights: Optional[dict] = None
+    year: int = Field(2021, description="Year for analysis")
+    landcover_scores: Optional[dict] = Field(None, description="Custom landcover scores mapping")
 
 class HabitatAhpRequest(BaseModel):
     custom_weights: Optional[dict] = None
@@ -1005,7 +1043,7 @@ class StaticMapRequest(BaseModel):
     district: str
     title: str
     url: str
-    bbox: Optional[list[float]] = None
+    bbox: Optional[list] = None
     class_areas: Optional[dict] = None
     override_palette: Optional[list[str]] = None
     show_frame: bool = True
@@ -1013,6 +1051,7 @@ class StaticMapRequest(BaseModel):
     show_legend: bool = True
     show_scale: bool = True
     show_compass: bool = True
+    show_title: bool = True
     size_multiplier: float = 1.0
     legend_pos: str = 'center left'
     scale_pos: str = 'lower left'
@@ -1076,15 +1115,27 @@ def _download_png(url: str) -> bytes:
             else:
                 raise
 
+def _parse_bbox(bbox_val):
+    if not bbox_val or not isinstance(bbox_val, list): return None
+    if len(bbox_val) > 0 and isinstance(bbox_val[0], list):
+        try:
+            lons = [p[0] for p in bbox_val]
+            lats = [p[1] for p in bbox_val]
+            return [min(lons), max(lons), min(lats), max(lats)]
+        except: return None
+    return bbox_val
+
 @app.post("/api/static-map", tags=["analysis"])
 def static_map_endpoint(req: StaticMapRequest):
     _require_gee()
     try:
         raw_png = _download_png(req.url)
+        parsed_bbox = _parse_bbox(req.bbox)
         carto_buf = enhance_map_cartography(
-            raw_png, req.district, req.title, bbox=req.bbox, class_areas=req.class_areas, override_palette=req.override_palette,
+            raw_png, req.district, req.title, bbox=parsed_bbox, class_areas=req.class_areas, override_palette=req.override_palette,
             show_frame=req.show_frame, show_grid=req.show_grid, 
             show_legend=req.show_legend, show_scale=req.show_scale, show_compass=req.show_compass,
+            show_title=req.show_title,
             size_multiplier=req.size_multiplier,
             legend_pos=req.legend_pos, scale_pos=req.scale_pos, north_arrow_pos=req.north_arrow_pos,
             output_format=req.output_format,
@@ -1361,8 +1412,9 @@ def static_map_download_endpoint(
 
         raw_png = _download_png(url)
         bbox = json.loads(bbox_json) if bbox_json and bbox_json != "null" else None
+        parsed_bbox = _parse_bbox(bbox)
         carto_buf = enhance_map_cartography(
-            raw_png, district, title, bbox, class_areas, override_palette,
+            raw_png, district, title, parsed_bbox, class_areas, override_palette,
             show_frame=show_frame, show_grid=show_grid, 
             show_legend=show_legend, show_scale=show_scale, show_compass=show_compass,
             size_multiplier=size_multiplier,
@@ -1485,10 +1537,39 @@ def ndvi_endpoint(req: NDVIRequest, user: dict = Depends(get_current_user)):
 def change_detection_endpoint(req: ChangeDetectionRequest, user: dict = Depends(get_current_user)):
     _require_gee()
     try:
-        return compute_change_detection(req.aoi, req.before_start, req.before_end, req.after_start, req.after_end)
+        return compute_change_detection(
+            req.aoi,
+            req.before_start,
+            req.before_end,
+            req.after_start,
+            req.after_end,
+            index_type=req.index_type or "NDVI",
+            mask_water=req.mask_water if req.mask_water is not None else True,
+            threshold=req.threshold,
+        )
     except Exception as exc:
         logger.exception("Change Detection failed for %s", req.district)
         raise HTTPException(500, str(exc)) from exc
+
+
+@app.post("/api/change-detection/point", tags=["analysis"])
+def change_detection_point_endpoint(req: ChangeDetectionPointRequest, user: dict = Depends(get_current_user)):
+    _require_gee()
+    try:
+        return inspect_change_point(
+            req.aoi,
+            req.before_start,
+            req.before_end,
+            req.after_start,
+            req.after_end,
+            lat=req.lat,
+            lng=req.lng,
+            index_type=req.index_type or "NDVI",
+        )
+    except Exception as exc:
+        logger.exception("Change Detection point inspection failed")
+        raise HTTPException(500, str(exc)) from exc
+
 
 
 @app.post("/api/lst", tags=["analysis"])
@@ -1498,6 +1579,25 @@ def lst_endpoint(req: LSTRequest, user: dict = Depends(get_current_user)):
         return compute_lst(req.aoi, req.start_date, req.end_date, req.n_classes, method=req.method, custom_labels=req.custom_labels)
     except Exception as exc:
         logger.exception("LST failed for %s", req.district)
+        raise HTTPException(500, str(exc)) from exc
+
+
+@app.post("/api/lst/point", tags=["analysis"])
+def lst_point_endpoint(req: LSTPointRequest, user: dict = Depends(get_current_user)):
+    _require_gee()
+    try:
+        from gee.lst import lst_image_and_aoi
+        import ee
+        lst_median, _ = lst_image_and_aoi(req.aoi, req.start_date, req.end_date)
+        point = ee.Geometry.Point([req.lng, req.lat])
+        value = lst_median.select("LST").reduceRegion(
+            reducer=ee.Reducer.first(),
+            geometry=point,
+            scale=30
+        ).getInfo()
+        return {"lst": value.get("LST")}
+    except Exception as exc:
+        logger.exception("LST point failed")
         raise HTTPException(500, str(exc)) from exc
 
 
@@ -1625,17 +1725,78 @@ def api_earthwork_analyze(req: EarthworkAdvancedRequest):
     _require_gee()
     try:
         return analyze_earthwork(
+            boreholes=req.boreholes,
             polygon_coords=req.polygon,
+            zones=req.zones,
             target_elevation=req.target_elevation,
+            auto_balance=req.auto_balance,
             swell_factor=req.swell_factor,
             shrink_factor=req.shrink_factor,
             slope_grade=req.slope_grade,
             slope_angle=req.slope_angle,
             topsoil_depth=req.topsoil_depth,
-            strata_layers=req.strata_layers
+            batter_ratio=req.batter_ratio,
+            water_table_depth=req.water_table_depth,
+            strata_layers=req.strata_layers,
+            custom_dem_id=req.custom_dem_id
         )
     except Exception as exc:
         logger.exception("Advanced earthwork computation failed")
+        raise HTTPException(500, str(exc)) from exc
+
+class EarthworkProfileRequest(BaseModel):
+    polygon: list[list[float]]
+    line: list[list[float]]
+    target_elevation: float
+    slope_grade: float = 0.0
+    slope_angle: float = 0.0
+    topsoil_depth: float = 0.0
+    custom_dem_id: Optional[str] = None
+
+from gee.earthwork import profile_earthwork_line
+
+@app.post("/api/earthwork/profile", tags=["analysis"])
+def api_earthwork_profile(req: EarthworkProfileRequest):
+    _require_gee()
+    try:
+        return profile_earthwork_line(
+            polygon_coords=req.polygon,
+            line_coords=req.line,
+            target_elevation=req.target_elevation,
+            slope_grade=req.slope_grade,
+            slope_angle=req.slope_angle,
+            topsoil_depth=req.topsoil_depth,
+            custom_dem_id=req.custom_dem_id
+        )
+    except Exception as exc:
+        logger.exception("Earthwork profile computation failed")
+        raise HTTPException(500, str(exc)) from exc
+class Earthwork3DRequest(BaseModel):
+    polygon: list[list[float]]
+    target_elevation: Optional[float] = None
+    slope_grade: float = 0.0
+    slope_angle: float = 0.0
+    topsoil_depth: float = 0.0
+    batter_ratio: float = 3.0
+    custom_dem_id: Optional[str] = None
+
+from gee.earthwork import get_earthwork_3d_grid
+
+@app.post("/api/earthwork/3d", tags=["analysis"])
+def api_earthwork_3d(req: Earthwork3DRequest):
+    _require_gee()
+    try:
+        return get_earthwork_3d_grid(
+            polygon_coords=req.polygon,
+            target_elevation=req.target_elevation,
+            slope_grade=req.slope_grade,
+            slope_angle=req.slope_angle,
+            topsoil_depth=req.topsoil_depth,
+            batter_ratio=req.batter_ratio,
+            custom_dem_id=req.custom_dem_id
+        )
+    except Exception as exc:
+        logger.exception("Earthwork 3D grid computation failed")
         raise HTTPException(500, str(exc)) from exc
 
 
@@ -1700,17 +1861,25 @@ def landfill_export_endpoint(req: LandfillRequest):
 def habitat_endpoint(req: HabitatRequest):
     _require_gee()
     try:
+        # FastAPI runs this synchronous endpoint in a threadpool automatically.
         return compute_habitat(
             aoi_config=req.aoi,
             reverse_flags=req.reverse_flags,
             n_classes=req.n_classes,
             custom_weights=req.custom_weights,
             method=req.method,
-            custom_labels=req.custom_labels
+            custom_labels=req.custom_labels,
+            year=req.year,
+            landcover_scores=req.landcover_scores
         )
     except Exception as exc:
         logger.exception("Habitat analysis failed for %s", req.aoi.get("name", "unknown"))
         raise HTTPException(status_code=500, detail=str(exc))
+
+@app.get("/api/habitat/config", tags=["analysis"])
+def habitat_config_endpoint():
+    from gee.habitat import get_habitat_config
+    return get_habitat_config()
 
 @app.post("/api/habitat/ahp", tags=["analysis"])
 def habitat_ahp_endpoint(req: HabitatAhpRequest):
@@ -3841,3 +4010,25 @@ def debug_datasets():
         return {"datasets": result}
     except Exception as e:
         return {"error": str(e)}
+
+
+
+from gee.earthwork import get_earthwork_3d_surface
+
+@app.post("/api/earthwork/surface3d", tags=["analysis"])
+def api_earthwork_surface3d(req: EarthworkAdvancedRequest):
+    _require_gee()
+    try:
+        pts = get_earthwork_3d_surface(
+            polygon_coords=req.polygon,
+            target_elevation=req.target_elevation,
+            slope_grade=req.slope_grade,
+            slope_angle=req.slope_angle,
+            topsoil_depth=req.topsoil_depth,
+            batter_ratio=req.batter_ratio,
+            custom_dem_id=req.custom_dem_id
+        )
+        return {"points": pts}
+    except Exception as exc:
+        logger.exception("3D surface computation failed")
+        raise HTTPException(500, str(exc)) from exc

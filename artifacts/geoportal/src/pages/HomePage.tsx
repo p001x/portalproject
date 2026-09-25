@@ -26,7 +26,7 @@ export function HomePage() {
           
           {user && (
             <div className="relative flex flex-col items-start gap-4 ml-2 mt-2">
-              <Button variant="ghost" onClick={() => setIsMenuOpen(!isMenuOpen)} className="p-3 text-muted-foreground hover:text-foreground transition-colors" title={isMenuOpen ? "Fold Menu" : "Unfold Menu"}>
+              <Button variant="ghost" onClick={() => setIsMenuOpen(!isMenuOpen)} className="p-3 text-muted-foreground hover:text-foreground transition-colors" title={isMenuOpen ? "Fold Menu" : "Unfold Menu"} aria-label={isMenuOpen ? "Close menu" : "Open menu"}>
                 <Menu className="w-12 h-12" />
               </Button>
               
@@ -40,7 +40,7 @@ export function HomePage() {
               <Popover>
                 <PopoverTrigger asChild>
                   <div className="flex items-center gap-4 cursor-pointer group">
-                    <Button variant="ghost" size="icon" className="relative text-muted-foreground group-hover:text-foreground pointer-events-none scale-110">
+                    <Button variant="ghost" size="icon" className="relative text-muted-foreground group-hover:text-foreground pointer-events-none scale-110" aria-label="Notifications">
                       <Bell className="w-6 h-6" />
                       {unreadCount > 0 && (
                         <span className="absolute top-0 right-0 flex h-3 w-3 items-center justify-center rounded-full bg-red-500 ring-2 ring-background"></span>
@@ -56,7 +56,7 @@ export function HomePage() {
 
               <Link href="/settings">
                 <div className="flex items-center gap-4 cursor-pointer group">
-                  <Button variant="ghost" size="icon" className="text-muted-foreground group-hover:text-foreground pointer-events-none scale-110" title="Settings">
+                  <Button variant="ghost" size="icon" className="text-muted-foreground group-hover:text-foreground pointer-events-none scale-110" title="Settings" aria-label="Settings">
                     <Settings className="w-6 h-6" />
                   </Button>
                   <span className="text-base font-semibold text-muted-foreground group-hover:text-foreground transition-colors">Settings</span>
@@ -64,7 +64,7 @@ export function HomePage() {
               </Link>
 
               <div className="flex items-center gap-4 cursor-pointer group" onClick={logout}>
-                <Button variant="ghost" size="icon" className="text-muted-foreground group-hover:text-destructive pointer-events-none scale-110" title="Log out">
+                <Button variant="ghost" size="icon" className="text-muted-foreground group-hover:text-destructive pointer-events-none scale-110" title="Log out" aria-label="Log out">
                   <LogOut className="w-6 h-6" />
                 </Button>
                 <span className="text-base font-semibold text-muted-foreground group-hover:text-destructive transition-colors">Log out</span>
@@ -141,7 +141,7 @@ export function HomePage() {
             </span>
           </div>
           <div className="flex gap-6 text-sm text-muted-foreground font-medium">
-            <Link href="/about"><a className="hover:text-primary transition-colors cursor-pointer">About Us</a></Link>
+            <Link href="/about" className="hover:text-primary transition-colors cursor-pointer">About Us</Link>
             <a href="#" className="hover:text-primary transition-colors">Privacy Policy</a>
             <a href="#" className="hover:text-primary transition-colors">Terms of Service</a>
             <a href="mailto:pierrendorimana16@gmail.com" className="hover:text-primary transition-colors">Email</a>

@@ -102,14 +102,35 @@ export interface ChangeDetectionRequest {
   before_end: string;
   after_start: string;
   after_end: string;
+  index_type?: string;
+  mask_water?: boolean;
+  threshold?: number;
+  n_classes?: number;
+  method?: string;
+  custom_labels?: string[];
 }
 
 export interface ChangeDetectionResult {
   tile_url: string;
+  before_tile_url?: string;
+  after_tile_url?: string;
+  before_rgb_tile_url?: string;
+  after_rgb_tile_url?: string;
   thumb_url: string;
   download_url?: string;
+  index_type?: string;
   stats: Record<string, number>;
+  net_change?: {
+    loss_km2: number;
+    stable_km2: number;
+    gain_km2: number;
+    net_km2: number;
+    pct_changed: number;
+    total_analyzed_km2: number;
+  };
   class_areas_km2: Record<string, number>;
+  class_colors?: string[];
+  classify?: any;
   center: [number, number];
   bbox?: number[];
   district?: string;
@@ -118,6 +139,30 @@ export interface ChangeDetectionResult {
   after_start: string;
   after_end: string;
 }
+
+export interface ChangeDetectionPointRequest {
+  aoi: AOIConfig;
+  district?: string;
+  before_start: string;
+  before_end: string;
+  after_start: string;
+  after_end: string;
+  lat: number;
+  lng: number;
+  index_type?: string;
+}
+
+export interface ChangeDetectionPointResult {
+  lat: number;
+  lng: number;
+  index_type: string;
+  before_value: number | null;
+  after_value: number | null;
+  delta: number | null;
+  status: string;
+  color: string;
+}
+
 
 export interface LSTResult {
   tile_url: string;
@@ -326,6 +371,9 @@ export interface AccessibilityRequest {
   dest_amenities?: string[];
   n_classes?: number;
   service_threshold_mins?: number;
+  method?: string;
+  custom_labels?: string[];
+  proposed_facilities?: number[][];
 }
 export interface AccessibilityMapResult {
   travel_time_tile_url: string;
@@ -353,6 +401,11 @@ export interface AccessibilityStatsResult {
   class_areas_km2: Record<string, number>;
   nearest_facility?: { lon: number; lat: number; name: string; type: string; distance_km: number };
   farthest_facility?: { lon: number; lat: number; name: string; type: string; distance_km: number };
+  delta_stats?: {
+    population_served: number;
+    area_km2_served: number;
+    mean_time_min: number;
+  };
 }
 export interface AccessibilityClassifyResult {
   classify: { panels: ClassifyPanel[]; n_classes: number; percentile_steps: number[] };
@@ -608,6 +661,7 @@ export interface StaticMapPayload {
   legend_pos?: string;
   scale_pos?: string;
   north_arrow_pos?: string;
+  proposed_facilities?: [number, number][];
 }
 
 export const api = {
@@ -651,13 +705,28 @@ export const api = {
     return res.json();
   },
 
+  async uploadTiff(file: File): Promise<{asset_id: string, task_id: string}> {
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch(`${BASE}/aoi/upload-tiff`, {
+      method: "POST",
+      body: formData,
+    });
+    if (!res.ok) throw new Error("Failed to upload TIFF");
+    return res.json();
+  },
+
   health: () => get<{ status: string }>("/health"),
   districts: () => get<{ districts: string[] }>("/districts"),
   ndvi: (req: NDVIRequest) => post<NDVIResult>("/ndvi", req),
   changeDetection: (req: ChangeDetectionRequest) => post<ChangeDetectionResult>("/change-detection", req),
-  lst: (req: { aoi: AOIConfig; district?: string; start_date: string; end_date: string; n_classes: number }) =>
-    post<LSTResult>("/lst", req),
-  rusle: {
+  changeDetectionPoint: (req: ChangeDetectionPointRequest) => post<ChangeDetectionPointResult>("/change-detection/point", req),
+  lst: {
+    analyze: (req: { aoi: AOIConfig; district?: string; start_date: string; end_date: string; n_classes: number; method?: string; custom_labels?: string[] }) =>
+      post<LSTResult>("/lst", req),
+    point: (req: { aoi: AOIConfig; start_date: string; end_date: string; lat: number; lng: number }) =>
+      post<{lst: number | null}>("/lst/point", req),
+  },  rusle: {
     map: (req: any) => post<RUSLEMapResult>("/rusle/map", req),
     stats: (req: any) => post<RUSLEStatsResult>("/rusle/stats", req),
     classify: (req: any) => post<RUSLEClassifyResult>("/rusle/classify", req),
@@ -668,6 +737,33 @@ export const api = {
     stats: (req: any) => post<any>("/slope/stats", req),
     classify: (req: any) => post<any>("/slope/classify", req),
     export: (req: any) => post<any>("/slope/export", req),
+    inspect: (req: { lat: number; lon: number; aoi: any }) => post<any>("/slope/inspect", req),
+    profile: (req: { line: number[][]; aoi: any }) => post<any>("/slope/profile", req),
+    watershed: (req: { lat: number; lon: number; level: number }) => post<any>("/slope/watershed", req),
+    earthwork: (req: { polygon: number[][]; target_elevation: number }) => post<any>("/slope/earthwork", req),
+  },
+  earthwork: {
+    analyze: (req: { 
+      polygon: number[][]; 
+      target_elevation?: number; 
+      auto_balance?: boolean;
+      swell_factor?: number; 
+      shrink_factor?: number;
+      topsoil_depth?: number;
+      slope_grade?: number;
+      slope_angle?: number;
+      strata_layers?: any[];
+      custom_dem_id?: string;
+    }) => post<any>("/earthwork/analyze", req),
+    profile: (req: {
+      polygon: number[][];
+      line: number[][];
+      target_elevation: number;
+      slope_grade?: number;
+      slope_angle?: number;
+      topsoil_depth?: number;
+      custom_dem_id?: string;
+    }) => post<any[]>("/earthwork/profile", req),
   },
   landfill: {
     map: (req: any) => post<any>("/landfill/map", req),
@@ -808,6 +904,7 @@ export const api = {
   },
   habitat: (req: any) => post<HabitatResult>("/habitat", req),
   habitatAhp: (customWeights: Record<string, number> | null) => post<AhpData>("/habitat/ahp", { custom_weights: customWeights || {} }),
+  habitatConfig: () => get<any>("/habitat/config"),
   waterHarvesting: {
     map: (req: { aoi: AOIConfig; year: number; runoff_coefficient?: number; manual_area_m2?: number; use_building_footprint?: boolean; household_size?: number; daily_water_use_liters?: number }) => post<any>("/water-harvesting/map", req),
     stats: (req: { aoi: AOIConfig; year: number; runoff_coefficient?: number; manual_area_m2?: number; use_building_footprint?: boolean; household_size?: number; daily_water_use_liters?: number }) => post<any>("/water-harvesting/stats", req),
@@ -834,6 +931,8 @@ export const api = {
     maps?: Array<[string, string]>;
     agency_template?: string;
     include_action_matrix?: boolean;
+    proposed_facilities?: [number, number][];
+    delta_stats?: Record<string, number>;
   }): Promise<Blob> => {
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     const appToken = localStorage.getItem("spetro_token");

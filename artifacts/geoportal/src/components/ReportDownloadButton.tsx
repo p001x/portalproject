@@ -2,7 +2,8 @@ import { useState } from "react";
 import { Download, Loader2, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { api, AOIConfig } from "@/lib/api";
+import { api } from "@/lib/api";
+import type { AOIConfig } from "@/lib/api";
 
 interface Props {
   moduleName: string;
@@ -14,6 +15,8 @@ interface Props {
   extraNotes?: string;
   maps?: Array<[string, string]>;
   filename?: string;
+  proposedFacilities?: [number, number][];
+  deltaStats?: Record<string, number>;
 }
 
 /**
@@ -30,6 +33,8 @@ export function ReportDownloadButton({
   extraNotes,
   maps = [],
   filename,
+  proposedFacilities,
+  deltaStats,
 }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -50,6 +55,8 @@ export function ReportDownloadButton({
         maps,
         agency_template: agencyTemplate,
         include_action_matrix: true,
+        proposed_facilities: proposedFacilities,
+        delta_stats: deltaStats,
       });
 
       const url = window.URL.createObjectURL(blob);

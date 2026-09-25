@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <script src="https://cdn.plot.ly/plotly-2.32.0.min.js"></script>
+    <style>
+        body { margin: 0; padding: 0; background-color: #0f172a; color: white; font-family: sans-serif; overflow: hidden; }
+        #plot { width: 100vw; height: 100vh; }
+        #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: none; }
+    </style>
+</head>
+<body>
+    <div id="loading">Loading 3D Model...</div>
+    <div id="plot"></div>
+    <script>
+        window.addEventListener("message", (event) => {
+            const data = event.data;
+            if (data.type === "RENDER_3D") {
+                renderPlot(data.points);
+            } else if (data.type === "LOADING") {
+                document.getElementById('loading').style.display = 'block';
+                document.getElementById('plot').innerHTML = '';
+            }
+        });
+
+        function renderPlot(points) {
+            document.getElementById('loading').style.display = 'none';
+            if (!points || points.length === 0) return;
+
+            const x = points.map(p => p.x);
+            const y = points.map(p => p.y);
+            const z_exist = points.map(p => p.z_exist);
+            const z_prop = points.map(p => p.z_prop);
+
+            const existingTrace = {
+                x: x,
+                y: y,
+                z: z_exist,
+                type: 'mesh3d',
+                color: '#8B4513',
+                opacity: 0.8,
+                name: 'Existing Terrain',
+                hoverinfo: 'x+y+z'
+            };
+
+            const proposedTrace = {
+                x: x,
+                y: y,
+                z: z_prop,
+                type: 'mesh3d',
+                color: '#32CD32',
+                opacity: 0.9,
+                name: 'Proposed Grading',
+                hoverinfo: 'x+y+z'
+            };
+
+            const layout = {
+                title: '3D Earthwork Visualization',
+                paper_bgcolor: '#0f172a',
+                plot_bgcolor: '#0f172a',
+                font: { color: '#ffffff' },
+                scene: {
+                    aspectmode: 'data',
+                    xaxis: { showgrid: false },
+                    yaxis: { showgrid: false },
+                    zaxis: { showgrid: true }
+                },
+                margin: { t: 50, l: 0, r: 0, b: 0 }
+            };
+
+            Plotly.newPlot('plot', [existingTrace, proposedTrace], layout);
+        }
+    </script>
+</body>
+</html>

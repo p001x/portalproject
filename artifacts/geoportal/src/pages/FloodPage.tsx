@@ -23,7 +23,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { api, FloodResult , AOIConfig} from "@/lib/api";
+import { api } from "@/lib/api";
+import type { FloodResult , AOIConfig } from "@/lib/api";
 import { DistrictMap } from "@/components/DistrictMap";
 import { ReportDownloadButton } from "@/components/ReportDownloadButton";
 import { MapExportControls } from "@/components/MapExportControls";
@@ -644,3 +645,4 @@ export function FloodPage() {
     </ResizablePanelGroup>
   );
 }
+

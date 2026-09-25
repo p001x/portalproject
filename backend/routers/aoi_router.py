@@ -100,6 +100,15 @@ async def upload_shapefile(file: UploadFile = File(...)):
         extract_dir = os.path.join(tmp_dir, "extracted")
         os.makedirs(extract_dir)
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            # Check for zip bombs and nested zips
+            total_size = 0
+            for info in zip_ref.infolist():
+                if info.filename.lower().endswith('.zip'):
+                    raise HTTPException(status_code=400, detail="Nested zip files are not allowed (anti zip-bomb).")
+                total_size += info.file_size
+                if total_size > 1024 * 1024 * 500: # 500MB max uncompressed
+                    raise HTTPException(status_code=400, detail="Zip file too large (anti zip-bomb).")
+                    
             zip_ref.extractall(extract_dir)
             
         # Find .shp file
@@ -130,6 +139,30 @@ async def upload_shapefile(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Error processing shapefile: {str(e)}")
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+@router.post("/upload-tiff")
+async def upload_tiff(file: UploadFile = File(...)):
+    """
+    Accepts a .tif or .tiff file, pushes it to Earth Engine using push_raster_to_gee,
+    and returns the resulting asset ID.
+    """
+    if not file.filename.lower().endswith((".tif", ".tiff")):
+        raise HTTPException(status_code=400, detail="Only .tif or .tiff files are supported.")
+        
+    try:
+        from gee_scripts.gee_asset_upload import push_raster_to_gee, AssetUploadError
+        import time
+        file_bytes = await file.read()
+        asset_name = f"upload_{int(time.time())}_{file.filename.replace('.tiff', '').replace('.tif', '')}"
+        
+        ingested_asset = push_raster_to_gee(
+            file_bytes=file_bytes,
+            filename=file.filename,
+            asset_name=asset_name
+        )
+        return {"asset_id": ingested_asset.asset_id, "task_id": ingested_asset.task_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error uploading TIFF: {str(e)}")
 
 @router.get("/rwanda-hierarchy")
 def get_rwanda_hierarchy():

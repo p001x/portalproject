@@ -11,7 +11,8 @@ import {
 import { Slider } from "@/components/ui/slider";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { ReportDownloadButton } from "@/components/ReportDownloadButton";
-import { api, IrrigationMapResult, IrrigationStatsResult, IrrigationExportResult, AOIConfig } from "@/lib/api";
+import { api } from "@/lib/api";
+import type { IrrigationMapResult, IrrigationStatsResult, IrrigationExportResult, AOIConfig } from "@/lib/api";
 import { DistrictMap, LegendItem } from "@/components/DistrictMap";
 import { StudyAreaSelector } from "@/components/StudyAreaSelector";
 import { MapExportControls } from "@/components/MapExportControls";
@@ -639,3 +640,4 @@ export function IrrigationPage() {
     </div>
   );
 }
+

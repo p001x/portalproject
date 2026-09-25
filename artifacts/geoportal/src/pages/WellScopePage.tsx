@@ -18,7 +18,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { api, AOIConfig } from "@/lib/api";
+import { api } from "@/lib/api";
+import type { AOIConfig } from "@/lib/api";
 import { DistrictMap, LegendItem } from "@/components/DistrictMap";
 import { ReportDownloadButton } from "@/components/ReportDownloadButton";
 import { StudyAreaSelector } from "@/components/StudyAreaSelector";
@@ -872,3 +873,4 @@ function printReport(data: any, analysisDate: string) {
     </ResizablePanelGroup>
   );
 }
+
