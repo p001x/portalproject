@@ -1266,7 +1266,7 @@ export function AcademyPage() {
                         : `${BASE}/academy/books/${selectedBookToRead.id}/download`
                     }
                     onLoadSuccess={onDocumentLoadSuccess}
-                    className="flex flex-col items-center shadow-2xl rounded-sm overflow-hidden bg-white"
+                    className="flex flex-col items-center shadow-2xl rounded-sm overflow-hidden bg-card"
                     loading={
                       <div className="flex items-center justify-center h-[60vh] w-full">
                         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>

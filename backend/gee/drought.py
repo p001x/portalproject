@@ -69,7 +69,7 @@ def norm_positive(img: ee.Image, lo: float, hi: float, name: str) -> ee.Image:
 
 
 def _build_drought_images(
-    aoi_config: dict, year: int,
+    aoi_config: dict, start_year: int, end_year: int,
     reverse_sm: bool, reverse_rf: bool, reverse_ndvi: bool,
     reverse_vci: bool, reverse_lst: bool, reverse_cdd: bool, reverse_evi: bool
 ):
@@ -79,10 +79,10 @@ def _build_drought_images(
     geometry = aoi.dissolve(maxError=1)
     geometry_buffered = geometry.buffer(500)
 
-    season_start = f"{year}-03-01"
-    season_end = f"{year}-06-30"
-    ext_start = f"{year}-02-01"
-    ext_end = f"{year}-07-31"
+    season_start = f"{start_year}-03-01"
+    season_end = f"{end_year}-06-30"
+    ext_start = f"{start_year}-02-01"
+    ext_end = f"{end_year}-07-31"
     base_year_start = 2013
     base_year_end = 2022
 
@@ -250,17 +250,17 @@ def _build_drought_images(
 
 
 def compute_drought_map(
-    aoi_config: dict, year: int,
+    aoi_config: dict, start_year: int, end_year: int,
     reverse_sm: bool = False, reverse_rf: bool = False, reverse_ndvi: bool = False,
     reverse_vci: bool = False, reverse_lst: bool = False, reverse_cdd: bool = False, reverse_evi: bool = False
 ) -> dict:
-    cache_key = ("map", json.dumps(aoi_config, sort_keys=True), year, reverse_sm, reverse_rf, reverse_ndvi, reverse_vci, reverse_lst, reverse_cdd, reverse_evi)
+    cache_key = ("map", json.dumps(aoi_config, sort_keys=True), start_year, end_year, reverse_sm, reverse_rf, reverse_ndvi, reverse_vci, reverse_lst, reverse_cdd, reverse_evi)
     with _lock:
         if cache_key in _cache:
             return _cache[cache_key]
 
     aoi, geometry, dvi, _, _, _, _, _, _ = _build_drought_images(
-        aoi_config, year, reverse_sm, reverse_rf, reverse_ndvi, reverse_vci, reverse_lst, reverse_cdd, reverse_evi
+        aoi_config, start_year, end_year, reverse_sm, reverse_rf, reverse_ndvi, reverse_vci, reverse_lst, reverse_cdd, reverse_evi
     )
 
     dvi_map_id = dvi.getMapId(DVI_VIS)
@@ -280,17 +280,17 @@ def compute_drought_map(
 
 
 def compute_drought_stats(
-    aoi_config: dict, year: int,
+    aoi_config: dict, start_year: int, end_year: int,
     reverse_sm: bool = False, reverse_rf: bool = False, reverse_ndvi: bool = False,
     reverse_vci: bool = False, reverse_lst: bool = False, reverse_cdd: bool = False, reverse_evi: bool = False
 ) -> dict:
-    cache_key = ("stats", json.dumps(aoi_config, sort_keys=True), year, reverse_sm, reverse_rf, reverse_ndvi, reverse_vci, reverse_lst, reverse_cdd, reverse_evi)
+    cache_key = ("stats", json.dumps(aoi_config, sort_keys=True), start_year, end_year, reverse_sm, reverse_rf, reverse_ndvi, reverse_vci, reverse_lst, reverse_cdd, reverse_evi)
     with _lock:
         if cache_key in _cache:
             return _cache[cache_key]
 
     aoi, geometry, dvi, _, _, _, _, _, _ = _build_drought_images(
-        aoi_config, year, reverse_sm, reverse_rf, reverse_ndvi, reverse_vci, reverse_lst, reverse_cdd, reverse_evi
+        aoi_config, start_year, end_year, reverse_sm, reverse_rf, reverse_ndvi, reverse_vci, reverse_lst, reverse_cdd, reverse_evi
     )
 
     stats = dvi.reduceRegion(
@@ -311,18 +311,18 @@ def compute_drought_stats(
 
 
 def compute_drought_classify(
-    aoi_config: dict, year: int, n_classes: int = 5, method: str = "natural_breaks", custom_labels: list = None,
+    aoi_config: dict, start_year: int, end_year: int, n_classes: int = 5, method: str = "natural_breaks", custom_labels: list = None,
     reverse_sm: bool = False, reverse_rf: bool = False, reverse_ndvi: bool = False,
     reverse_vci: bool = False, reverse_lst: bool = False, reverse_cdd: bool = False, reverse_evi: bool = False
 ) -> dict:
-    cache_key = ("classify", json.dumps(aoi_config, sort_keys=True), year, n_classes, method, tuple(custom_labels) if custom_labels else None,
+    cache_key = ("classify", json.dumps(aoi_config, sort_keys=True), start_year, end_year, n_classes, method, tuple(custom_labels) if custom_labels else None,
                  reverse_sm, reverse_rf, reverse_ndvi, reverse_vci, reverse_lst, reverse_cdd, reverse_evi)
     with _lock:
         if cache_key in _cache:
             return _cache[cache_key]
 
     aoi, geometry, dvi, vci, sm_anom, rf_anom, lst_anom, dry_pentads, ndvi_current = _build_drought_images(
-        aoi_config, year, reverse_sm, reverse_rf, reverse_ndvi, reverse_vci, reverse_lst, reverse_cdd, reverse_evi
+        aoi_config, start_year, end_year, reverse_sm, reverse_rf, reverse_ndvi, reverse_vci, reverse_lst, reverse_cdd, reverse_evi
     )
 
     result = quantile_classify(
@@ -345,17 +345,17 @@ def compute_drought_classify(
 
 
 def compute_drought_export(
-    aoi_config: dict, year: int,
+    aoi_config: dict, start_year: int, end_year: int,
     reverse_sm: bool = False, reverse_rf: bool = False, reverse_ndvi: bool = False,
     reverse_vci: bool = False, reverse_lst: bool = False, reverse_cdd: bool = False, reverse_evi: bool = False
 ) -> dict:
-    cache_key = ("export", json.dumps(aoi_config, sort_keys=True), year, reverse_sm, reverse_rf, reverse_ndvi, reverse_vci, reverse_lst, reverse_cdd, reverse_evi)
+    cache_key = ("export", json.dumps(aoi_config, sort_keys=True), start_year, end_year, reverse_sm, reverse_rf, reverse_ndvi, reverse_vci, reverse_lst, reverse_cdd, reverse_evi)
     with _lock:
         if cache_key in _cache:
             return _cache[cache_key]
 
     aoi, geometry, dvi, _, _, _, _, _, _ = _build_drought_images(
-        aoi_config, year, reverse_sm, reverse_rf, reverse_ndvi, reverse_vci, reverse_lst, reverse_cdd, reverse_evi
+        aoi_config, start_year, end_year, reverse_sm, reverse_rf, reverse_ndvi, reverse_vci, reverse_lst, reverse_cdd, reverse_evi
     )
 
     result = {

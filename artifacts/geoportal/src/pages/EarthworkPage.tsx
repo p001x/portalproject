@@ -468,7 +468,7 @@ export default function EarthworkPage() {
     >
       {isDragging && (
         <div className="absolute inset-0 bg-blue-500/20 backdrop-blur-sm z-[9999] flex items-center justify-center border-4 border-dashed border-blue-500 pointer-events-none">
-          <div className="bg-white dark:bg-slate-900 p-8 rounded-xl shadow-2xl flex flex-col items-center">
+          <div className="bg-card dark:bg-slate-900 p-8 rounded-xl shadow-2xl flex flex-col items-center">
             <MapIcon className="w-16 h-16 text-blue-500 mb-4 animate-bounce" />
             <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-2">Drop data here</h2>
             <p className="text-gray-500 text-center">.zip (Shapefile) for Site Boundary<br/>.tif / .tiff for Custom DEM Surface<br/>.csv (Lon,Lat,Depth) for Boreholes</p>
@@ -500,7 +500,7 @@ export default function EarthworkPage() {
         </div>
 
         {/* Ribbon Tabs */}
-        <div className="flex px-4 pt-2 gap-1 border-b dark:border-slate-800 bg-white dark:bg-slate-900">
+        <div className="flex px-4 pt-2 gap-1 border-b dark:border-slate-800 bg-card dark:bg-slate-900">
           <button 
             onClick={() => setActiveTab("analysis")}
             className={`px-4 py-1.5 text-[11px] font-semibold rounded-t-sm border-b-2 uppercase tracking-wider ${activeTab === "analysis" ? "border-[#007AC2] bg-[#f3f4f6] dark:bg-slate-800 text-[#007AC2]" : "border-transparent text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-slate-800"}`}>
@@ -519,7 +519,7 @@ export default function EarthworkPage() {
         </div>
         
         {/* Ribbon Toolbar Content */}
-        <div className="p-2 flex gap-4 items-stretch h-[85px] overflow-x-auto bg-white dark:bg-slate-900 shrink-0 border-b dark:border-slate-800">
+        <div className="p-2 flex gap-4 items-stretch h-[85px] overflow-x-auto bg-card dark:bg-slate-900 shrink-0 border-b dark:border-slate-800">
            
            {activeTab === "analysis" && (
              <>
@@ -840,7 +840,7 @@ export default function EarthworkPage() {
 
          {/* ArcGIS Dockable Contents Pane (Right Side) */}
          {result && (
-           <div className="absolute top-4 right-4 z-[1000] w-[320px] bg-white shadow-xl rounded-md border flex flex-col max-h-[calc(100%-2rem)] overflow-hidden">
+           <div className="absolute top-4 right-4 z-[1000] w-[320px] bg-card shadow-xl rounded-md border flex flex-col max-h-[calc(100%-2rem)] overflow-hidden">
              {/* Header */}
              <div className="px-3 py-2 border-b bg-gray-50 flex items-center justify-between shrink-0">
                <h3 className="text-[12px] font-bold text-gray-800 uppercase tracking-wider flex items-center gap-1.5">

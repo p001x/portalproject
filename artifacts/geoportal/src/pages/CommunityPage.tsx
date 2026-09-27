@@ -660,7 +660,7 @@ export function CommunityPage() {
             <div className="flex items-center gap-3 bg-muted/30 p-3 rounded-xl border">
               <span className="text-sm text-muted-foreground font-medium">Filtering by:</span>
               {searchQuery && (
-                <div className="bg-white border rounded-full px-3 py-1 flex items-center gap-2 text-sm shadow-sm">
+                <div className="bg-card border rounded-full px-3 py-1 flex items-center gap-2 text-sm shadow-sm">
                   <Search className="w-3 h-3 text-emerald-600" />
                   "{searchQuery}"
                   <button onClick={() => { setSearchQuery(""); setSearchInput(""); }} className="text-muted-foreground hover:text-foreground"><X className="w-3 h-3" /></button>
@@ -779,7 +779,7 @@ export function CommunityPage() {
                     <div className="bg-red-50/50 border border-red-100 rounded-lg p-2.5">
                       <div className="flex flex-wrap gap-1.5">
                         {blockedUsers.map((u: string) => (
-                          <div key={u} className="flex items-center gap-2 bg-white border border-red-200 px-3 py-1.5 rounded-full text-xs font-medium shadow-sm">
+                          <div key={u} className="flex items-center gap-2 bg-card border border-red-200 px-3 py-1.5 rounded-full text-xs font-medium shadow-sm">
                             <span className="text-red-900">{u}</span>
                             <button onClick={() => unblockMutation.mutate(u)} className="text-red-400 hover:text-red-600 hover:bg-red-50 rounded-full p-0.5 transition-colors">
                               <X className="w-3 h-3" />

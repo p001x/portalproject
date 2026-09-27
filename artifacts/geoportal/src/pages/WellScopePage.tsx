@@ -36,7 +36,7 @@ const PALETTES = [
   { name: "Grayscale", value: "000000,ffffff" },
 ];
 
-const FACTOR_KEYS = ["rainfall", "lithology", "slope", "twi", "drainage", "dist_water", "lulc"] as const;
+const FACTOR_KEYS = ["rainfall", "lithology", "slope", "twi", "drainage", "dist_water", "soil", "lulc"] as const;
 type FactorKey = typeof FACTOR_KEYS[number];
 
 const FACTOR_LABELS: Record<FactorKey, string> = {
@@ -46,11 +46,12 @@ const FACTOR_LABELS: Record<FactorKey, string> = {
   twi: "Topographic Wetness",
   drainage: "Drainage Density",
   dist_water: "Distance to Water",
+  soil: "Soil Permeability",
   lulc: "Land Cover",
 };
 
 const DEFAULT_WEIGHTS: Record<FactorKey, number> = {
-  rainfall: 30, lithology: 21, slope: 15, twi: 15, drainage: 9, dist_water: 6, lulc: 4,
+  rainfall: 26, lithology: 18, slope: 13, twi: 13, drainage: 9, dist_water: 6, soil: 11, lulc: 4,
 };
 
 const SUITABILITY_LEGEND: LegendItem[] = [
@@ -62,11 +63,11 @@ const SUITABILITY_LEGEND: LegendItem[] = [
 ];
 
 const SCORE_LEGEND: LegendItem[] = [
-  { color: "#1a9850", label: "Score 5 – Most suitable" },
+  { color: "#1a9850", label: "Score 5 â€“ Most suitable" },
   { color: "#d9ef8b", label: "Score 4" },
   { color: "#fee08b", label: "Score 3" },
   { color: "#f46d43", label: "Score 2" },
-  { color: "#d73027", label: "Score 1 – Least suitable" },
+  { color: "#d73027", label: "Score 1 â€“ Least suitable" },
 ];
 
 const CLASS_COLOR_LIST = ["#d73027", "#fc8d59", "#fee08b", "#91cf60", "#1a9850"];
@@ -107,7 +108,7 @@ function FactorMapCard({ factorKey, factor, analysisDate }: {
   analysisDate: string;
 }) {
   return (
-    <div className="border rounded-lg p-4 space-y-3">
+    <div className="border rounded-lg p-4 space-y-3 bg-card">
       <div>
         <h4 className="font-semibold text-base leading-tight">{factor.label}</h4>
         <p className="text-sm text-muted-foreground">
@@ -134,7 +135,7 @@ function FactorMapCard({ factorKey, factor, analysisDate }: {
       <div className="text-xs text-muted-foreground flex items-center justify-between">
         <span className="flex items-center gap-1.5">
           <div className="w-16 h-2 rounded-sm bg-gradient-to-r from-[#d73027] via-[#fee08b] to-[#1a9850]" />
-          Low → High Score
+          Low â†’ High Score
         </span>
         <span className="text-[10px] uppercase">{analysisDate}</span>
       </div>
@@ -176,7 +177,7 @@ function InteractiveFactorMapCard({ factorKey, factor, aoiConfig }: { factorKey:
   }, [selectedPalette]);
 
   return (
-    <div className="border rounded-lg p-4 space-y-4 bg-white shadow-sm flex flex-col">
+    <div className="border rounded-lg p-4 space-y-4 bg-card shadow-sm flex flex-col">
       <div>
         <h4 className="font-semibold text-base leading-tight">{factor.label}</h4>
         <p className="text-sm text-muted-foreground">
@@ -195,7 +196,7 @@ function InteractiveFactorMapCard({ factorKey, factor, aoiConfig }: { factorKey:
 
       <div className="space-y-3 pt-2">
         <div className="space-y-1.5">
-          <Label className="text-xs font-semibold text-slate-500">Color Palette</Label>
+          <Label className="text-xs font-semibold text-muted-foreground">Color Palette</Label>
           <Select value={selectedPalette} onValueChange={setSelectedPalette} disabled={loading}>
             <SelectTrigger className="h-8 text-xs">
               <SelectValue />
@@ -275,15 +276,15 @@ function printReport(data: any, analysisDate: string) {
   const areaRows = Object.entries(data.class_areas_km2).map(([cls, km2]: any, i) => `
     <tr>
       <td>${cls}</td>
-      <td style="text-align:right">${km2} km²</td>
-      <td style="text-align:right">${total > 0 ? ((km2 / total) * 100).toFixed(1) : "—"}%</td>
+      <td style="text-align:right">${km2} kmÂ²</td>
+      <td style="text-align:right">${total > 0 ? ((km2 / total) * 100).toFixed(1) : "â€”"}%</td>
     </tr>`).join("");
 
   const factorThumbs = Object.entries(data.factor_maps).map(([, f]: any) => `
     <div style="break-inside:avoid;margin-bottom:12px;border:1px solid #ddd;border-radius:6px;padding:8px">
-      <p style="margin:0 0 4px;font-weight:600;font-size:13px">${f.label} — Weight: ${f.weight_pct}%</p>
+      <p style="margin:0 0 4px;font-weight:600;font-size:13px">${f.label} â€” Weight: ${f.weight_pct}%</p>
       <img src="${f.thumb_url}" style="width:100%;border-radius:4px;border:1px solid #eee" alt="${f.label}" />
-      <p style="margin:4px 0 0;font-size:10px;color:#888">Score 1 (Least suitable) → 5 (Most suitable) · Source: Google Earth Engine</p>
+      <p style="margin:4px 0 0;font-size:10px;color:#888">Score 1 (Least suitable) â†’ 5 (Most suitable) Â· Source: Google Earth Engine</p>
     </div>`).join("");
 
   const vhKm2 = (data.class_areas_km2["Very High (80-100)"] as number) ?? 0;
@@ -297,17 +298,17 @@ function printReport(data: any, analysisDate: string) {
 
   const interpretation = `
     The multi-criteria weighted overlay analysis for <strong>${data.district}</strong> identifies 
-    <strong>${hsPct}%</strong> of the study area (${hsKm2.toFixed(2)} km²) as High to Very High potential for groundwater, 
-    while <strong>${unPct}%</strong> (${unKm2.toFixed(2)} km²) is classified as Low to Very Low potential. 
+    <strong>${hsPct}%</strong> of the study area (${hsKm2.toFixed(2)} kmÂ²) as High to Very High potential for groundwater, 
+    while <strong>${unPct}%</strong> (${unKm2.toFixed(2)} kmÂ²) is classified as Low to Very Low potential. 
     The analysis applies AHP-derived weights based on 7 factors, including Rainfall, Lithology, and Topography. 
     The AHP consistency ratio (CR = ${data.ahp_data.cr.toFixed(2)}) confirms the weight assignments are 
-    ${data.ahp_data.consistent ? "acceptable (CR < 0.10)" : "inconsistent — consider revising weights"}.`;
+    ${data.ahp_data.consistent ? "acceptable (CR < 0.10)" : "inconsistent â€” consider revising weights"}.`;
 
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>WellScope Suitability Report — ${data.district}</title>
+  <title>WellScope Suitability Report â€” ${data.district}</title>
   <style>
     * { box-sizing: border-box; }
     body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; color: #222; margin: 0; padding: 24px 36px; }
@@ -341,7 +342,7 @@ function printReport(data: any, analysisDate: string) {
 <body>
   <div class="no-print" style="margin-bottom:16px">
     <button onclick="window.print()" style="background:#1a5c2e;color:#fff;border:none;border-radius:5px;padding:8px 18px;cursor:pointer;font-size:13px">
-      🖨 Print / Save as PDF
+      ðŸ–¨ Print / Save as PDF
     </button>
   </div>
 
@@ -357,7 +358,7 @@ function printReport(data: any, analysisDate: string) {
       <div class="lbl">Mean Suitability Score</div>
     </div>
     <div class="stat-card">
-      <div class="val">${hsKm2.toFixed(1)} <span style="font-size:12px;font-weight:normal">km²</span></div>
+      <div class="val">${hsKm2.toFixed(1)} <span style="font-size:12px;font-weight:normal">kmÂ²</span></div>
       <div class="lbl">High/Very High Potential Area</div>
     </div>
     <div class="stat-card">
@@ -383,11 +384,11 @@ function printReport(data: any, analysisDate: string) {
 
   <h2>2. Suitability Class Distribution</h2>
   <table>
-    <tr><th>Class</th><th style="text-align:right">Area (km²)</th><th style="text-align:right">% of Total</th></tr>
+    <tr><th>Class</th><th style="text-align:right">Area (kmÂ²)</th><th style="text-align:right">% of Total</th></tr>
     ${areaRows}
     <tr style="font-weight:bold;background:#eee">
       <td>Total Area</td>
-      <td style="text-align:right">${total.toFixed(2)} km²</td>
+      <td style="text-align:right">${total.toFixed(2)} kmÂ²</td>
       <td style="text-align:right">100.0%</td>
     </tr>
   </table>
@@ -415,13 +416,13 @@ function printReport(data: any, analysisDate: string) {
   <div style="background:#f4f4f4; color: #111;padding:12px 16px;border-radius:6px;margin-top:12px">
     <p style="margin:0 0 6px"><strong>Consistency Analysis</strong></p>
     <ul style="margin:0;padding-left:20px;font-size:12px">
-      <li>Principal Eigenvalue (λ_max) = ${data.ahp_data.lambda_max.toFixed(3)}</li>
+      <li>Principal Eigenvalue (Î»_max) = ${data.ahp_data.lambda_max.toFixed(3)}</li>
       <li>Consistency Index (CI) = ${data.ahp_data.ci.toFixed(3)}</li>
       <li>Random Index (RI) = ${data.ahp_data.ri.toFixed(2)}</li>
     </ul>
     <div class="cr-box ${data.ahp_data.consistent ? 'cr-good' : 'cr-bad'}">
       Consistency Ratio (CR) = ${data.ahp_data.cr.toFixed(3)}
-      ${data.ahp_data.consistent ? " ✓ Acceptable" : " ⚠ Revision Recommended"}
+      ${data.ahp_data.consistent ? " âœ“ Acceptable" : " âš  Revision Recommended"}
     </div>
   </div>
 
@@ -446,8 +447,9 @@ function printReport(data: any, analysisDate: string) {
 }
 
   export function WellScopePage() {
-  const [aoi, setAoi] = useState<AOIConfig>({ type: "rwanda", country: "Rwanda", province: "Kigali City", name: "Gasabo" });
+  const [aoi, setAoi] = useState<AOIConfig>({ type: "rwanda", country: "Rwanda", province: "Kigali City", name: "Gasabo", start_year: 1980, end_year: 2024 });
   const [activeTab, setActiveTab] = useState("map");
+  const [activeExportLayer, setActiveExportLayer] = useState<"continuous" | "classified" | FactorKey>("continuous");
 
   const effectiveDistrictName = aoi.name || "Custom Study Area";
   
@@ -547,7 +549,57 @@ function printReport(data: any, analysisDate: string) {
     return mapped;
   }, [rawAreas, customClassNames, isContinuous]);
 
-  const activeTileUrl = (!isContinuous && mapData?.classify?.panels?.[0]?.tile_url) 
+  const activeTileUrl = (!isContinuous && classifyData?.classify?.panels?.[0]?.tile_url) 
+    ? classifyData.classify.panels[0].tile_url 
+    : mapData?.tile_url;
+
+  const activeThumbUrl = (!isContinuous && classifyData?.classify?.panels?.[0]?.thumb_url) 
+    ? classifyData.classify.panels[0].thumb_url 
+    : mapData?.thumb_url;
+
+  const palette = (n: number) => {
+    const stops = ["#d73027", "#fc8d59", "#fee08b", "#91cf60", "#1a9850"];
+    if (n <= 1) return ["#1a9850"];
+    if (n === stops.length) return stops;
+    
+    const hexToRgb = (h: string) => {
+      const clean = h.replace("#", "");
+      return [
+        parseInt(clean.substring(0, 2), 16),
+        parseInt(clean.substring(2, 4), 16),
+        parseInt(clean.substring(4, 6), 16),
+      ];
+    };
+    
+    const rgbToHex = (r: number, g: number, b: number) =>
+      "#" + [r, g, b].map(x => Math.max(0, Math.min(255, Math.round(x))).toString(16).padStart(2, "0")).join("");
+
+    const rgbStops = stops.map(hexToRgb);
+    return Array.from({ length: n }, (_, i) => {
+      const t = (i / (n - 1)) * (rgbStops.length - 1);
+      const idx = Math.floor(t);
+      const frac = t - idx;
+      if (idx >= rgbStops.length - 1) return stops[stops.length - 1];
+      const c1 = rgbStops[idx];
+      const c2 = rgbStops[idx + 1];
+      return rgbToHex(
+        c1[0] + (c2[0] - c1[0]) * frac,
+        c1[1] + (c2[1] - c1[1]) * frac,
+        c1[2] + (c2[2] - c1[2]) * frac
+      );
+    });
+  };
+
+  const activeNClasses = classifyData?.classify?.n_classes || nClasses;
+  const activeColors = !isContinuous ? palette(activeNClasses) : CLASS_COLOR_LIST;
+  const dynamicLegend = isContinuous
+    ? SUITABILITY_LEGEND
+    : customClassNames.slice(0, activeNClasses).map((name, i) => ({
+        color: activeColors[i % activeColors.length],
+        label: name
+      }));
+
+  const _dummy = (!isContinuous && mapData?.classify?.panels?.[0]?.tile_url) 
     ? mapData.classify.panels[0].tile_url 
     : mapData?.tile_url;
 
@@ -573,7 +625,35 @@ function printReport(data: any, analysisDate: string) {
           <div className="space-y-6 flex-1">
             <div className="space-y-3">
               <StudyAreaSelector value={aoi} onChange={setAoi} />
-              <p className="text-xs text-muted-foreground">Select a district or draw an area to screen for groundwater potential.</p>
+              <div className="flex gap-2 w-full mt-2">
+                <div className="flex-1 space-y-1">
+                  <Label className="text-xs text-muted-foreground">Start Year</Label>
+                  <Select value={String(aoi.start_year || 1980)} onValueChange={(val) => setAoi(prev => ({ ...prev, start_year: parseInt(val) }))}>
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Array.from({ length: new Date().getFullYear() - 1980 + 1 }, (_, i) => 1980 + i).map(year => (
+                        <SelectItem key={year} value={String(year)} className="text-xs">{year}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex-1 space-y-1">
+                  <Label className="text-xs text-muted-foreground">End Year</Label>
+                  <Select value={String(aoi.end_year || 2024)} onValueChange={(val) => setAoi(prev => ({ ...prev, end_year: parseInt(val) }))}>
+                    <SelectTrigger className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {Array.from({ length: new Date().getFullYear() - 1980 + 1 }, (_, i) => 1980 + i).map(year => (
+                        <SelectItem key={year} value={String(year)} className="text-xs">{year}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">Select a district and time period to process historical rainfall data (1980-Present) dynamically.</p>
             </div>
 
             <div className="space-y-4 pt-2 border-t border-border">
@@ -721,32 +801,72 @@ function printReport(data: any, analysisDate: string) {
                   <TabsList>
                     <TabsTrigger value="map">Map</TabsTrigger>
                     <TabsTrigger value="statistics">Statistics</TabsTrigger>
-                    <TabsTrigger value="factor-maps">Factor Maps</TabsTrigger>
                     <TabsTrigger value="static-maps">Static Maps</TabsTrigger>
                     <TabsTrigger value="report" className="gap-1.5"><FileText className="w-3.5 h-3.5" />Report</TabsTrigger>
                   </TabsList>
                 </div>
 
                 <TabsContent value="map" className="flex-1 p-0 m-0 flex flex-col min-h-0 relative">
+                  {mapData && (
+                    <div className="flex flex-wrap items-center justify-between gap-3 m-4 mb-3 p-2 bg-muted/30 rounded-lg border">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Map Symbology:</span>
+                        <div className="inline-flex items-center rounded-md border bg-background p-0.5 text-xs shadow-2xs">
+                          <button
+                            type="button"
+                            onClick={() => setLayerMode("classified")}
+                            disabled={isContinuous}
+                            className={`px-3 py-1 rounded font-medium transition-all ${
+                              layerMode === "classified" && !isContinuous
+                                ? "bg-primary text-primary-foreground shadow-xs"
+                                : "text-muted-foreground hover:text-foreground disabled:opacity-40"
+                            }`}
+                          >
+                            Classified ({activeNClasses} Classes)
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setLayerMode("continuous")}
+                            className={`px-3 py-1 rounded font-medium transition-all ${
+                              layerMode === "continuous" || isContinuous
+                                ? "bg-primary text-primary-foreground shadow-xs"
+                                : "text-muted-foreground hover:text-foreground"
+                            }`}
+                          >
+                            Continuous Gradient
+                          </button>
+                        </div>
+                      </div>
 
-                  {mapData ? (
-                    <DistrictMap
-                      tileUrl={activeTileUrl}
-                      center={mapData.center}
-                      bbox={mapData.bbox}
-                      title="Groundwater Suitability"
-                      legend={SUITABILITY_LEGEND}
-                    />
-                  ) : (
-                    <div className="h-full flex items-center justify-center text-muted-foreground">Map not available</div>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <span>Method:</span>
+                        <span className="font-semibold text-foreground bg-background px-2 py-0.5 rounded border capitalize">
+                          {method.replace(/_/g, " ")}
+                        </span>
+                      </div>
+                    </div>
                   )}
+
+                  <div className="flex-1 relative border-t">
+                    {mapData ? (
+                      <DistrictMap
+                        tileUrl={activeTileUrl}
+                        center={mapData.center}
+                        bbox={mapData.bbox}
+                        title="Groundwater Suitability"
+                        legend={dynamicLegend}
+                      />
+                    ) : (
+                      <div className="h-full flex items-center justify-center text-muted-foreground">Map not available</div>
+                    )}
+                  </div>
                 </TabsContent>
 
                 <TabsContent value="statistics" className="flex-1 p-6 overflow-y-auto m-0 space-y-6">
                   {statsData ? (
                     <>
                       <div>
-                        <h2 className="font-semibold text-lg mb-1">Analysis Results â€” {effectiveDistrictName}</h2>
+                        <h2 className="font-semibold text-lg mb-1">Analysis Results Ã¢â‚¬â€ {effectiveDistrictName}</h2>
                         <p className="text-sm text-muted-foreground">Overall groundwater suitability distribution.</p>
                       </div>
 
@@ -762,11 +882,11 @@ function printReport(data: any, analysisDate: string) {
                             <ResponsiveContainer width="100%" height={250}>
                               <BarChart data={Object.entries(activeAreas).map(([k,v], i) => ({ name: k, area: v, classIndex: i }))}>
                                 <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                                <YAxis unit=" km²" tick={{ fontSize: 11 }} />
-                                <Tooltip formatter={(v) => [`${v} km²`, 'Area']} />
+                                <YAxis unit=" kmÂ²" tick={{ fontSize: 11 }} />
+                                <Tooltip formatter={(v) => [`${v} kmÂ²`, 'Area']} />
                                 <Bar dataKey="area" radius={[4, 4, 0, 0]}>
                                   {Object.keys(activeAreas).map((_, i) => (
-                                    <Cell key={i} fill={CLASS_COLOR_LIST[i % CLASS_COLOR_LIST.length]} />
+                                    <Cell key={i} fill={activeColors[i % activeColors.length]} />
                                   ))}
                                 </Bar>
                               </BarChart>
@@ -778,12 +898,12 @@ function printReport(data: any, analysisDate: string) {
                            <h3 className="font-medium text-sm">AHP Consistency Check</h3>
                            {mapData?.ahp_data ? (
                              <div className="bg-muted/40 p-4 rounded text-sm space-y-2">
-                                <div className="flex justify-between"><span>Principal Eigenvalue (λ_max)</span> <span className="font-medium">{mapData.ahp_data.lambda_max.toFixed(3)}</span></div>
+                                <div className="flex justify-between"><span>Principal Eigenvalue (Î»_max)</span> <span className="font-medium">{mapData.ahp_data.lambda_max.toFixed(3)}</span></div>
                                 <div className="flex justify-between"><span>Consistency Index (CI)</span> <span className="font-medium">{mapData.ahp_data.ci.toFixed(3)}</span></div>
                                 <div className="flex justify-between"><span>Random Index (RI)</span> <span className="font-medium">{mapData.ahp_data.ri.toFixed(2)}</span></div>
                                 <div className={"mt-2 pt-2 border-t font-semibold flex justify-between " + (mapData.ahp_data.consistent ? "text-emerald-600" : "text-amber-600")}>
                                   <span>Consistency Ratio (CR)</span>
-                                  <span>{mapData.ahp_data.cr.toFixed(3)} {mapData.ahp_data.consistent ? "✓" : "⚠"}</span>
+                                  <span>{mapData.ahp_data.cr.toFixed(3)} {mapData.ahp_data.consistent ? "âœ“" : "âš "}</span>
                                 </div>
                              </div>
                            ) : (
@@ -795,35 +915,83 @@ function printReport(data: any, analysisDate: string) {
                   ) : <div className="text-muted-foreground">Stats unavailable</div>}
                 </TabsContent>
 
-                <TabsContent value="factor-maps" className="flex-1 p-6 overflow-y-auto m-0 space-y-4">
-                   <h2 className="font-semibold text-lg">Factor Maps</h2>
-                   <p className="text-sm text-muted-foreground mb-4">Standardized score maps for each criterion.</p>
-                   {mapData ? (
-                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <TabsContent value="static-maps" className="flex-1 p-6 overflow-y-auto m-0 space-y-4">
+                   <div className="flex flex-col gap-2 mb-4">
+                     <span className="text-sm font-medium">Select Map to Export:</span>
+                     <div className="flex flex-wrap gap-2 items-center mb-1">
+                       <button
+                         onClick={() => setActiveExportLayer("continuous")}
+                         className={`px-3 py-1 rounded text-xs font-medium border transition-colors ${
+                           activeExportLayer === "continuous" ? "bg-primary text-primary-foreground border-primary" : "bg-card border-input hover:bg-muted"
+                         }`}
+                       >
+                         Suitability Index (Continuous)
+                       </button>
+                       <button
+                         onClick={() => setActiveExportLayer("classified")}
+                         className={`px-3 py-1 rounded text-xs font-medium border transition-colors ${
+                           activeExportLayer === "classified" ? "bg-primary text-primary-foreground border-primary" : "bg-card border-input hover:bg-muted"
+                         }`}
+                       >
+                         Suitability Risk (Classified)
+                       </button>
+                     </div>
+                     <div className="flex flex-wrap gap-2 items-center mb-4">
                        {FACTOR_KEYS.map((k) => (
-                         <InteractiveFactorMapCard 
-                           key={k} 
-                           factorKey={k} 
-                           factor={mapData.factor_maps[k]} 
-                           aoiConfig={aoi} 
-                         />
+                         <button
+                           key={k}
+                           onClick={() => setActiveExportLayer(k)}
+                           className={`px-3 py-1 rounded text-xs font-medium border transition-colors ${
+                             activeExportLayer === k ? "bg-primary text-primary-foreground border-primary" : "bg-card border-input hover:bg-muted"
+                           }`}
+                         >
+                           {FACTOR_LABELS[k]}
+                         </button>
                        ))}
                      </div>
-                   ) : <div className="text-muted-foreground">Factor maps unavailable</div>}
-                </TabsContent>
-                
-                <TabsContent value="static-maps" className="flex-1 p-6 overflow-y-auto m-0 space-y-4">
-                   <h2 className="font-semibold text-lg">Professional Cartography</h2>
-                   {mapData ? (
-                     <MapExportControls
-                        district={effectiveDistrictName}
-                        title="Groundwater Suitability"
-                        tileUrl={activeTileUrl}
-                        thumbUrl={mapData.thumb_url}
-                        legend={SUITABILITY_LEGEND}
-                        classAreas={activeAreas}
-                     />
-                   ) : <div className="text-muted-foreground">Static maps unavailable</div>}
+                   </div>
+
+                   <div className="bg-card border rounded-lg p-4">
+                     {mapData && activeExportLayer === "continuous" && (
+                        <MapExportControls
+                           district={effectiveDistrictName}
+                           title="Groundwater_Suitability_Index"
+                           tileUrl={mapData.tile_url}
+                           thumbUrl={mapData.thumb_url}
+                           legend={SUITABILITY_LEGEND}
+                           classAreas={{}}
+                        />
+                     )}
+                     {mapData && activeExportLayer === "classified" && (
+                        <MapExportControls
+                           district={effectiveDistrictName}
+                           title="Groundwater_Suitability_Classified"
+                           tileUrl={classifyData?.classify?.panels?.[0]?.tile_url || mapData.tile_url}
+                           thumbUrl={classifyData?.classify?.panels?.[0]?.thumb_url || mapData.thumb_url}
+                           legend={customClassNames.slice(0, activeNClasses).map((name, i) => ({
+                              color: activeColors[i % activeColors.length],
+                              label: name
+                           }))}
+                           classAreas={activeAreas}
+                        />
+                     )}
+                     {mapData && FACTOR_KEYS.includes(activeExportLayer as FactorKey) && (
+                       <MapExportControls
+                          district={effectiveDistrictName}
+                          title={mapData.factor_maps[activeExportLayer as FactorKey].label}
+                          tileUrl={mapData.factor_maps[activeExportLayer as FactorKey].tile_url}
+                          thumbUrl={mapData.factor_maps[activeExportLayer as FactorKey].thumb_url}
+                          legend={[
+                            { color: '#d73027', label: 'Very Low (1)' },
+                            { color: '#fc8d59', label: 'Low (2)' },
+                            { color: '#fee08b', label: 'Moderate (3)' },
+                            { color: '#d9ef8b', label: 'High (4)' },
+                            { color: '#1a9850', label: 'Very High (5)' }
+                          ]}
+                          classAreas={{}}
+                       />
+                     )}
+                   </div>
                 </TabsContent>
 
                 <TabsContent value="report" className="flex-1 p-6 overflow-y-auto m-0 space-y-6">
@@ -837,10 +1005,10 @@ function printReport(data: any, analysisDate: string) {
                         stats={{
                           "Mean Suitability": statsData.stats?.["Mean Suitability"] || 0,
                           "Consistency Ratio (CR)": mapData.ahp_data.cr,
-                          "Total Area (km²)": Object.values(activeAreas).reduce((a: any, b: any) => a + b, 0) as number,
+                          "Total Area (kmÂ²)": Object.values(activeAreas).reduce((a: any, b: any) => a + b, 0) as number,
                         }}
                         classAreas={activeAreas}
-                        extraNotes={`The AHP consistency ratio (CR = ${mapData.ahp_data.cr.toFixed(3)}) confirms the weight assignments are ${mapData.ahp_data.consistent ? "acceptable" : "inconsistent — consider revising weights"}.`}
+                        extraNotes={`The AHP consistency ratio (CR = ${mapData.ahp_data.cr.toFixed(3)}) confirms the weight assignments are ${mapData.ahp_data.consistent ? "acceptable" : "inconsistent â€” consider revising weights"}.`}
                         maps={Object.entries(mapData.factor_maps).map(([k, f]: any) => [f.label, f.thumb_url] as [string, string])}
                       />
                     ) : (

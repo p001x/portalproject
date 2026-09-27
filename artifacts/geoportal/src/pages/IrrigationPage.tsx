@@ -627,7 +627,7 @@ export function IrrigationPage() {
             </Tabs>
           ) : (
             <div className="h-full border rounded-lg flex flex-col items-center justify-center bg-slate-50/50 text-slate-400">
-              <div className="p-4 bg-white rounded-full shadow-sm mb-4">
+              <div className="p-4 bg-card rounded-full shadow-sm mb-4">
                 <Droplet className="w-12 h-12 text-blue-300" />
               </div>
               <p className="text-lg font-medium">Ready to run Irrigation Scheduling Analysis</p>

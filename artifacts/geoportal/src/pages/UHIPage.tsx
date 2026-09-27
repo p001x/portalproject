@@ -52,6 +52,7 @@ export function UHIPage() {
 
   const [method, setMethod] = useState("natural_breaks");
   const [nClasses, setNClasses] = useState(5);
+  const [lstSource, setLstSource] = useState("hybrid");
 
   const mutation = useMutation({
     mutationFn: () => api.uhi({ 
@@ -60,7 +61,8 @@ export function UHIPage() {
       end_date: endDate, 
       grid_size: gridSize, 
       n_classes: nClasses, 
-      method 
+      method,
+      lst_source: lstSource
     }),
   });
 
@@ -127,6 +129,19 @@ export function UHIPage() {
           />
         </div>
 
+                <div className="space-y-1 mt-4">
+          <Label>Temperature Source</Label>
+          <Select value={lstSource} onValueChange={setLstSource}>
+            <SelectTrigger className="w-full text-xs h-8">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="hybrid" className="text-xs">Hybrid (MODIS+SRTM 30m - Recommended)</SelectItem>
+              <SelectItem value="landsat" className="text-xs">Harmonized Landsat 30m (4,5,7,8,9)</SelectItem>
+              <SelectItem value="modis" className="text-xs">Raw MODIS (1km)</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
         <div className="space-y-2 pt-2 border-t mt-2">
           <Label>Classification</Label>
           <div className="flex flex-col gap-3">
@@ -424,6 +439,7 @@ export function UHIPage() {
     </ResizablePanelGroup>
   );
 }
+
 
 
 

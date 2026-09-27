@@ -80,14 +80,14 @@ function FactorMapCard({ factorKey, factor, analysisDate, factorLabels }: {
         {factor.thumb_url ? (
           <>
             <img src={factor.thumb_url} alt={`${factorKey} map`} className="w-full h-full object-cover" />
-            <div className="absolute top-2 left-2 bg-white/90 backdrop-blur-sm px-2 py-1 rounded shadow-sm text-xs border">
+            <div className="absolute top-2 left-2 bg-background/90 backdrop-blur-sm px-2 py-1 rounded shadow-sm text-xs border">
               <strong>{factorLabels[factorKey]}</strong>
               <div className="text-[10px] text-muted-foreground">{analysisDate}</div>
             </div>
-            <div className="absolute top-2 right-2 bg-white/80 rounded shadow-sm p-1">
+            <div className="absolute top-2 right-2 bg-background/80 rounded shadow-sm p-1">
               <SmallNorthArrow />
             </div>
-            <div className="absolute bottom-2 left-2 right-2 bg-white/90 backdrop-blur-sm rounded shadow-sm border px-2 py-1.5 flex flex-col gap-1">
+            <div className="absolute bottom-2 left-2 right-2 bg-background/90 backdrop-blur-sm rounded shadow-sm border px-2 py-1.5 flex flex-col gap-1">
               <div className="text-[10px] font-medium text-center uppercase tracking-wider text-slate-500">
                 Suitability Score (1-5)
               </div>
@@ -160,12 +160,11 @@ export function HabitatSuitabilityPage() {
     queryFn: api.habitatConfig,
   });
 
-  const [aoi, setAoi] = useState<AOIConfig>({ type: "rwanda", country: "Rwanda", province: "Kigali City", name: "Kigali City" });
+  const [aoi, setAoi] = useState<AOIConfig>({ type: "rwanda", country: "Rwanda", province: "Kigali City", name: "Kigali City", start_year: 1980, end_year: 2024 });
   const effectiveDistrictName = aoi.name || "Custom Study Area";
   const [activeLayer, setActiveLayer] = useState<string>("suitability");
   
   const [weights, setWeights] = useState<Record<string, number>>({});
-  const [year, setYear] = useState<number>(2021);
   const [landcoverScores, setLandcoverScores] = useState<Record<string, number>>({});
   
   const [ahpData, setAhpData] = useState<AhpData | null>(null);
@@ -193,9 +192,7 @@ export function HabitatSuitabilityPage() {
       if (Object.keys(landcoverScores).length === 0) {
         setLandcoverScores({ ...config.default_landcover_scores });
       }
-      if (config.available_years?.length > 0 && !config.available_years.includes(year)) {
-        setYear(config.available_years[config.available_years.length - 1]);
-      }
+      
     }
   }, [config, effectiveDistrictName]);
 
@@ -233,10 +230,10 @@ export function HabitatSuitabilityPage() {
       custom_weights,
       method: method,
       custom_labels: customClassNames,
-      year: year,
+      start_year: aoi.start_year || 1980, end_year: aoi.end_year || 2024,
       landcover_scores: landcoverScores
     };
-  }, [weights, aoi, reverseFlags, nClasses, method, customClassNames, year, landcoverScores, normalize]);
+  }, [weights, aoi, reverseFlags, nClasses, method, customClassNames, aoi.start_year, aoi.end_year, landcoverScores, normalize]);
 
   const analysisMutation = useMutation({
     mutationFn: async () => api.habitat(getReq()),
@@ -286,7 +283,7 @@ export function HabitatSuitabilityPage() {
         module_name: "Habitat Suitability",
         aoi: aoi,
         district: effectiveDistrictName,
-        date_range: year.toString(),
+        date_range: `${aoi.start_year || 1980}-${aoi.end_year || 2024}`,
         stats: {
           "Total Analyzed Area (km²)": parseFloat(Object.values(data.class_areas_km2).reduce((a: any, b: any) => a + b, 0).toFixed(2)),
           "AHP Consistency Ratio": parseFloat((ahpData?.cr || 0).toFixed(3)),
@@ -765,7 +762,7 @@ export function HabitatSuitabilityPage() {
             </Tabs>
           ) : (
             <div className="h-[600px] border rounded-lg flex flex-col items-center justify-center bg-slate-50/50 text-slate-400">
-              <div className="p-4 bg-white rounded-full shadow-sm mb-4">
+              <div className="p-4 bg-card rounded-full shadow-sm mb-4">
                 <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="opacity-50">
                   <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
                 </svg>

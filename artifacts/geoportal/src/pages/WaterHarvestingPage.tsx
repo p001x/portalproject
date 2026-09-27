@@ -29,8 +29,7 @@ const PRECIP_LEGEND: LegendItem[] = [
 ];
 
 export function WaterHarvestingPage() {
-  const [aoi, setAoi] = useState<AOIConfig>({ type: "rwanda", country: "Rwanda", province: "Kigali City", name: "Gasabo" });
-  const [year, setYear] = useState<number>(2023);
+  const [aoi, setAoi] = useState<AOIConfig>({ type: "rwanda", country: "Rwanda", province: "Kigali City", name: "Gasabo", start_year: 1980, end_year: 2024 });
   const [runoffCoefficient, setRunoffCoefficient] = useState<number>(0.85);
   const [manualArea, setManualArea] = useState<string>("");
   const [useBuildingFootprint, setUseBuildingFootprint] = useState<boolean>(false);
@@ -42,7 +41,8 @@ export function WaterHarvestingPage() {
 
   const getReq = () => ({
     aoi, 
-    year, 
+    start_year: aoi.start_year || 1980, 
+    end_year: aoi.end_year || 2024,
     runoff_coefficient: runoffCoefficient,
     manual_area_m2: manualArea ? parseFloat(manualArea) : undefined,
     use_building_footprint: useBuildingFootprint,
@@ -114,15 +114,33 @@ export function WaterHarvestingPage() {
               </p>
             </div>
 
-            <div className="space-y-3">
-              <Label>Year (for historical rainfall)</Label>
-              <Input 
-                type="number" 
-                value={year}
-                onChange={(e) => setYear(parseInt(e.target.value) || 2023)}
-                min={2000}
-                max={2024}
-              />
+            <div className="flex gap-2 w-full mt-2">
+              <div className="flex-1 space-y-1">
+                <Label className="text-xs text-muted-foreground">Start Year</Label>
+                <Select value={String(aoi.start_year || 1980)} onValueChange={(val) => setAoi(prev => ({ ...prev, start_year: parseInt(val) }))}>
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Array.from({ length: new Date().getFullYear() - 1980 + 1 }, (_, i) => 1980 + i).map(year => (
+                      <SelectItem key={year} value={String(year)} className="text-xs">{year}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex-1 space-y-1">
+                <Label className="text-xs text-muted-foreground">End Year</Label>
+                <Select value={String(aoi.end_year || 2024)} onValueChange={(val) => setAoi(prev => ({ ...prev, end_year: parseInt(val) }))}>
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Array.from({ length: new Date().getFullYear() - 1980 + 1 }, (_, i) => 1980 + i).map(year => (
+                      <SelectItem key={year} value={String(year)} className="text-xs">{year}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
 
             <div className="space-y-3">
@@ -332,7 +350,7 @@ export function WaterHarvestingPage() {
                         <ReportDownloadButton aoi={aoi}
                           moduleName="Household Water Harvesting"
                           district={effectiveDistrictName}
-                          dateRange={`Year ${year}`}
+                          dateRange={`${aoi.start_year || 1980} - ${aoi.end_year || 2024}`}
                           stats={{
                             "Total Annual Harvest (L)": statsData.annual_volume_liters,
                             "Annual Household Demand (L)": statsData.annual_demand_liters,

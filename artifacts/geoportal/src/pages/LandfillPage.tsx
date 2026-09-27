@@ -133,11 +133,11 @@ function FactorMapCard({ factorKey, factor, analysisDate }: {
           {factor.label} · Score 1–5 · Weight {factor.weight_pct}%
         </div>
         {/* North arrow */}
-        <div className="absolute top-5 right-1 bg-white/85 rounded p-0.5">
+        <div className="absolute top-5 right-1 bg-background/85 rounded p-0.5">
           <SmallNorthArrow />
         </div>
         {/* Score legend */}
-        <div className="absolute bottom-4 right-1 bg-white/85 rounded p-1 text-[8px] leading-tight">
+        <div className="absolute bottom-4 right-1 bg-background/85 rounded p-1 text-[8px] leading-tight">
           {[
             { c: "#1a9850", l: "5" }, { c: "#d9ef8b", l: "4" }, { c: "#fee08b", l: "3" },
             { c: "#f46d43", l: "2" }, { c: "#d73027", l: "1" },
@@ -673,7 +673,7 @@ export function LandfillPage() {
         <main className="h-full overflow-y-auto p-6">
         {!data && !isPending && (
           <div className="h-full relative bg-muted/20 rounded-lg overflow-hidden border">
-            <DistrictMap aoi={aoi} basemap="satellite" />
+            <DistrictMap aoi={aoi} customGeojson={aoi.type === "custom" && aoi.geojson ? JSON.parse(aoi.geojson) : undefined} basemap="satellite" />
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-4 z-[1000]">
               <div className="bg-background/80 backdrop-blur-md p-6 rounded-2xl shadow-xl border border-primary/20 text-center max-w-sm pointer-events-none transition-all hover:scale-105 duration-300">
                 <h3 className="text-xl font-bold mb-2 text-foreground">Analysis Configuration</h3>
@@ -964,10 +964,10 @@ export function LandfillPage() {
                   <div className="absolute top-0 left-0 right-0 bg-black/55 text-white text-[11px] font-semibold text-center py-1 px-2">
                     Landfill Site Suitability — {data.district}
                   </div>
-                  <div className="absolute top-6 right-1 bg-white/85 rounded p-0.5">
+                  <div className="absolute top-6 right-1 bg-background/85 rounded p-0.5">
                     <SmallNorthArrow />
                   </div>
-                  <div className="absolute bottom-4 right-1 bg-white/85 rounded p-1 text-[8px] leading-tight">
+                  <div className="absolute bottom-4 right-1 bg-background/85 rounded p-1 text-[8px] leading-tight">
                     {SUITABILITY_LEGEND.map(({ color, label }) => (
                       <div key={label} className="flex items-center gap-0.5">
                         <span className="w-2.5 h-2.5 inline-block rounded-sm border border-gray-300" style={{ background: color }} />

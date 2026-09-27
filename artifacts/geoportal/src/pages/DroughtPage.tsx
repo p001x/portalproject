@@ -70,8 +70,7 @@ function getDefaultLabels(n: number): string[] {
 }
 
 export function DroughtPage() {
-  const [aoi, setAoi] = useState<AOIConfig>({ type: "rwanda", country: "Rwanda", name: "Rwanda" });
-  const [year, setYear] = useState(2023);
+  const [aoi, setAoi] = useState<AOIConfig>({ type: "rwanda", country: "Rwanda", name: "Rwanda", start_year: 1980, end_year: 2024 });
   const [nClasses, setNClasses] = useState(5);
   const [method, setMethod] = useState("natural_breaks");
   const [customClassNames, setCustomClassNames] = useState<string[]>(() => getDefaultLabels(5));
@@ -100,16 +99,24 @@ export function DroughtPage() {
   const [reverseEvi, setReverseEvi] = useState(false);
 
   const mapMutation = useMutation({
-    mutationFn: () => api.drought.map({ aoi, year, reverse_sm: reverseSm, reverse_rf: reverseRf, reverse_ndvi: reverseNdvi, reverse_vci: reverseVci, reverse_lst: reverseLst, reverse_cdd: reverseCdd, reverse_evi: reverseEvi }),
+    mutationFn: () => api.drought.map({ aoi,
+    start_year: aoi.start_year || 1980,
+    end_year: aoi.end_year || 2024, reverse_sm: reverseSm, reverse_rf: reverseRf, reverse_ndvi: reverseNdvi, reverse_vci: reverseVci, reverse_lst: reverseLst, reverse_cdd: reverseCdd, reverse_evi: reverseEvi }),
   });
   const statsMutation = useMutation({
-    mutationFn: () => api.drought.stats({ aoi, year, reverse_sm: reverseSm, reverse_rf: reverseRf, reverse_ndvi: reverseNdvi, reverse_vci: reverseVci, reverse_lst: reverseLst, reverse_cdd: reverseCdd, reverse_evi: reverseEvi }),
+    mutationFn: () => api.drought.stats({ aoi,
+    start_year: aoi.start_year || 1980,
+    end_year: aoi.end_year || 2024, reverse_sm: reverseSm, reverse_rf: reverseRf, reverse_ndvi: reverseNdvi, reverse_vci: reverseVci, reverse_lst: reverseLst, reverse_cdd: reverseCdd, reverse_evi: reverseEvi }),
   });
   const classifyMutation = useMutation({
-    mutationFn: () => api.drought.classify({ aoi, year, n_classes: nClasses, method, custom_labels: customClassNames, reverse_sm: reverseSm, reverse_rf: reverseRf, reverse_ndvi: reverseNdvi, reverse_vci: reverseVci, reverse_lst: reverseLst, reverse_cdd: reverseCdd, reverse_evi: reverseEvi }),
+    mutationFn: () => api.drought.classify({ aoi,
+    start_year: aoi.start_year || 1980,
+    end_year: aoi.end_year || 2024, n_classes: nClasses, method, custom_labels: customClassNames, reverse_sm: reverseSm, reverse_rf: reverseRf, reverse_ndvi: reverseNdvi, reverse_vci: reverseVci, reverse_lst: reverseLst, reverse_cdd: reverseCdd, reverse_evi: reverseEvi }),
   });
   const exportMutation = useMutation({
-    mutationFn: () => api.drought.export({ aoi, year, reverse_sm: reverseSm, reverse_rf: reverseRf, reverse_ndvi: reverseNdvi, reverse_vci: reverseVci, reverse_lst: reverseLst, reverse_cdd: reverseCdd, reverse_evi: reverseEvi }),
+    mutationFn: () => api.drought.export({ aoi,
+    start_year: aoi.start_year || 1980,
+    end_year: aoi.end_year || 2024, reverse_sm: reverseSm, reverse_rf: reverseRf, reverse_ndvi: reverseNdvi, reverse_vci: reverseVci, reverse_lst: reverseLst, reverse_cdd: reverseCdd, reverse_evi: reverseEvi }),
   });
 
   const handleAnalyze = () => {

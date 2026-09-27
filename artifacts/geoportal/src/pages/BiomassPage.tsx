@@ -10,6 +10,7 @@ import { api } from "@/lib/api";
 import type { AOIConfig } from "@/lib/api";
 import { DistrictMap, LegendItem } from "@/components/DistrictMap";
 import { StudyAreaSelector } from "@/components/StudyAreaSelector";
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { ReportDownloadButton } from "@/components/ReportDownloadButton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Download, ImageIcon, FileText, Printer, Map as MapIcon } from "lucide-react";
@@ -37,7 +38,7 @@ const PALETTES = [
 
 function SmallNorthArrow() {
   return (
-    <div className="bg-white/90 backdrop-blur rounded shadow-sm p-1 flex flex-col items-center">
+    <div className="bg-background/90 backdrop-blur rounded shadow-sm p-1 flex flex-col items-center">
       <div className="text-[10px] font-bold leading-none mb-0.5 text-slate-700">N</div>
       <svg width="12" height="16" viewBox="0 0 24 32" fill="none" xmlns="http://www.w3.org/2000/svg">
         <path d="M12 0L24 32L12 24L0 32L12 0Z" fill="currentColor" className="text-slate-800" />
@@ -63,8 +64,8 @@ function InteractiveFactorMapCard({ factorKey, factor, aoiConfig, bufferKm, year
         factor_key: factorKey,
         palette: paletteParam,
         buffer_km: bufferKm,
-        year_start: yearStart,
-        year_end: yearEnd
+        start_year: aoi.start_year || 1980,
+        end_year: aoi.end_year || 2024
       });
       setUrls(res.data);
     } catch (err) {
@@ -83,7 +84,7 @@ function InteractiveFactorMapCard({ factorKey, factor, aoiConfig, bufferKm, year
   }, [selectedPalette]);
 
   return (
-    <div className="border rounded-lg p-4 space-y-4 bg-white shadow-sm flex flex-col">
+    <div className="border rounded-lg p-4 space-y-4 bg-card shadow-sm flex flex-col">
       <div>
         <h4 className="font-semibold text-base leading-tight">{factor.title || factor.label}</h4>
       </div>
@@ -93,8 +94,8 @@ function InteractiveFactorMapCard({ factorKey, factor, aoiConfig, bufferKm, year
           <div className="absolute inset-0 flex items-center justify-center bg-slate-50/80 backdrop-blur-sm z-10">
             <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
           </div>
-        ) : (
-          <div className="h-full relative bg-muted/20 rounded-lg overflow-hidden border">
+        ) : null}
+          {/*<div className="h-full relative bg-muted/20 rounded-lg overflow-hidden border">
             <DistrictMap aoi={aoi} basemap="satellite" />
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-4 z-[1000]">
               <div className="bg-background/80 backdrop-blur-md p-6 rounded-2xl shadow-xl border border-primary/20 text-center max-w-sm pointer-events-none transition-all hover:scale-105 duration-300">
@@ -115,7 +116,7 @@ function InteractiveFactorMapCard({ factorKey, factor, aoiConfig, bufferKm, year
               </div>
             </div>
           </div>
-        )}
+        )}*/}
         <img src={urls.thumb_url} alt={factor.title || factor.label} className="w-full h-full object-cover transition-transform group-hover:scale-[1.02] duration-300" />
       </div>
 
@@ -167,8 +168,8 @@ function InteractiveFactorMapCard({ factorKey, factor, aoiConfig, bufferKm, year
                   factor_key: factorKey,
                   palette: paletteParam,
                   buffer_km: bufferKm,
-                  year_start: yearStart,
-                  year_end: yearEnd
+                  start_year: aoi.start_year || 1980,
+                  end_year: aoi.end_year || 2024
                 }).then(res => {
                   window.open(res.data.download_url, '_blank');
                 });
@@ -196,10 +197,10 @@ function StaticMapCard({ factorKey, factor, analysisDate }: { factorKey: string;
         
         <div className="absolute inset-0 ring-1 ring-inset ring-black/10 rounded pointer-events-none"></div>
 
-        <div className="absolute top-2 right-2 bg-white/90 backdrop-blur shadow-sm p-1.5 rounded text-[10px] uppercase font-bold text-slate-700 tracking-wider">
+        <div className="absolute top-2 right-2 bg-background/90 backdrop-blur shadow-sm p-1.5 rounded text-[10px] uppercase font-bold text-slate-700 tracking-wider">
           Score Map
         </div>
-        <div className="absolute bottom-2 left-2 bg-white/90 backdrop-blur shadow-sm p-1.5 rounded text-[9px] uppercase font-bold text-slate-600 tracking-wider flex items-center gap-1">
+        <div className="absolute bottom-2 left-2 bg-background/90 backdrop-blur shadow-sm p-1.5 rounded text-[9px] uppercase font-bold text-slate-600 tracking-wider flex items-center gap-1">
           <span className="text-slate-400">Scale:</span> 1 : 100,000
         </div>
         <div className="absolute bottom-2 right-2 drop-shadow-md">
@@ -210,7 +211,7 @@ function StaticMapCard({ factorKey, factor, analysisDate }: { factorKey: string;
       <div className="text-xs text-muted-foreground flex items-center justify-between">
         <span className="flex items-center gap-1.5">
           <div className="w-16 h-2 rounded-sm bg-gradient-to-r from-[#0000ff] via-[#00ff00] to-[#ff0000]" />
-          Low → High Risk
+          Low â†’ High Risk
         </span>
         <span className="text-[10px] uppercase">{analysisDate}</span>
       </div>
@@ -219,7 +220,7 @@ function StaticMapCard({ factorKey, factor, analysisDate }: { factorKey: string;
 }
 
 export function BiomassPage() {
-  const [aoi, setAoi] = useState<AOIConfig>({ type: "district", name: "GICUMBI" });
+  const [aoi, setAoi] = useState<AOIConfig>({ type: "rwanda", country: "Rwanda", name: "Rwanda" });
   const [bufferKm, setBufferKm] = useState(3.0);
   const [activeTab, setActiveTab] = useState("map");
 
@@ -228,8 +229,8 @@ export function BiomassPage() {
   const getReq = () => ({
     aoi,
     buffer_km: bufferKm,
-    year_start: 2019,
-    year_end: 2023,
+    start_year: aoi.start_year || 1980,
+    end_year: aoi.end_year || 2024,
   });
 
   const mapMutation = useMutation({
@@ -260,6 +261,7 @@ export function BiomassPage() {
   const anyData = (mapData && statsData && classifyData && exportData) ? {
     ...mapData,
     ...statsData,
+    class_areas_km2: classifyData.panels?.[0]?.areas || {},
     ...classifyData,
     ...exportData
   } : null;
@@ -267,242 +269,266 @@ export function BiomassPage() {
   const error = mapMutation.error || statsMutation.error || classifyMutation.error || exportMutation.error;
 
   return (
-    <div className="space-y-6 max-w-[1600px] mx-auto">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold flex items-center gap-3">
-            <Flame className="w-8 h-8 text-orange-500" />
-            Firewood/Biomass Depletion Tracker
-          </h1>
-          <p className="text-muted-foreground mt-2 max-w-3xl">
-            Monitors forest cover change over time near settlements to flag areas at risk of biomass/firewood scarcity.
-          </p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        <div className="lg:col-span-1">
-          <div className="bg-card border rounded-lg shadow-sm flex flex-col h-[calc(100vh-170px)] sticky top-20">
-            <h3 className="font-semibold text-lg flex items-center border-b p-5 shrink-0 gap-2">
-              <Flame className="w-5 h-5 text-orange-500" />
-              Configuration
-            </h3>
-            
-            <div className="flex-1 overflow-y-auto p-5 space-y-8">
-              <div className="space-y-3">
-                <StudyAreaSelector value={aoi} onChange={setAoi} />
-                <p className="text-xs text-muted-foreground">Select an area to scan for biomass depletion.</p>
-              </div>
-
-              <div className="space-y-4 pt-2 border-t">
-                <div>
-                  <h4 className="font-medium text-sm">Settlement Proximity Buffer (km)</h4>
-                  <p className="text-xs text-muted-foreground mt-1 mb-4">
-                    Distance from populated areas (WorldPop &gt; 10 people/100m) to search for forest degradation.
-                  </p>
-                </div>
-                
-                <div className="space-y-2 bg-slate-50/50 p-3 rounded-md border border-slate-100">
-                  <div className="flex justify-between items-center mb-2">
-                    <Label className="text-sm font-medium">Gathering Distance</Label>
-                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-orange-100 text-orange-800">
-                      {bufferKm} km
-                    </span>
-                  </div>
-                  <Slider
-                    value={[bufferKm]}
-                    min={1}
-                    max={10}
-                    step={0.5}
-                    onValueChange={(v) => setBufferKm(v[0])}
-                    className="py-1"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="p-5 border-t shrink-0">
-              <Button onClick={runAnalysis} disabled={isPending} className="w-full h-11 text-base bg-orange-600 hover:bg-orange-700">
-                {isPending && <Loader2 className="mr-2 h-5 w-5 animate-spin" />}
-                {isPending ? "Calculating..." : "Run Tracker"}
-              </Button>
-            </div>
+    <ResizablePanelGroup direction="horizontal" className="h-full items-stretch">
+      {/* Sidebar */}
+      <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
+        <aside className="h-full w-full md:border-b md:border-b-0 md:border-r bg-card flex flex-col gap-5 p-5 md:overflow-y-auto">
+          <div className="flex items-center gap-2 text-primary font-semibold text-lg">
+            <Flame className="w-5 h-5" />
+            Biomass Tracker
           </div>
-        </div>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            Monitor forest cover change and analyze biomass depletion risk zones.
+          </p>
 
-        <div className="lg:col-span-3 flex flex-col h-[calc(100vh-170px)] sticky top-20">
+          <StudyAreaSelector value={aoi} onChange={setAoi} />
+
+          <div className="space-y-1">
+            <Label>Analysis Buffer (km)</Label>
+            <p className="text-[11px] text-muted-foreground leading-relaxed mb-2">
+              Search radius from settlements to detect extraction activity.
+            </p>
+            <div className="flex justify-between items-center p-2 rounded-lg border bg-muted/30 text-sm">
+              <span className="font-medium text-muted-foreground">Radius</span>
+              <span className="font-bold text-primary">{bufferKm} km</span>
+            </div>
+            <Slider value={[bufferKm]} min={1} max={10} step={0.5} onValueChange={(v) => setBufferKm(v[0])} className="py-4" />
+          </div>
+
+          <div className="mt-auto pt-4 flex gap-2">
+            <Button onClick={runAnalysis} disabled={isPending} className="w-full gap-2">
+              {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+              {isPending ? "Processing..." : "Generate Analysis"}
+            </Button>
+          </div>
+        </aside>
+      </ResizablePanel>
+      <ResizableHandle withHandle />
+      <ResizablePanel defaultSize={75}>
+        <div className="h-full flex flex-col relative bg-muted/10">
           {error ? (
-             <div className="h-full border rounded-lg flex flex-col items-center justify-center bg-red-50 text-red-500 p-6 text-center">
-               <Info className="w-10 h-10 mb-4" />
-               <p className="text-lg font-bold">Analysis Failed</p>
-               <p className="text-sm mt-2">{error.message}</p>
-             </div>
+            <div className="h-full flex flex-col items-center justify-center text-destructive p-8 text-center">
+              <Info className="w-10 h-10 mb-4" />
+              <p className="text-lg font-semibold mb-2">Analysis Failed</p>
+              <p className="text-sm opacity-80 max-w-md">{error.message}</p>
+            </div>
           ) : isPending && !anyData ? (
-            <div className="h-full border rounded-lg flex flex-col items-center justify-center bg-slate-50/50 text-slate-400">
-              <Loader2 className="w-8 h-8 animate-spin mb-4" />
-              <p>Analyzing Sentinel-2 NDVI trends and Hansen Forest Cover...</p>
+            <div className="h-full flex flex-col items-center justify-center">
+              <Loader2 className="w-8 h-8 animate-spin text-primary mb-4" />
+              <p className="text-sm font-medium text-muted-foreground">Running Analysis in Earth Engine...</p>
             </div>
           ) : anyData ? (
-            <div className="bg-card border rounded-lg shadow-sm flex flex-col h-full overflow-hidden">
-              <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full flex flex-col h-full">
-                <div className="border-b px-4 py-2 shrink-0 flex items-center justify-between bg-slate-50/50">
-                  <TabsList>
-                    <TabsTrigger value="map">Risk Map</TabsTrigger>
-                    <TabsTrigger value="factors">Factors</TabsTrigger>
-                    <TabsTrigger value="statistics">Statistics</TabsTrigger>
-                    <TabsTrigger value="static-maps">Static Maps</TabsTrigger>
-                    <TabsTrigger value="report">Report</TabsTrigger>
-                  </TabsList>
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col min-h-0">
+              <div className="border-b px-4 py-2 bg-background flex items-center justify-between shrink-0">
+                <TabsList className="bg-muted">
+                  <TabsTrigger value="map">Risk Map</TabsTrigger>
+                  <TabsTrigger value="statistics">Dashboard</TabsTrigger>
+                  <TabsTrigger value="factors">Factors</TabsTrigger>
+                  <TabsTrigger value="static-maps">Static Maps</TabsTrigger>
+                  <TabsTrigger value="report">Report</TabsTrigger>
+                </TabsList>
+                <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                  Data Ready
                 </div>
+              </div>
 
-                <div className="flex-1 overflow-hidden relative">
-                  <TabsContent value="map" className="h-full w-full m-0 data-[state=active]:flex flex-col">
-                    {mapData ? (
-                      <div className="flex-1 relative bg-slate-100">
-                        <DistrictMap
-                          tileUrl={mapData.tile_url}
-                          center={mapData.center}
-                          bbox={mapData.bbox}
-                          title="Biomass Depletion Risk (0-100)"
-                          legend={RISK_LEGEND}
-                        />
+              <div className="flex-1 relative overflow-hidden">
+                <TabsContent value="map" className="h-full w-full m-0 p-0 border-0 data-[state=active]:flex flex-col">
+                  <div className="flex-1 relative">
+                    <DistrictMap
+                      tileUrl={mapData.tile_url}
+                      center={mapData.center}
+                      bbox={mapData.bbox}
+                      title="Biomass Depletion Risk"
+                      legend={RISK_LEGEND}
+                    />
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="statistics" className="h-full w-full m-0 p-4 sm:p-6 overflow-y-auto">
+                  <div className="max-w-5xl mx-auto space-y-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                      <div className="bg-card rounded-xl border p-4 shadow-sm">
+                        <div className="text-sm font-medium text-muted-foreground mb-1">Total Standing Biomass</div>
+                        <div className="text-2xl font-bold">{statsData.stats["Total Standing Biomass (Tonnes)"]?.toLocaleString()}</div>
+                        <div className="text-xs text-muted-foreground mt-1">Tonnes</div>
                       </div>
-                    ) : (
-                      <div className="h-full flex items-center justify-center text-muted-foreground">Map data unavailable</div>
-                    )}
-                  </TabsContent>
+                      <div className="bg-card rounded-xl border p-4 shadow-sm">
+                        <div className="text-sm font-medium text-muted-foreground mb-1">Mean Depletion Risk</div>
+                        <div className="text-2xl font-bold text-orange-500">{statsData.stats["Mean Depletion Risk"]}</div>
+                        <div className="text-xs text-muted-foreground mt-1">/ 100 average risk score</div>
+                      </div>
+                      <div className="bg-card rounded-xl border p-4 shadow-sm">
+                        <div className="text-sm font-medium text-muted-foreground mb-1">Estimated Biomass Lost</div>
+                        <div className="text-2xl font-bold text-red-500">{statsData.stats["Estimated Biomass Lost (Tonnes)"]?.toLocaleString()}</div>
+                        <div className="text-xs text-muted-foreground mt-1">Tonnes recently depleted</div>
+                      </div>
+                      <div className="bg-card rounded-xl border p-4 shadow-sm">
+                        <div className="text-sm font-medium text-muted-foreground mb-1">Depletion Runway</div>
+                        <div className="text-2xl font-bold">{statsData.stats["Depletion Runway (Years)"] === 999 ? "∞" : statsData.stats["Depletion Runway (Years)"]}</div>
+                        <div className="text-xs text-muted-foreground mt-1">Years</div>
+                      </div>
+                    </div>
 
-                  <TabsContent value="statistics" className="h-full w-full m-0 p-6 overflow-y-auto bg-slate-50/50">
-                    <div className="max-w-5xl mx-auto space-y-8">
-                      {statsData && mapData && (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                          <div>
-                            <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                              <div className="w-1.5 h-6 bg-orange-500 rounded-full" />
-                              Risk Distribution (km²)
-                            </h3>
-                            <div className="space-y-3">
-                              {Object.entries(statsData.class_areas_km2).map(([cls, area]: [string, any], i) => {
-                                const total = Object.values(statsData.class_areas_km2).reduce((a: any, b: any) => a + b, 0) as number;
-                                const pct = total > 0 ? (area / total) * 100 : 0;
-                                return (
-                                  <div key={cls} className="space-y-1.5">
-                                    <div className="flex justify-between text-sm">
-                                      <span className="font-medium text-slate-700">{cls}</span>
-                                      <span className="text-muted-foreground">{area.toFixed(1)} km² ({pct.toFixed(1)}%)</span>
-                                    </div>
-                                    <div className="h-2.5 rounded-full bg-slate-100 overflow-hidden">
-                                      <div 
-                                        className="h-full rounded-full transition-all duration-1000 ease-out" 
-                                        style={{ width: `${pct}%`, backgroundColor: CLASS_COLOR_LIST[i] }} 
-                                      />
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                      <div className="lg:col-span-2 bg-card rounded-xl border p-6 shadow-sm">
+                        <h3 className="text-lg font-semibold mb-6">Commercial Energy Balance</h3>
+                        <div className="flex flex-col md:flex-row items-center gap-8">
+                          <div className="flex flex-col items-center justify-center w-32 h-32 rounded-full border-4 border-muted relative">
+                            <span className={`text-sm font-bold text-center px-2 ${statsData.stats["Commercial Energy Status"]?.includes('CRITICAL') ? 'text-destructive' : statsData.stats["Commercial Energy Status"] === 'SUSTAINABLE SURPLUS' ? 'text-emerald-500' : 'text-orange-500'}`}>
+                              {statsData.stats["Commercial Energy Status"]}
+                            </span>
                           </div>
                           
-                          <div className="bg-slate-50 rounded-lg p-6 border flex flex-col justify-center">
-                            <p className="text-sm text-slate-600 mb-2">Mean Depletion Risk (Forested Areas)</p>
-                            <div className="text-4xl font-bold text-slate-800">
-                              {statsData.stats["Mean Depletion Risk"]}<span className="text-lg text-slate-400 font-normal ml-1">/ 100</span>
+                          <div className="flex-1 w-full space-y-4">
+                            <div>
+                              <div className="flex justify-between text-sm mb-1">
+                                <span className="font-medium">Annual Fuelwood Demand</span>
+                                <span className="text-muted-foreground">{statsData.stats["Annual Fuelwood Demand (Tonnes/yr)"]?.toLocaleString()} T/yr</span>
+                              </div>
+                              <div className="h-2 bg-muted rounded-full overflow-hidden">
+                                <div className="h-full bg-orange-500" style={{ width: `${Math.min(100, (statsData.stats["Annual Fuelwood Demand (Tonnes/yr)"] / Math.max(statsData.stats["Annual Fuelwood Demand (Tonnes/yr)"], statsData.stats["Sustainable Annual Yield (Tonnes/yr)"])) * 100)}%` }} />
+                              </div>
                             </div>
-                            <div className="mt-4 pt-4 border-t border-slate-200/60 text-sm text-muted-foreground leading-relaxed">
-                              This score reflects the average forest degradation and proximity to population centers within the AOI. Areas over 75 indicate critical loss of biomass that may impact local communities.
+                            <div>
+                              <div className="flex justify-between text-sm mb-1">
+                                <span className="font-medium">Sustainable Annual Yield</span>
+                                <span className="text-muted-foreground">{statsData.stats["Sustainable Annual Yield (Tonnes/yr)"]?.toLocaleString()} T/yr</span>
+                              </div>
+                              <div className="h-2 bg-muted rounded-full overflow-hidden">
+                                <div className="h-full bg-emerald-500" style={{ width: `${Math.min(100, (statsData.stats["Sustainable Annual Yield (Tonnes/yr)"] / Math.max(statsData.stats["Annual Fuelwood Demand (Tonnes/yr)"], statsData.stats["Sustainable Annual Yield (Tonnes/yr)"])) * 100)}%` }} />
+                              </div>
                             </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </TabsContent>
-
-                  <TabsContent value="factors" className="h-full w-full m-0 p-6 overflow-y-auto bg-slate-50/50">
-                    <div className="max-w-6xl mx-auto space-y-6">
-                      <div>
-                        <h2 className="text-2xl font-bold text-slate-800">Biomass Depletion Factors</h2>
-                        <p className="text-muted-foreground">Preview, customize, and export individual factor maps that contributed to the final risk assessment.</p>
-                      </div>
-                      
-                      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">
-                        {mapData?.factor_maps && Object.entries(mapData.factor_maps).map(([key, factor]: [string, any]) => (
-                          <InteractiveFactorMapCard 
-                            key={key} 
-                            factorKey={key} 
-                            factor={factor} 
-                            aoiConfig={aoi}
-                            bufferKm={bufferKm}
-                            yearStart={2019}
-                            yearEnd={2023}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  </TabsContent>
-
-                  <TabsContent value="static-maps" className="h-full w-full m-0 p-6 overflow-y-auto bg-slate-50/50">
-                    <div className="max-w-6xl mx-auto space-y-6">
-                      <div>
-                        <h2 className="text-2xl font-bold text-slate-800">Static Maps</h2>
-                        <p className="text-muted-foreground">Print-ready static maps for reports and presentations.</p>
-                      </div>
-                      
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                        <div className="border rounded-lg p-4 space-y-3 bg-white">
-                          <h4 className="font-semibold text-base leading-tight">Final Depletion Risk Map</h4>
-                          <div className="relative border rounded bg-slate-50 aspect-square overflow-hidden">
-                            <img src={mapData?.thumb_url} alt="Final Map" className="w-full h-full object-cover" />
-                            <div className="absolute inset-0 ring-1 ring-inset ring-black/10 rounded pointer-events-none"></div>
-                            <div className="absolute bottom-2 right-2 drop-shadow-md">
-                              <SmallNorthArrow />
+                            <div className="pt-4 border-t flex justify-between items-center">
+                              <span className="text-sm font-medium">Net Biomass Deficit</span>
+                              <span className="text-lg font-bold">{statsData.stats["Net Biomass Deficit (Tonnes/yr)"]?.toLocaleString()} <span className="text-sm font-normal text-muted-foreground">T/yr</span></span>
                             </div>
                           </div>
                         </div>
-                        {mapData?.factor_maps && Object.entries(mapData.factor_maps).map(([key, factor]: [string, any]) => (
-                          <StaticMapCard 
-                            key={key} 
-                            factorKey={key} 
-                            factor={factor} 
-                            analysisDate={new Date().toLocaleDateString()}
-                          />
-                        ))}
                       </div>
-                    </div>
-                  </TabsContent>
 
-                  <TabsContent value="report" className="h-full w-full m-0 p-6 overflow-y-auto bg-slate-50/50">
-                    <div className="max-w-3xl mx-auto space-y-6">
-                      <div className="bg-white border rounded-xl p-8 shadow-sm text-center space-y-4">
-                        <div className="w-16 h-16 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center mx-auto">
-                          <FileText className="w-8 h-8" />
-                        </div>
-                        <div>
-                          <h2 className="font-semibold text-2xl mb-2">Biomass Depletion Report — {effectiveDistrictName}</h2>
-                          <p className="text-muted-foreground">
-                            Download a full PDF report including statistics, class areas, and classification maps.
-                          </p>
-                        </div>
-                        
-                        <div className="pt-4 flex justify-center">
-                          <ReportDownloadButton 
-                            aoi={aoi}
-                            moduleName="Firewood/Biomass Depletion Tracker"
-                            dateRange="2019 - 2023"
-                            stats={statsData?.stats || {}}
-                            classAreas={statsData?.class_areas_km2 || {}}
-                            district={effectiveDistrictName}
-                          />
+                      <div className="bg-card rounded-xl border p-6 shadow-sm">
+                        <h3 className="text-lg font-semibold mb-6">Risk Distribution</h3>
+                        <div className="space-y-4">
+                          {Object.entries(anyData.class_areas_km2).map(([cls, area], i) => {
+                            const total = Object.values(anyData.class_areas_km2).reduce((a, b) => (a as number) + (b as number), 0) as number;
+                            const pct = total > 0 ? ((area as number) / total) * 100 : 0;
+                            return (
+                              <div key={cls} className="space-y-1">
+                                <div className="flex justify-between text-sm">
+                                  <span className="font-medium">{cls}</span>
+                                  <span className="text-muted-foreground">{pct.toFixed(1)}%</span>
+                                </div>
+                                <div className="h-2 rounded-full bg-muted overflow-hidden">
+                                  <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: CLASS_COLOR_LIST[i] }} />
+                                </div>
+                                <div className="text-[10px] text-muted-foreground text-right">{(area as number).toFixed(1)} km²</div>
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     </div>
-                  </TabsContent>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="factors" className="h-full w-full m-0 p-4 sm:p-6 overflow-y-auto">
+                  <div className="max-w-6xl mx-auto">
+                    <div className="mb-6">
+                      <h2 className="text-xl font-bold">Biomass Depletion Factors</h2>
+                      <p className="text-sm text-muted-foreground mt-1">Preview, customize, and export individual factor maps.</p>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {mapData?.factor_maps && Object.entries(mapData.factor_maps).map(([key, factor]: [string, any]) => (
+                        <InteractiveFactorMapCard 
+                          key={key} 
+                          factorKey={key} 
+                          factor={factor} 
+                          aoiConfig={aoi}
+                          bufferKm={bufferKm}
+                          yearStart={aoi.start_year || 1980}
+                          yearEnd={aoi.end_year || 2024}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="static-maps" className="h-full w-full m-0 p-4 sm:p-6 overflow-y-auto">
+                  <div className="max-w-6xl mx-auto">
+                    <div className="mb-6">
+                      <h2 className="text-xl font-bold">Static Maps</h2>
+                      <p className="text-sm text-muted-foreground mt-1">Print-ready static maps with scalebars and legends.</p>
+                    </div>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      <div className="border rounded-xl p-4 space-y-4 bg-card shadow-sm">
+                        <h4 className="font-semibold text-sm">Final Depletion Risk Map</h4>
+                        <div className="relative border rounded-lg bg-muted/20 aspect-square overflow-hidden">
+                          <img src={mapData?.thumb_url} alt="Final Map" className="w-full h-full object-cover" />
+                          <div className="absolute bottom-3 right-3 drop-shadow-md">
+                            <SmallNorthArrow />
+                          </div>
+                        </div>
+                      </div>
+                      {mapData?.factor_maps && Object.entries(mapData.factor_maps).map(([key, factor]: [string, any]) => (
+                        <StaticMapCard 
+                          key={key} 
+                          factorKey={key} 
+                          factor={factor} 
+                          analysisDate={new Date().toLocaleDateString()}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="report" className="h-full w-full m-0 p-6 overflow-y-auto flex items-center justify-center">
+                  <div className="max-w-xl w-full">
+                    <div className="bg-card border rounded-2xl p-10 shadow-sm text-center space-y-6">
+                      <div className="w-16 h-16 bg-primary/10 text-primary rounded-full flex items-center justify-center mx-auto">
+                        <FileText className="w-8 h-8" />
+                      </div>
+                      <div>
+                        <h2 className="font-bold text-2xl">Biomass Depletion Report</h2>
+                        <p className="text-muted-foreground font-medium mt-2">{effectiveDistrictName}</p>
+                        <p className="text-sm text-muted-foreground max-w-sm mx-auto mt-4">
+                          Download a comprehensive PDF report including all statistics, class area breakdowns, and high-resolution maps.
+                        </p>
+                      </div>
+                      
+                      <div className="pt-4 flex justify-center">
+                        <ReportDownloadButton 
+                          aoi={aoi}
+                          moduleName="Firewood/Biomass Depletion Tracker"
+                          dateRange="2019 - 2023"
+                          stats={statsData?.stats || {}}
+                          classAreas={anyData?.class_areas_km2 || {}}
+                          district={effectiveDistrictName}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </TabsContent>
+              </div>
+            </Tabs>
+          ) : (
+            <div className="h-full relative bg-muted/20 rounded-lg overflow-hidden border">
+              <DistrictMap aoi={aoi} customGeojson={aoi.type === "custom" && aoi.geojson ? JSON.parse(aoi.geojson) : undefined} basemap="satellite" />
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-4 z-[1000]">
+                <div className="bg-background/80 backdrop-blur-md p-6 rounded-2xl shadow-xl border border-primary/20 text-center max-w-sm pointer-events-none transition-all hover:scale-105 duration-300">
+                  <h3 className="text-xl font-bold mb-2 text-foreground">Analysis Configuration</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Select a study area and parameters from the sidebar, then click run to visualize the results here.
+                  </p>
                 </div>
-              </Tabs>
+              </div>
             </div>
-          ) : null}
+          )}
         </div>
-      </div>
-    </div>
+      </ResizablePanel>
+    </ResizablePanelGroup>
   );
 }
-

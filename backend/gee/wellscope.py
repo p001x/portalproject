@@ -1,29 +1,38 @@
 import json
 import ee
+import math
 from cachetools import TTLCache
-from threading import Lock
+from threading import Lock, BoundedSemaphore
 import concurrent.futures
 
-_cache_map = TTLCache(maxsize=128, ttl=3600)
+gee_semaphore = BoundedSemaphore(5)
+
+_cache_map = TTLCache(maxsize=64, ttl=3600)
+_cache_stats = TTLCache(maxsize=64, ttl=3600)
+_cache_classify = TTLCache(maxsize=64, ttl=3600)
+_cache_export = TTLCache(maxsize=64, ttl=3600)
+_cache_build = TTLCache(maxsize=64, ttl=3600)
 _lock = Lock()
 
-FACTOR_ORDER = ["rainfall", "lithology", "slope", "twi", "drainage", "dist_water", "lulc"]
+FACTOR_ORDER = ["rainfall", "lithology", "slope", "twi", "drainage", "dist_water", "soil", "lulc"]
 DEFAULT_WEIGHTS = {
-    "rainfall": 30.0,
-    "lithology": 21.0,
-    "slope": 15.0,
-    "twi": 15.0,
+    "rainfall": 26.0,
+    "lithology": 18.0,
+    "slope": 13.0,
+    "twi": 13.0,
     "drainage": 9.0,
     "dist_water": 6.0,
+    "soil": 11.0,
     "lulc": 4.0
 }
 FACTOR_META = {
-    "rainfall":   {"label": "Rainfall", "weight_pct": 30},
-    "lithology":  {"label": "Lithology", "weight_pct": 21},
-    "slope":      {"label": "Slope", "weight_pct": 15},
-    "twi":        {"label": "Topographic Wetness", "weight_pct": 15},
+    "rainfall":   {"label": "Rainfall", "weight_pct": 26},
+    "lithology":  {"label": "Lithology", "weight_pct": 18},
+    "slope":      {"label": "Slope", "weight_pct": 13},
+    "twi":        {"label": "Topographic Wetness", "weight_pct": 13},
     "drainage":   {"label": "Drainage Density", "weight_pct": 9},
     "dist_water": {"label": "Distance to Water", "weight_pct": 6},
+    "soil":       {"label": "Soil Permeability", "weight_pct": 11},
     "lulc":       {"label": "Land Cover", "weight_pct": 4},
 }
 
@@ -64,20 +73,6 @@ def compute_ahp_data(weights: dict) -> dict:
         "n": n,
     }
 
-def _reclassify(image, thresholds, values):
-    result = ee.Image(values[-1])
-    for i in range(len(thresholds) - 1, -1, -1):
-        result = result.where(image.lt(thresholds[i]), values[i])
-    return result.toFloat()
-
-def _factor_urls(image, key: str, aoi) -> dict:
-    return {
-        "label": FACTOR_META[key]["label"],
-        "weight_pct": FACTOR_META[key]["weight_pct"],
-        "tile_url": image.getMapId(_SCORE_VIS)["tile_fetcher"].url_format,
-        "thumb_url": image.getThumbURL({**_SCORE_VIS, "region": aoi.bounds(), "dimensions": 512, "format": "png"}),
-    }
-
 def _normalize_weights(custom: dict | None) -> dict:
     if not custom:
         return {k: v / 100.0 for k, v in DEFAULT_WEIGHTS.items()}
@@ -85,124 +80,146 @@ def _normalize_weights(custom: dict | None) -> dict:
     total = sum(raw.values())
     return {k: v / total for k, v in raw.items()}
 
-def get_factor_images(aoi, dynamic_scale):
-    from gee.classify_utils import get_jenks_breaks
-
-    def apply_jenks(img, name, reverse=False, n=5):
-        hist = img.reduceRegion(
-            reducer=ee.Reducer.autoHistogram(),
-            geometry=aoi,
-            scale=dynamic_scale,
-            maxPixels=1e9
-        ).getInfo()
-        
-        band_name = list(hist.keys())[0] if hist else None
-        if not hist or not band_name or not hist[band_name]:
-            return ee.Image(3).toFloat()
-            
-        bps = get_jenks_breaks(hist[band_name], n)
-        bps = list(sorted(set(bps)))
-        
-        if len(bps) < 2: return ee.Image(3).toFloat()
-            
-        values = [5, 4, 3, 2, 1] if reverse else [1, 2, 3, 4, 5]
-        
-        result = ee.Image(values[-1])
-        for i in range(len(bps) - 1, -1, -1):
-            result = result.where(img.lt(bps[i]), values[min(i, 4)])
-        return result.updateMask(img.mask()).toFloat()
-
-    # 1. Rainfall
-    rain = ee.Image("WORLDCLIM/V1/BIO").select('bio12').clip(aoi)
-    rain_score = apply_jenks(rain, 'bio12')
-
-    # 2. Lithology
-    # Using the local asset 'litodoloy' instead of the deprecated ALOS_lithology
-    lith = ee.Image("projects/ee-petersonyang87/assets/litodoloy").clip(aoi)
-    
-    # Remap the local 1-10 classes into groundwater potential scores (1-5)
-    # Defaulting unmapped values to 3
-    lith_score = lith.remap(
-        [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], 
-        [3, 4, 5, 2, 1, 3, 4, 2, 5, 1], 
-        3
-    ).toFloat().clip(aoi)
-
-    # 3. Slope
-    dem = ee.ImageCollection("COPERNICUS/DEM/GLO30").select('DEM').mosaic().clip(aoi)
-    slope = ee.Terrain.slope(dem)
-    slope_score = apply_jenks(slope, 'slope', reverse=True)
-
-    # 4. TWI
-    flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1').clip(aoi)
-    slope_rad = slope.multiply(3.14159 / 180.0)
-    tan_slope = slope_rad.tan().max(0.001)
-    twi = flow_acc.add(1).divide(tan_slope).log().rename("twi")
-    twi_score = apply_jenks(twi, 'twi')
-
-    # 5. Drainage Density (Distance to streams)
-    streams = flow_acc.gt(100)
-    # fastDistanceTransform targets 0. We invert streams so 0 = stream. (463m is approx 15 arcsec)
-    dist_to_stream = streams.Not().fastDistanceTransform(256).multiply(463).clip(aoi).rename("dist_stream")
-    drainage_score = apply_jenks(dist_to_stream, 'dist_stream', reverse=True)
-
-    # 6. Distance to Surface Water
-    gsw = ee.Image("JRC/GSW1_4/GlobalSurfaceWater").select('occurrence')
-    water_mask = gsw.gt(0).unmask(0).clip(aoi)
-    # Invert water_mask so 0 = water
-    dist_water = water_mask.Not().fastDistanceTransform(256).multiply(30).clip(aoi).rename("dist_water")
-    dist_water_score = apply_jenks(dist_water, 'dist_water', reverse=True)
-
-    # 7. LULC
-    lulc = ee.ImageCollection("ESA/WorldCover/v200").first().select('Map').clip(aoi)
-    lulc_score = ee.Image(1) \
-        .where(lulc.eq(10), 5) \
-        .where(lulc.eq(90), 5) \
-        .where(lulc.eq(95), 5) \
-        .where(lulc.eq(20), 4) \
-        .where(lulc.eq(30), 4) \
-        .where(lulc.eq(40), 3) \
-        .toFloat().clip(aoi)
-
-    return {
-        "rainfall": rain_score,
-        "lithology": lith_score,
-        "slope": slope_score,
-        "twi": twi_score,
-        "drainage": drainage_score,
-        "dist_water": dist_water_score,
-        "lulc": lulc_score,
-    }
+def get_dynamic_scale(geom):
+    try:
+        area_sqkm = geom.area().divide(1e6).getInfo()
+        if area_sqkm > 10000: return 500
+        elif area_sqkm > 2000: return 250
+        elif area_sqkm > 500: return 100
+        else: return 30
+    except:
+        return 250
 
 def _build_wellscope_base(aoi_config: dict, custom_weights: dict = None):
-    from gee.aoi_utils import get_aoi_geometry
-    aoi = get_aoi_geometry(aoi_config)
-    area_sqkm = aoi.area().divide(1e6).getInfo()
-    if area_sqkm > 10000:
-        dynamic_scale = 500
-    elif area_sqkm > 2000:
-        dynamic_scale = 250
-    elif area_sqkm > 500:
-        dynamic_scale = 100
-    else:
-        dynamic_scale = 30
+    cache_key = (json.dumps(aoi_config, sort_keys=True), json.dumps(custom_weights, sort_keys=True) if custom_weights else None)
+    is_first = False
+    with _lock:
+        if cache_key in _cache_build:
+            cached = _cache_build[cache_key]
+        else:
+            cached = concurrent.futures.Future()
+            _cache_build[cache_key] = cached
+            is_first = True
 
-    weights = _normalize_weights(custom_weights)
-    score_images = get_factor_images(aoi, dynamic_scale)
-    
-    suitability = (
-        score_images["rainfall"].multiply(weights["rainfall"])
-        .add(score_images["lithology"].multiply(weights["lithology"]))
-        .add(score_images["slope"].multiply(weights["slope"]))
-        .add(score_images["twi"].multiply(weights["twi"]))
-        .add(score_images["drainage"].multiply(weights["drainage"]))
-        .add(score_images["dist_water"].multiply(weights["dist_water"]))
-        .add(score_images["lulc"].multiply(weights["lulc"]))
-    )
+    if not is_first:
+        return cached.result()
 
-    suitability_100 = suitability.subtract(1).divide(4).multiply(100).rename("GWP")
-    
-    return aoi, dynamic_scale, weights, score_images, suitability_100
+    try:
+        from gee.aoi_utils import get_aoi_geometry
+        from gee.classify_utils import get_jenks_breaks
+        aoi = get_aoi_geometry(aoi_config)
+        dynamic_scale = get_dynamic_scale(aoi)
+
+        weights = _normalize_weights(custom_weights)
+        
+        start_year = int(aoi_config.get("start_year", 1980))
+        end_year = int(aoi_config.get("end_year", 2024))
+        
+        # Build raw continuous images
+        chirps = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY")
+        rain = chirps.filterDate(f"{start_year}-01-01", f"{end_year}-12-31") \
+                     .select("precipitation") \
+                     .sum() \
+                     .divide(max(end_year - start_year + 1, 1)) \
+                     .clip(aoi).rename("bio12")
+        
+        dem = ee.Image("USGS/SRTMGL1_003").select("elevation").clip(aoi)
+        slope = ee.Terrain.slope(dem).rename("slope")
+        
+        flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1').clip(aoi)
+        slope_rad = slope.multiply(math.pi / 180.0)
+        tan_slope = slope_rad.tan().max(0.001)
+        twi = flow_acc.add(1).divide(tan_slope).log().rename("twi")
+        
+        # Extract dense stream network (upstream area > 10 km2 for significant streams)
+        merit_upa = ee.Image("MERIT/Hydro/v1_0_1").select('upa')
+        streams = merit_upa.gt(10).unmask(0)
+        
+        # True Drainage Density via Kernel Density Estimation (Spatial Interpolation)
+        kernel = ee.Kernel.circle(radius=3000, units='meters')
+        drainage_density = streams.convolve(kernel).clip(aoi).rename("drainage")
+
+        rivers = ee.FeatureCollection("WWF/HydroSHEDS/v1/FreeFlowingRivers").filterBounds(aoi)
+        dist_water = rivers.distance(searchRadius=20000, maxError=500).clip(aoi).rename("dist_water")
+        
+        clay = ee.Image("OpenLandMap/SOL/SOL_CLAY-WFRACTION_USDA-3A1A1A_M/v02").select("b0").clip(aoi)
+        sand = ee.Image("OpenLandMap/SOL/SOL_SAND-WFRACTION_USDA-3A1A1A_M/v02").select("b0").clip(aoi)
+        permeability = sand.subtract(clay).rename("soil_perm")
+
+        # Combine for a single histogram pass
+        continuous_bands = ee.Image.cat([rain, slope, twi, drainage_density, dist_water, permeability])
+        
+        scale_hist = dynamic_scale * 2 if dynamic_scale else 100
+        with gee_semaphore:
+            hist_raw = continuous_bands.reduceRegion(
+                reducer=ee.Reducer.autoHistogram(maxBuckets=50),
+                geometry=aoi,
+                scale=scale_hist,
+                maxPixels=10000, bestEffort=True,
+            ).getInfo()
+
+        def apply_jenks(img, name, reverse=False, n=5):
+            hist = hist_raw.get(name) or []
+            bps = get_jenks_breaks(hist, n)
+            while len(bps) < n - 1:
+                bps.append(bps[-1] + 0.001 if bps else 1.0)
+            bps = bps[:n-1]
+            
+            values = [5, 4, 3, 2, 1] if reverse else [1, 2, 3, 4, 5]
+            result = ee.Image(values[-1])
+            for i in range(len(bps) - 1, -1, -1):
+                result = result.where(img.lt(bps[i]), values[min(i, 4)])
+            return result.updateMask(img.mask()).toFloat()
+
+        rain_score = apply_jenks(rain, 'bio12')
+        slope_score = apply_jenks(slope, 'slope', reverse=True)
+        twi_score = apply_jenks(twi, 'twi')
+        drainage_score = apply_jenks(drainage_density, 'drainage')
+        dist_water_score = apply_jenks(dist_water, 'dist_water', reverse=True)
+        soil_score = apply_jenks(permeability, 'soil_perm')
+
+        # Categorical variables
+        lith = ee.Image("projects/ee-petersonyang87/assets/litodoloy").clip(aoi)
+        lith_score = lith.remap([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], [3, 4, 5, 2, 1, 3, 4, 2, 5, 1], 3).toFloat().clip(aoi)
+        
+        lulc = ee.ImageCollection("ESA/WorldCover/v200").first().select('Map').clip(aoi)
+        lulc_score = ee.Image(1) \
+            .where(lulc.eq(10), 5).where(lulc.eq(90), 5).where(lulc.eq(95), 5) \
+            .where(lulc.eq(20), 4).where(lulc.eq(30), 4).where(lulc.eq(40), 3) \
+            .toFloat().clip(aoi)
+
+        score_images = {
+            "rainfall": rain_score, "lithology": lith_score, "slope": slope_score,
+            "twi": twi_score, "drainage": drainage_score, "dist_water": dist_water_score,
+            "soil": soil_score, "lulc": lulc_score,
+        }
+
+        suitability = (
+            score_images["rainfall"].multiply(weights["rainfall"])
+            .add(score_images["lithology"].multiply(weights["lithology"]))
+            .add(score_images["slope"].multiply(weights["slope"]))
+            .add(score_images["twi"].multiply(weights["twi"]))
+            .add(score_images["drainage"].multiply(weights["drainage"]))
+            .add(score_images["dist_water"].multiply(weights["dist_water"]))
+            .add(score_images["soil"].multiply(weights["soil"]))
+            .add(score_images["lulc"].multiply(weights["lulc"]))
+        )
+        suitability_100 = suitability.subtract(1).divide(4).multiply(100).rename("GWP")
+
+        res = (aoi, dynamic_scale, weights, score_images, suitability_100)
+        try:
+            cached.set_result(res)
+        except concurrent.futures.InvalidStateError:
+            pass
+        return res
+    except Exception as e:
+        with _lock:
+            _cache_build.pop(cache_key, None)
+        try:
+            cached.set_exception(e)
+        except concurrent.futures.InvalidStateError:
+            pass
+        raise e
 
 def compute_wellscope_map(aoi_config: dict, custom_weights: dict = None) -> dict:
     cache_key = ("wellscope_map", json.dumps(aoi_config, sort_keys=True), json.dumps(custom_weights, sort_keys=True) if custom_weights else None)
@@ -216,14 +233,25 @@ def compute_wellscope_map(aoi_config: dict, custom_weights: dict = None) -> dict
     bounds = aoi.bounds().getInfo()["coordinates"][0]
     center = [(bounds[0][1] + bounds[2][1]) / 2, (bounds[0][0] + bounds[2][0]) / 2]
 
-    map_id = suitability_100.getMapId(_SUITABILITY_VIS)
-    thumb_url = suitability_100.getThumbURL({
-        **_SUITABILITY_VIS, "region": aoi.bounds(), "dimensions": 512, "format": "png"
-    })
+    with gee_semaphore:
+        map_id = suitability_100.getMapId(_SUITABILITY_VIS)
+        try:
+            thumb_url = suitability_100.getThumbURL({**_SUITABILITY_VIS, "region": aoi.bounds(), "dimensions": 512, "format": "png"})
+        except ee.EEException:
+            thumb_url = None
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        f_factors = executor.submit(lambda: {k: _factor_urls(v, k, aoi) for k, v in score_images.items()})
-        factor_maps = f_factors.result()
+    factor_maps = {}
+    for key, img in score_images.items():
+        with gee_semaphore:
+            try:
+                factor_maps[key] = {
+                    "label": FACTOR_META[key]["label"],
+                    "weight_pct": FACTOR_META[key]["weight_pct"],
+                    "tile_url": img.getMapId(_SCORE_VIS)["tile_fetcher"].url_format,
+                    "thumb_url": img.getThumbURL({**_SCORE_VIS, "region": aoi.bounds(), "dimensions": 512, "format": "png"})
+                }
+            except ee.EEException:
+                pass
 
     result = {
         "tile_url": map_id["tile_fetcher"].url_format,
@@ -241,17 +269,18 @@ def compute_wellscope_map(aoi_config: dict, custom_weights: dict = None) -> dict
 def compute_wellscope_stats(aoi_config: dict, custom_weights: dict = None) -> dict:
     cache_key = ("wellscope_stats", json.dumps(aoi_config, sort_keys=True), json.dumps(custom_weights, sort_keys=True) if custom_weights else None)
     with _lock:
-        if cache_key in _cache_map:
-            return _cache_map[cache_key]
+        if cache_key in _cache_stats:
+            return _cache_stats[cache_key]
 
     aoi, dynamic_scale, _, _, suitability_100 = _build_wellscope_base(aoi_config, custom_weights)
 
-    stats = suitability_100.reduceRegion(
-        reducer=ee.Reducer.mean().combine(ee.Reducer.min(), sharedInputs=True).combine(ee.Reducer.max(), sharedInputs=True),
-        geometry=aoi,
-        scale=dynamic_scale,
-        maxPixels=1e10
-    ).getInfo()
+    with gee_semaphore:
+        stats = suitability_100.reduceRegion(
+            reducer=ee.Reducer.mean().combine(ee.Reducer.min(), sharedInputs=True).combine(ee.Reducer.max(), sharedInputs=True),
+            geometry=aoi,
+            scale=dynamic_scale,
+            maxPixels=1e10
+        ).getInfo()
 
     result = {
         "Mean Suitability": round(stats.get("GWP_mean") or 0, 1),
@@ -259,15 +288,15 @@ def compute_wellscope_stats(aoi_config: dict, custom_weights: dict = None) -> di
         "Max Suitability": round(stats.get("GWP_max") or 0, 1),
     }
     with _lock:
-        _cache_map[cache_key] = result
+        _cache_stats[cache_key] = result
     return result
 
 def compute_wellscope_classify(aoi_config: dict, custom_weights: dict = None, n_classes: int = 5, method: str = "natural_breaks", custom_labels: list = None) -> dict:
     labels_tuple = tuple(custom_labels) if custom_labels else None
     cache_key = ("wellscope_classify", json.dumps(aoi_config, sort_keys=True), json.dumps(custom_weights, sort_keys=True) if custom_weights else None, n_classes, method, labels_tuple)
     with _lock:
-        if cache_key in _cache_map:
-            return _cache_map[cache_key]
+        if cache_key in _cache_classify:
+            return _cache_classify[cache_key]
 
     aoi, dynamic_scale, _, _, suitability_100 = _build_wellscope_base(aoi_config, custom_weights)
     from gee.classify_utils import quantile_classify
@@ -293,48 +322,51 @@ def compute_wellscope_classify(aoi_config: dict, custom_weights: dict = None, n_
         "classified_areas_km2": raw_areas,
     }
     with _lock:
-        _cache_map[cache_key] = result
+        _cache_classify[cache_key] = result
     return result
 
 def compute_wellscope_export(aoi_config: dict, custom_weights: dict = None) -> dict:
     cache_key = ("wellscope_export", json.dumps(aoi_config, sort_keys=True), json.dumps(custom_weights, sort_keys=True) if custom_weights else None)
     with _lock:
-        if cache_key in _cache_map:
-            return _cache_map[cache_key]
+        if cache_key in _cache_export:
+            return _cache_export[cache_key]
 
     aoi, _, _, _, suitability_100 = _build_wellscope_base(aoi_config, custom_weights)
 
+    with gee_semaphore:
+        try:
+            dl_url = suitability_100.getDownloadURL({"scale": 100, "region": aoi.bounds(), "format": "GEO_TIFF", "crs": "EPSG:4326"})
+        except Exception:
+            dl_url = None
+
     result = {
-        "download_url": suitability_100.getDownloadURL({
-            "scale": 100, "region": aoi.bounds(), "format": "GEO_TIFF", "crs": "EPSG:4326"
-        })
+        "download_url": dl_url
     }
     with _lock:
-        _cache_map[cache_key] = result
+        _cache_export[cache_key] = result
     return result
 
 def export_factor_map(aoi_config: dict, factor_key: str, palette: list = None) -> dict:
-    from gee.aoi_utils import get_aoi_geometry
-    aoi = get_aoi_geometry(aoi_config)
-    area_sqkm = aoi.area().divide(1e6).getInfo()
-    if area_sqkm > 10000:
-        dynamic_scale = 500
-    elif area_sqkm > 2000:
-        dynamic_scale = 250
-    elif area_sqkm > 500:
-        dynamic_scale = 100
-    else:
-        dynamic_scale = 30
-        
-    score_images = get_factor_images(aoi, dynamic_scale)
+    aoi, _, _, score_images, _ = _build_wellscope_base(aoi_config)
+    
     if factor_key not in score_images:
         raise ValueError(f"Invalid factor key: {factor_key}")
         
     image = score_images[factor_key]
     vis = {"min": 1, "max": 5, "palette": palette} if palette else _SCORE_VIS
         
+    with gee_semaphore:
+        try:
+            thumb_url = image.getThumbURL({**vis, "region": aoi.bounds(), "dimensions": 1024, "format": "png"})
+        except Exception:
+            thumb_url = None
+            
+        try:
+            download_url = image.getDownloadURL({"scale": 30, "crs": "EPSG:4326", "region": aoi, "format": "GEO_TIFF"})
+        except Exception:
+            download_url = None
+            
     return {
-        "thumb_url": image.getThumbURL({**vis, "region": aoi.bounds(), "dimensions": 1024, "format": "png"}),
-        "download_url": image.getDownloadURL({"scale": 30, "crs": "EPSG:4326", "region": aoi, "format": "GEO_TIFF"})
+        "thumb_url": thumb_url,
+        "download_url": download_url
     }
-

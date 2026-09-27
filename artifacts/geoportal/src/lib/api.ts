@@ -50,6 +50,8 @@ export type AOIConfig = {
   sector?: string;
   cell?: string;
   geojson?: any;
+  start_year?: number;
+  end_year?: number;
   name?: string; // friendly name
 };
 
@@ -385,7 +387,11 @@ export interface AccessibilityMapResult {
   facilities?: { lon: number; lat: number; name: string; type: string }[];
   origins?: { lon: number; lat: number; name: string; type: string }[];
   nearest_road_geojson?: any;
+  start_year?: number;
+  end_year?: number;
   farthest_road_geojson?: any;
+  start_year?: number;
+  end_year?: number;
   incidents?: { lon: number; lat: number; name: string }[];
   routes?: { geometry: any; incident_name: string; facility_name: string; distance_km: number }[];
 }
@@ -980,6 +986,8 @@ export const api = {
   biomass: {
     map: (body: any) => post<{ tile_url: string; thumb_url?: string; factor_maps?: Record<string, any>; center: [number, number]; bbox: number[] }>("/biomass/map", body),
     stats: (body: any) => post<{ stats: Record<string, number>; class_areas_km2: Record<string, number>; district: string }>("/biomass/stats", body),
+    classify: (body: any) => post<any>("/biomass/classify", body),
+    export: (body: any) => post<any>("/biomass/export", body),
     factorExport: (req: { aoi: AOIConfig; factor_key: string; palette?: string[]; buffer_km?: number; year_start?: number; year_end?: number }) => post<{ download_url: string }>("/biomass/factor-export", req),
   },
 

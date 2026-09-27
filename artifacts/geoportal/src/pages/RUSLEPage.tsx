@@ -66,8 +66,7 @@ function getDefaultLabels(n: number): string[] {
 }
 
 export function RUSLEPage() {
-  const [aoi, setAoi] = useState<AOIConfig>({ type: "rwanda", country: "Rwanda", name: "Rwanda" });
-  const [year, setYear] = useState(2023);
+  const [aoi, setAoi] = useState<AOIConfig>({ type: "rwanda", country: "Rwanda", name: "Rwanda", start_year: 1980, end_year: 2024 });
   const [nClasses, setNClasses] = useState(5);
   const [method, setMethod] = useState("natural_breaks");
   const [customClassNames, setCustomClassNames] = useState<string[]>(() => getDefaultLabels(5));
@@ -94,7 +93,8 @@ export function RUSLEPage() {
 
   const getReq = () => ({
     aoi,
-    year,
+    start_year: aoi.start_year || 1980,
+    end_year: aoi.end_year || 2024,
     n_classes: nClasses,
     method,
     custom_labels: customClassNames,
@@ -174,19 +174,33 @@ export function RUSLEPage() {
 
         <StudyAreaSelector value={aoi} onChange={setAoi} />
 
-        <div className="space-y-1">
-          <Label>Year</Label>
-          <Select value={String(year)} onValueChange={(v) => setYear(Number(v))}>
-            <SelectTrigger className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">None</SelectItem>
-              {YEARS.map((y) => (
-                <SelectItem key={y} value={String(y)}>{y}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        <div className="flex gap-2 w-full mt-2">
+          <div className="flex-1 space-y-1">
+            <Label className="text-xs text-muted-foreground">Start Year</Label>
+            <Select value={String(aoi.start_year || 1980)} onValueChange={(val) => setAoi(prev => ({ ...prev, start_year: parseInt(val) }))}>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {Array.from({ length: new Date().getFullYear() - 1980 + 1 }, (_, i) => 1980 + i).map(y => (
+                  <SelectItem key={y} value={String(y)} className="text-xs">{y}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex-1 space-y-1">
+            <Label className="text-xs text-muted-foreground">End Year</Label>
+            <Select value={String(aoi.end_year || 2024)} onValueChange={(val) => setAoi(prev => ({ ...prev, end_year: parseInt(val) }))}>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {Array.from({ length: new Date().getFullYear() - 1980 + 1 }, (_, i) => 1980 + i).map(y => (
+                  <SelectItem key={y} value={String(y)} className="text-xs">{y}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
         <div className="space-y-4">
@@ -288,7 +302,7 @@ export function RUSLEPage() {
         {isPending && (
           <div className="h-full flex flex-col items-center justify-center gap-3 text-muted-foreground">
             <Loader2 className="w-8 h-8 animate-spin text-primary" />
-            <p>Computing RUSLE for {aoi.name || 'Custom'} ({year})…</p>
+            <p>Computing RUSLE for {aoi.name || 'Custom'} ({aoi.start_year || 1980}-{aoi.end_year || 2024})…</p>
             <p className="text-xs">GEE analysis typically takes 15–60 seconds.</p>
           </div>
         )}
@@ -366,7 +380,7 @@ export function RUSLEPage() {
                     <h2 className="font-semibold text-lg mb-1">
                       Statistics — {statsData.district}
                     </h2>
-                    <p className="text-sm text-muted-foreground">Year: {statsData.year}</p>
+                    <p className="text-sm text-muted-foreground">Year: {statsData.start_year || 1980}-{statsData.end_year || 2024}</p>
                   </div>
 
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -535,7 +549,7 @@ export function RUSLEPage() {
                     <ReportDownloadButton aoi={aoi}
                       moduleName="RUSLE Soil Erosion"
                       district={aoi.name || "Custom"}
-                      dateRange={`Year: ${statsData.year}`}
+                      dateRange={`${statsData.start_year || 1980} - ${statsData.end_year || 2024}`}
                       stats={{
                         ...statsData.stats,
                         "Mean R": statsData.factor_means?.R,

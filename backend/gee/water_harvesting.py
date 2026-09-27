@@ -22,20 +22,21 @@ _lock = Lock()
 
 _PRECIP_VIS = {"min": 0, "max": 200, "palette": ["#f7fbff", "#c6dbef", "#6baed6", "#2171b5", "#08306b"]}
 
-def _build_water_harvesting_images(aoi_config: dict, year: int):
+def _build_water_harvesting_images(aoi_config: dict, start_year: int, end_year: int):
     from gee.aoi_utils import get_aoi_geometry
     aoi = get_aoi_geometry(aoi_config)
 
     
-    start_date = f"{year}-01-01"
-    end_date = f"{year}-12-31"
+    start_date = f"{start_year}-01-01"
+    end_date = f"{end_year}-12-31"
+    num_years = max(1, end_year - start_year + 1)
 
     # Precipitation from TERRACLIMATE (Monthly, ~4km)
     precip_col = ee.ImageCollection("IDAHO_EPSCOR/TERRACLIMATE").filterDate(start_date, end_date).select("pr")
-    annual_precip = precip_col.sum().clip(aoi).rename("annual_precip")
+    annual_precip = precip_col.sum().divide(num_years).clip(aoi).rename("annual_precip")
     monthly_precip = annual_precip.divide(12).rename("monthly_precip")
     
-    return aoi, annual_precip, monthly_precip, precip_col
+    return aoi, annual_precip, monthly_precip, precip_col, num_years
 
 
 def apply_natural_breaks(img: ee.Image, aoi: ee.Geometry, scale: int, n_classes: int = 5):
@@ -78,13 +79,13 @@ def get_continuous_labels(breaks, unit=""):
     return labels
 
 
-def compute_water_harvesting_map(aoi_config: dict, year: int) -> dict:
-    cache_key = json.dumps({"aoi": aoi_config, "year": year}, sort_keys=True)
+def compute_water_harvesting_map(aoi_config: dict, start_year: int, end_year: int) -> dict:
+    cache_key = json.dumps({"aoi": aoi_config, "start_year": start_year, "end_year": end_year}, sort_keys=True)
     with _lock:
         if cache_key in _cache_map:
             return _cache_map[cache_key]
 
-    aoi, annual_precip, monthly_precip, _ = _build_water_harvesting_images(aoi_config, year)
+    aoi, annual_precip, monthly_precip, _, _ = _build_water_harvesting_images(aoi_config, start_year, end_year)
 
     # Classify using natural breaks
     scale = get_dynamic_scale(aoi)
@@ -126,9 +127,9 @@ def recommend_tank(volume_liters: float) -> int:
     return (int(volume_liters) // 5000 + 1) * 5000
 
 
-def compute_water_harvesting_stats(aoi_config: dict, year: int, runoff_coefficient: float, manual_area_m2: float = None, use_building_footprint: bool = False, household_size: int = 5, daily_water_use_liters: int = 50) -> dict:
+def compute_water_harvesting_stats(aoi_config: dict, start_year: int, end_year: int, runoff_coefficient: float, manual_area_m2: float = None, use_building_footprint: bool = False, household_size: int = 5, daily_water_use_liters: int = 50) -> dict:
     cache_key = json.dumps({
-        "aoi": aoi_config, "year": year, 
+        "aoi": aoi_config, "start_year": start_year, "end_year": end_year, 
         "rc": runoff_coefficient, "ma": manual_area_m2, "ubf": use_building_footprint,
         "hs": household_size, "du": daily_water_use_liters
     }, sort_keys=True)
@@ -136,7 +137,7 @@ def compute_water_harvesting_stats(aoi_config: dict, year: int, runoff_coefficie
         if cache_key in _cache_stats:
             return _cache_stats[cache_key]
 
-    aoi, annual_precip, monthly_precip, precip_col = _build_water_harvesting_images(aoi_config, year)
+    aoi, annual_precip, monthly_precip, precip_col, num_years = _build_water_harvesting_images(aoi_config, start_year, end_year)
     
     # Calculate Area
     if manual_area_m2 and manual_area_m2 > 0:
@@ -186,7 +187,7 @@ def compute_water_harvesting_stats(aoi_config: dict, year: int, runoff_coefficie
     monthly_precip_series = monthly_precip_series[:12]
     
     # Calculate Total Annual Harvest
-    annual_precip_mm = sum(monthly_precip_series)
+    annual_precip_mm = sum(monthly_precip_series) / num_years
     annual_volume_liters = area_m2 * annual_precip_mm * runoff_coefficient
     
     # Household demand
@@ -203,7 +204,7 @@ def compute_water_harvesting_stats(aoi_config: dict, year: int, runoff_coefficie
         storage = 0
         months_met = 0
         # Simulate over 2 years to allow reservoir to carry over
-        simulation_months = monthly_precip_series * 2
+        simulation_months = monthly_precip_series * max(1, 24 // len(monthly_precip_series) + 1)
         for pr in simulation_months:
             inflow = area_m2 * pr * runoff_coefficient
             storage += inflow
@@ -248,13 +249,13 @@ def compute_water_harvesting_stats(aoi_config: dict, year: int, runoff_coefficie
     return out
 
 
-def compute_water_harvesting_export(aoi_config: dict, year: int) -> dict:
-    cache_key = json.dumps({"aoi": aoi_config, "year": year}, sort_keys=True)
+def compute_water_harvesting_export(aoi_config: dict, start_year: int, end_year: int) -> dict:
+    cache_key = json.dumps({"aoi": aoi_config, "start_year": start_year, "end_year": end_year}, sort_keys=True)
     with _lock:
         if cache_key in _cache_export:
             return _cache_export[cache_key]
 
-    aoi, annual_precip, monthly_precip, _ = _build_water_harvesting_images(aoi_config, year)
+    aoi, annual_precip, monthly_precip, _, _ = _build_water_harvesting_images(aoi_config, start_year, end_year)
     
     # Classify using natural breaks for export
     scale = get_dynamic_scale(aoi)

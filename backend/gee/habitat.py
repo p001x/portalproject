@@ -185,7 +185,8 @@ def _build_habitat_images(
     aoi_config: dict,
     reverse_flags: dict,
     custom_weights: dict | None = None,
-    year: int = 2021,
+    start_year: int = 2021,
+    end_year: int = 2021,
     landcover_scores: dict | None = None,
     method: str = "natural_breaks"
 ):
@@ -196,7 +197,7 @@ def _build_habitat_images(
     lc_scores = landcover_scores or DEFAULT_LANDCOVER_SCORES
     lc_scores_tuple = tuple((k, lc_scores[k]) for k in sorted(lc_scores.keys()))
     
-    cache_key = (json.dumps(aoi_config, sort_keys=True), rev_tuple, weights_tuple, year, lc_scores_tuple, method)
+    cache_key = (json.dumps(aoi_config, sort_keys=True), rev_tuple, weights_tuple, start_year, end_year, lc_scores_tuple, method)
     
     with _lock:
         if cache_key in _cache_build:
@@ -211,7 +212,7 @@ def _build_habitat_images(
     
         # Calculate raw images
         # Map year to WorldCover version (2020 v100, 2021 v200)
-        wc_asset = "ESA/WorldCover/v100/2020" if year <= 2020 else "ESA/WorldCover/v200/2021"
+        wc_asset = "ESA/WorldCover/v100/2020" if end_year <= 2020 else "ESA/WorldCover/v200/2021"
         lc_buffered = ee.Image(wc_asset).select("Map").clip(aoi_buffer)
         lc = lc_buffered.clip(aoi)
         
@@ -231,8 +232,8 @@ def _build_habitat_images(
         dem = ee.Image("USGS/SRTMGL1_003").select("elevation").clip(aoi)
         slope_deg = ee.Terrain.slope(dem).clip(aoi)
         
-        rainfall = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY").filterDate(f"{year}-01-01", f"{year+1}-01-01").sum().clip(aoi)
-        lst_coll = ee.ImageCollection("MODIS/061/MOD11A1").filterDate(f"{year}-01-01", f"{year+1}-01-01").select("LST_Day_1km")
+        rainfall = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY").filterDate(f"{start_year}-01-01", f"{end_year+1}-01-01").sum().divide(max(1, end_year - start_year + 1)).clip(aoi)
+        lst_coll = ee.ImageCollection("MODIS/061/MOD11A1").filterDate(f"{start_year}-01-01", f"{end_year+1}-01-01").select("LST_Day_1km")
         lst = lst_coll.mean().multiply(0.02).subtract(273.15).unmask(22.0).clip(aoi)
     
         raw_images = {
@@ -293,7 +294,8 @@ def compute_habitat(
     custom_weights: dict | None = None,
     method: str = "natural_breaks",
     custom_labels: list = None,
-    year: int = 2021,
+    start_year: int = 2021,
+    end_year: int = 2021,
     landcover_scores: dict | None = None
 ) -> dict:
     weights = _normalize_weights(custom_weights)
@@ -303,14 +305,14 @@ def compute_habitat(
     lc_scores = landcover_scores or DEFAULT_LANDCOVER_SCORES
     lc_scores_tuple = tuple((k, lc_scores[k]) for k in sorted(lc_scores.keys()))
     
-    cache_key = (json.dumps(aoi_config, sort_keys=True), rev_tuple, n_classes, weights_tuple, method, tuple(custom_labels) if custom_labels else None, year, lc_scores_tuple)
+    cache_key = (json.dumps(aoi_config, sort_keys=True), rev_tuple, n_classes, weights_tuple, method, tuple(custom_labels) if custom_labels else None, start_year, end_year, lc_scores_tuple)
     
     with _lock:
         if cache_key in _cache_unified:
             return _cache_unified[cache_key]
 
     aoi, suitability, score_images, raw_images, _, export_breaks, scale = _build_habitat_images(
-        aoi_config, reverse_flags, custom_weights, year, landcover_scores, method
+        aoi_config, reverse_flags, custom_weights, start_year, end_year, landcover_scores, method
     )
 
     # 1. Map Data (Parallelized factor tile fetch)

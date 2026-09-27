@@ -850,7 +850,8 @@ class LSTPointRequest(BaseModel):
 class RUSLERequest(BaseModel):
     aoi: dict = Field(default_factory=dict, description="AOI Configuration object")
     district: Optional[str] = Field(None, examples=["Huye"])
-    year: int = Field(2023, ge=2010, le=2024)
+    start_year: int = Field(2010, ge=1980, le=2024)
+    end_year: int = Field(2024, ge=1980, le=2024)
     n_classes: int = Field(5, ge=1, le=15)
     method: Optional[str] = Field("natural_breaks", description="Classification method")
     custom_labels: Optional[list[str]] = Field(None, description="Custom class names/labels")
@@ -929,7 +930,8 @@ class HabitatRequest(BaseModel):
     custom_labels: Optional[list[str]] = Field(None, description="Custom class names/labels")
     classify_method: str = "natural_breaks"
     custom_weights: Optional[dict] = None
-    year: int = Field(2021, description="Year for analysis")
+    start_year: int = Field(2010, ge=1980, le=2024)
+    end_year: int = Field(2024, ge=1980, le=2024)
     landcover_scores: Optional[dict] = Field(None, description="Custom landcover scores mapping")
 
 class HabitatAhpRequest(BaseModel):
@@ -991,7 +993,8 @@ class UHIRequest(BaseModel):
 class DroughtRequest(BaseModel):
     aoi: dict = Field(default_factory=dict, description="AOI Configuration object")
     district: Optional[str] = Field(None, examples=["Kayonza"])
-    year: int = Field(2023, ge=2013, le=2024)
+    start_year: int = Field(2010, ge=1980, le=2024)
+    end_year: int = Field(2024, ge=1980, le=2024)
     n_classes: int = Field(5, ge=1, le=15)
     method: Optional[str] = Field("natural_breaks", description="Classification method")
     custom_labels: Optional[list[str]] = Field(None, description="Custom class names/labels")
@@ -1219,7 +1222,8 @@ def irrigation_export_endpoint(req: IrrigationRequest):
 
 class WaterHarvestingRequest(BaseModel):
     aoi: dict
-    year: int
+    start_year: int = Field(2010, ge=1980, le=2024)
+    end_year: int = Field(2024, ge=1980, le=2024)
     runoff_coefficient: float = 0.8
     manual_area_m2: Optional[float] = None
     use_building_footprint: bool = False
@@ -1230,7 +1234,7 @@ class WaterHarvestingRequest(BaseModel):
 def water_harvesting_map_endpoint(req: WaterHarvestingRequest):
     _require_gee()
     try:
-        return compute_water_harvesting_map(req.aoi, req.year)
+        return compute_water_harvesting_map(req.aoi, req.start_year, req.end_year)
     except Exception as exc:
         logger.exception("Water harvesting map failed")
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1239,7 +1243,7 @@ def water_harvesting_map_endpoint(req: WaterHarvestingRequest):
 def water_harvesting_stats_endpoint(req: WaterHarvestingRequest):
     _require_gee()
     try:
-        return compute_water_harvesting_stats(req.aoi, req.year, req.runoff_coefficient, req.manual_area_m2, req.use_building_footprint, req.household_size, req.daily_water_use_liters)
+        return compute_water_harvesting_stats(req.aoi, req.start_year, req.end_year, req.runoff_coefficient, req.manual_area_m2, req.use_building_footprint, req.household_size, req.daily_water_use_liters)
     except Exception as exc:
         logger.exception("Water harvesting stats failed")
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1248,7 +1252,7 @@ def water_harvesting_stats_endpoint(req: WaterHarvestingRequest):
 def water_harvesting_export_endpoint(req: WaterHarvestingRequest):
     _require_gee()
     try:
-        return compute_water_harvesting_export(req.aoi, req.year)
+        return compute_water_harvesting_export(req.aoi, req.start_year, req.end_year)
     except Exception as exc:
         logger.exception("Water harvesting export failed")
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1299,8 +1303,8 @@ def wellscope_export_endpoint(req: WellScopeRequest):
 class BiomassRequest(BaseModel):
     aoi: dict
     buffer_km: Optional[float] = 3.0
-    year_start: Optional[int] = 2019
-    year_end: Optional[int] = 2023
+    start_year: int = Field(2019, ge=1980, le=2024)
+    end_year: int = Field(2023, ge=1980, le=2024)
     n_classes: Optional[int] = 4
     method: Optional[str] = "natural_breaks"
     custom_labels: Optional[list] = None
@@ -1309,7 +1313,7 @@ class BiomassRequest(BaseModel):
 def biomass_map_endpoint(req: BiomassRequest):
     _require_gee()
     try:
-        return compute_biomass_map(req.aoi, req.buffer_km, req.year_start, req.year_end)
+        return compute_biomass_map(req.aoi, req.buffer_km, req.start_year, req.end_year)
     except Exception as exc:
         logger.exception("Biomass map failed")
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1318,7 +1322,7 @@ def biomass_map_endpoint(req: BiomassRequest):
 def biomass_stats_endpoint(req: BiomassRequest):
     _require_gee()
     try:
-        return compute_biomass_stats(req.aoi, req.buffer_km, req.year_start, req.year_end)
+        return compute_biomass_stats(req.aoi, req.buffer_km, req.start_year, req.end_year)
     except Exception as exc:
         logger.exception("Biomass stats failed")
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1327,7 +1331,7 @@ def biomass_stats_endpoint(req: BiomassRequest):
 def biomass_classify_endpoint(req: BiomassRequest):
     _require_gee()
     try:
-        return compute_biomass_classify(req.aoi, req.buffer_km, req.year_start, req.year_end, req.n_classes, req.method, req.custom_labels)
+        return compute_biomass_classify(req.aoi, req.buffer_km, req.start_year, req.end_year, req.n_classes, req.method, req.custom_labels)
     except Exception as exc:
         logger.exception("Biomass classify failed")
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1336,7 +1340,7 @@ def biomass_classify_endpoint(req: BiomassRequest):
 def biomass_export_endpoint(req: BiomassRequest):
     _require_gee()
     try:
-        return compute_biomass_export(req.aoi, req.buffer_km, req.year_start, req.year_end)
+        return compute_biomass_export(req.aoi, req.buffer_km, req.start_year, req.end_year)
     except Exception as exc:
         logger.exception("Biomass export failed")
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1346,15 +1350,15 @@ class BiomassFactorExportRequest(BaseModel):
     factor_key: str
     palette: Optional[list] = None
     buffer_km: Optional[float] = 3.0
-    year_start: Optional[int] = 2019
-    year_end: Optional[int] = 2023
+    start_year: int = Field(2019, ge=1980, le=2024)
+    end_year: int = Field(2023, ge=1980, le=2024)
 
 @app.post("/api/biomass/factor-export", tags=["analysis"])
 def biomass_factor_export_endpoint(req: BiomassFactorExportRequest):
     _require_gee()
     try:
         from gee.biomass import export_factor_map
-        return export_factor_map(req.aoi, req.factor_key, req.palette, req.buffer_km, req.year_start, req.year_end)
+        return export_factor_map(req.aoi, req.factor_key, req.palette, req.buffer_km, req.start_year, req.end_year)
     except Exception as exc:
         logger.exception("Biomass factor export failed")
         raise HTTPException(status_code=500, detail=str(exc))
@@ -1605,7 +1609,7 @@ def lst_point_endpoint(req: LSTPointRequest, user: dict = Depends(get_current_us
 def rusle_map_endpoint(req: RUSLERequest, user: dict = Depends(get_current_user)):
     _require_gee()
     try:
-        return compute_rusle_map(req.aoi, req.year, req.reverse_r, req.reverse_k, req.reverse_ls, req.reverse_c, req.reverse_p)
+        return compute_rusle_map(req.aoi, req.start_year, req.end_year, req.reverse_r, req.reverse_k, req.reverse_ls, req.reverse_c, req.reverse_p)
     except Exception as exc:
         logger.exception("RUSLE map failed for %s", req.district)
         raise HTTPException(500, str(exc)) from exc
@@ -1614,7 +1618,7 @@ def rusle_map_endpoint(req: RUSLERequest, user: dict = Depends(get_current_user)
 def rusle_stats_endpoint(req: RUSLERequest, user: dict = Depends(get_current_user)):
     _require_gee()
     try:
-        return compute_rusle_stats(req.aoi, req.year, req.reverse_r, req.reverse_k, req.reverse_ls, req.reverse_c, req.reverse_p)
+        return compute_rusle_stats(req.aoi, req.start_year, req.end_year, req.reverse_r, req.reverse_k, req.reverse_ls, req.reverse_c, req.reverse_p)
     except Exception as exc:
         logger.exception("RUSLE stats failed for %s", req.district)
         raise HTTPException(500, str(exc)) from exc
@@ -1623,7 +1627,7 @@ def rusle_stats_endpoint(req: RUSLERequest, user: dict = Depends(get_current_use
 def rusle_classify_endpoint(req: RUSLERequest, user: dict = Depends(get_current_user)):
     _require_gee()
     try:
-        return compute_rusle_classify(req.aoi, req.year, req.n_classes, req.reverse_r, req.reverse_k, req.reverse_ls, req.reverse_c, req.reverse_p, method=req.method, custom_labels=req.custom_labels)
+        return compute_rusle_classify(req.aoi, req.start_year, req.end_year, req.n_classes, req.reverse_r, req.reverse_k, req.reverse_ls, req.reverse_c, req.reverse_p, method=req.method, custom_labels=req.custom_labels)
     except Exception as exc:
         logger.exception("RUSLE classify failed for %s", req.district)
         raise HTTPException(500, str(exc)) from exc
@@ -1632,7 +1636,7 @@ def rusle_classify_endpoint(req: RUSLERequest, user: dict = Depends(get_current_
 def rusle_export_endpoint(req: RUSLERequest, user: dict = Depends(get_current_user)):
     _require_gee()
     try:
-        return compute_rusle_export(req.aoi, req.year, req.reverse_r, req.reverse_k, req.reverse_ls, req.reverse_c, req.reverse_p)
+        return compute_rusle_export(req.aoi, req.start_year, req.end_year, req.reverse_r, req.reverse_k, req.reverse_ls, req.reverse_c, req.reverse_p)
     except Exception as exc:
         logger.exception("RUSLE export failed for %s", req.district)
         raise HTTPException(500, str(exc)) from exc
@@ -1869,7 +1873,8 @@ def habitat_endpoint(req: HabitatRequest):
             custom_weights=req.custom_weights,
             method=req.method,
             custom_labels=req.custom_labels,
-            year=req.year,
+            start_year=req.start_year,
+            end_year=req.end_year,
             landcover_scores=req.landcover_scores
         )
     except Exception as exc:
@@ -2054,7 +2059,7 @@ def drought_map_endpoint(req: DroughtRequest):
     _require_gee()
     try:
         return compute_drought_map(
-            req.aoi, req.year,
+            req.aoi, req.start_year, req.end_year,
             reverse_sm=req.reverse_sm,
             reverse_rf=req.reverse_rf,
             reverse_ndvi=req.reverse_ndvi,
@@ -2072,7 +2077,7 @@ def drought_stats_endpoint(req: DroughtRequest):
     _require_gee()
     try:
         return compute_drought_stats(
-            req.aoi, req.year,
+            req.aoi, req.start_year, req.end_year,
             reverse_sm=req.reverse_sm,
             reverse_rf=req.reverse_rf,
             reverse_ndvi=req.reverse_ndvi,
@@ -2090,7 +2095,7 @@ def drought_classify_endpoint(req: DroughtRequest):
     _require_gee()
     try:
         return compute_drought_classify(
-            req.aoi, req.year, req.n_classes,
+            req.aoi, req.start_year, req.end_year, req.n_classes,
             reverse_sm=req.reverse_sm,
             reverse_rf=req.reverse_rf,
             reverse_ndvi=req.reverse_ndvi,
@@ -2109,7 +2114,7 @@ def drought_export_endpoint(req: DroughtRequest):
     _require_gee()
     try:
         return compute_drought_export(
-            req.aoi, req.year,
+            req.aoi, req.start_year, req.end_year,
             reverse_sm=req.reverse_sm,
             reverse_rf=req.reverse_rf,
             reverse_ndvi=req.reverse_ndvi,

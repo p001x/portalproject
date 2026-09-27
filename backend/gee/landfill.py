@@ -87,21 +87,35 @@ def compute_ahp_data(weights: dict) -> dict:
 
 def _distance_km(mask, aoi, scale=None):
     if scale is None: scale = get_dynamic_scale(aoi)
-    filled = mask.unmask(0).selfMask().unmask(0).toByte()
+    
+    bg_mask = mask.unmask(0).Not()
+    dist_pixels = bg_mask.fastDistanceTransform(1024, "pixels", "squared_euclidean").sqrt()
+    
+    # fastDistanceTransform returns 0 if no target is found within the neighborhood (1024 pixels).
+    # We must replace these 0s with 1024 so they are correctly treated as "far away", 
+    # rather than being falsely treated as "0 distance" (which ruins the suitability score).
+    dist_pixels = dist_pixels.where(bg_mask.And(dist_pixels.eq(0)), 1024)
+
     distance_m = (
-        filled.fastDistanceTransform(256, "pixels", "squared_euclidean")
-        .sqrt().multiply(ee.Image.pixelArea().sqrt()).clip(aoi)
+        dist_pixels
+        .reproject(crs="EPSG:3857", scale=scale)
+        .multiply(scale).clip(aoi)
     )
     return distance_m.divide(1000).reproject(crs="EPSG:4326", scale=scale)
 
 
-def _reclass_far_is_good(d):
-    return (ee.Image(1).where(d.gte(1).And(d.lt(2)), 2).where(d.gte(2).And(d.lt(3)), 3)
-            .where(d.gte(3).And(d.lt(5)), 4).where(d.gte(5), 5))
+def _reclass_river_far_is_good(d):
+    # Rwanda has many rivers. >1km is excellent.
+    return (ee.Image(1).where(d.gte(0.1).And(d.lt(0.2)), 2).where(d.gte(0.2).And(d.lt(0.5)), 3)
+            .where(d.gte(0.5).And(d.lt(1.0)), 4).where(d.gte(1.0), 5))
 
+def _reclass_residential_far_is_good(d):
+    # Rwanda is densely populated. >2km is excellent.
+    return (ee.Image(1).where(d.gte(0.2).And(d.lt(0.5)), 2).where(d.gte(0.5).And(d.lt(1.0)), 3)
+            .where(d.gte(1.0).And(d.lt(2.0)), 4).where(d.gte(2.0), 5))
 
-def _reclass_near_is_good(d):
-    return (ee.Image(1).where(d.lt(5), 2).where(d.lt(3), 3).where(d.lt(2), 4).where(d.lt(1), 5))
+def _reclass_road_near_is_good(d):
+    return (ee.Image(1).where(d.lt(5.0), 2).where(d.lt(2.5), 3).where(d.lt(1.0), 4).where(d.lt(0.5), 5))
 
 
 def _apply_reverse(score_img, flag):
@@ -145,11 +159,11 @@ def _build_landfill_base(
     slope_pct = ee.Terrain.slope(dem).multiply(math.pi / 180).tan().multiply(100)
     slope_score = (
         ee.Image(1)
-        .where(slope_pct.gte(0).And(slope_pct.lt(2)), 5)
-        .where(slope_pct.gte(2).And(slope_pct.lt(5)), 4)
-        .where(slope_pct.gte(5).And(slope_pct.lt(10)), 3)
-        .where(slope_pct.gte(10).And(slope_pct.lt(15)), 2)
-        .where(slope_pct.gte(15), 1)
+        .where(slope_pct.gte(0).And(slope_pct.lt(5)), 5)
+        .where(slope_pct.gte(5).And(slope_pct.lt(10)), 4)
+        .where(slope_pct.gte(10).And(slope_pct.lt(15)), 3)
+        .where(slope_pct.gte(15).And(slope_pct.lt(20)), 2)
+        .where(slope_pct.gte(20), 1)
         .clip(aoi)
     )
     slope_score = _apply_reverse(slope_score, reverse_flags["slope"]).rename("slope_score")
@@ -158,12 +172,16 @@ def _build_landfill_base(
     gsw = ee.Image("JRC/GSW1_4/GlobalSurfaceWater").select("occurrence")
     water_mask = gsw.gte(50).unmask(0).Or(lc.eq(80)).Or(lc.eq(90))
     river_dist_km = _distance_km(water_mask, aoi)
-    river_score = _apply_reverse(_reclass_far_is_good(river_dist_km), reverse_flags["river"]).rename("river_score")
+    river_score = _apply_reverse(_reclass_river_far_is_good(river_dist_km), reverse_flags["river"]).rename("river_score")
 
     residential_mask = lc.eq(50)
     residential_dist_km = _distance_km(residential_mask, aoi)
-    residential_score = _apply_reverse(_reclass_far_is_good(residential_dist_km), reverse_flags["residential"]).rename("residential_score")
-    road_score = _apply_reverse(_reclass_near_is_good(residential_dist_km), reverse_flags["road"]).rename("road_score")
+    residential_score = _apply_reverse(_reclass_residential_far_is_good(residential_dist_km), reverse_flags["residential"]).rename("residential_score")
+    
+    roads = ee.FeatureCollection("projects/sat-io/open-datasets/GRIP4/Africa").filterBounds(aoi)
+    # Use FeatureCollection.distance for true, exact Euclidean distance from vector lines
+    road_dist_km = roads.distance(searchRadius=50000, maxError=50).unmask(50000).divide(1000).clip(aoi)
+    road_score = _apply_reverse(_reclass_road_near_is_good(road_dist_km), reverse_flags["road"]).rename("road_score")
 
     lulc_score = (
         ee.Image(1)
@@ -188,9 +206,22 @@ def _build_landfill_base(
         .add(lulc_score.multiply(weights["lulc"]))
     ).rename("suitability")
 
+    # STRICT EXCLUSION ZONES:
+    # 1. Protected Areas (National Parks, Reserves)
+    protected_areas = ee.FeatureCollection("WCMC/WDPA/current/polygons").filterBounds(aoi)
+    protected_mask = ee.Image(0).paint(protected_areas, 1).unmask(0)
+    
+    # 2. Water Bodies (already defined as water_mask)
+    # Combine into a single exclusion mask
+    exclusion_mask = protected_mask.eq(1).Or(water_mask.eq(1))
+
+    # Mask out the excluded areas so they are completely removed from the map and statistics
+    suitability = suitability.updateMask(exclusion_mask.Not())
+
     raw_layers = {
         "river_dist_km": river_dist_km,
         "residential_dist_km": residential_dist_km,
+        "road_dist_km": road_dist_km,
         "slope_pct": slope_pct,
         "lc": lc
     }
@@ -331,7 +362,7 @@ def compute_landfill_classify(
             {"name": "river_score",    "image": raw_layers["river_dist_km"],      "title": "River Distance (km)"},
             {"name": "resid_score",    "image": raw_layers["residential_dist_km"],"title": "Residential Distance (km)"},
             {"name": "slope_score",    "image": raw_layers["slope_pct"],      "title": "Slope (%)"},
-            {"name": "road_score",     "image": raw_layers["residential_dist_km"],       "title": "Road Accessibility (km)"},
+            {"name": "road_score",     "image": raw_layers["road_dist_km"],       "title": "Road Accessibility (km)"},
             {"name": "lulc_score",     "image": raw_layers["lc"],       "title": "Land Cover (Categorical)"},
         ],
         aoi=aoi, scale=get_dynamic_scale(aoi), n_classes=n_classes,

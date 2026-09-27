@@ -20,7 +20,7 @@ def get_dynamic_scale(geom):
     except:
         return 250
 
-FLOOD_CLASS_NAMES = ["LOW", "MODERATE", "MEDIUM", "HIGH", "VERY HIGH"]
+FLOOD_CLASS_NAMES = ["Very Low", "Low", "Moderate", "High", "Very High"]
 
 DEFAULT_WEIGHTS = {
     "rainfall": 0.15,
@@ -267,6 +267,19 @@ def _build_flood_image(aoi: ee.Geometry, start_year: int, end_year: int, weights
         "ndvi": ndvi_score,
     }
 
+    raw_images = {
+        "rainfall": rainfall,
+        "twi": twi,
+        "lulc": lc,
+        "elevation": dem,
+        "slope": slope_deg,
+        "river_dist": river_dist_km,
+        "road_dist": road_dist_km,
+        "soil_type": soiltype,
+        "drainage_density": drainage_density,
+        "ndvi": ndvi,
+    }
+
     score_images = {}
     for key, img in raw_scores.items():
         score_images[key] = _apply_reverse(img, reverse_flags.get(key, False)).rename(f"{key}_score")
@@ -279,7 +292,7 @@ def _build_flood_image(aoi: ee.Geometry, start_year: int, end_year: int, weights
     
     suitability = suitability.rename("suitability")
     
-    return suitability, score_images
+    return suitability, score_images, raw_images
 
 
 def compute_flood_map(aoi_config: dict, start_year: int, end_year: int, weights: dict, reverse_flags: dict) -> dict:
@@ -289,9 +302,18 @@ def compute_flood_map(aoi_config: dict, start_year: int, end_year: int, weights:
             return _cache[cache_key]
 
     aoi = get_aoi_geometry(aoi_config)
-    suitability, score_images = _build_flood_image(aoi, start_year, end_year, weights, reverse_flags)
+    suitability, score_images, raw_images = _build_flood_image(aoi, start_year, end_year, weights, reverse_flags)
     
-    map_id = suitability.getMapId(_SCORE_VIS)
+    from threading import BoundedSemaphore
+    gee_semaphore = BoundedSemaphore(5)
+
+    with gee_semaphore:
+        try:
+            map_id = suitability.getMapId(_SCORE_VIS)
+        except ee.EEException as e:
+            if "Memory limit" in str(e) or "User memory limit" in str(e):
+                raise ValueError("The selected region is too large or complex for real-time visualization. Please select a smaller area.") from e
+            raise
     bounds = aoi.bounds().getInfo()["coordinates"][0]
     
     x_coords = [p[0] for p in bounds]
@@ -301,12 +323,16 @@ def compute_flood_map(aoi_config: dict, start_year: int, end_year: int, weights:
     # We also return factor map urls here for fast access in the frontend
     factor_maps = {}
     for key in FACTOR_ORDER:
-        img_id = score_images[key].getMapId(_SCORE_VIS)
-        factor_maps[key] = {
-            "label": FACTOR_META[key]["label"],
-            "tile_url": img_id["tile_fetcher"].url_format,
-            "reversed": reverse_flags.get(key, False),
-        }
+        with gee_semaphore:
+            try:
+                img_id = score_images[key].getMapId(_SCORE_VIS)
+                factor_maps[key] = {
+                    "label": FACTOR_META[key]["label"],
+                    "tile_url": img_id["tile_fetcher"].url_format,
+                    "reversed": reverse_flags.get(key, False),
+                }
+            except ee.EEException:
+                pass
 
     ahp_data = compute_ahp_data(weights)
 
@@ -330,7 +356,7 @@ def compute_flood_stats(aoi_config: dict, start_year: int, end_year: int, weight
             return _cache[cache_key]
 
     aoi = get_aoi_geometry(aoi_config)
-    suitability, _ = _build_flood_image(aoi, start_year, end_year, weights, reverse_flags)
+    suitability, _, _ = _build_flood_image(aoi, start_year, end_year, weights, reverse_flags)
 
     # Simplified standard classification for baseline stats
     classes = {
@@ -382,11 +408,16 @@ def compute_flood_classify(aoi_config: dict, start_year: int, end_year: int, wei
             return _cache[cache_key]
 
     aoi = get_aoi_geometry(aoi_config)
-    suitability, score_images = _build_flood_image(aoi, start_year, end_year, weights, reverse_flags)
+    suitability, score_images, raw_images = _build_flood_image(aoi, start_year, end_year, weights, reverse_flags)
 
     layers_to_classify = [{"name": "suitability", "image": suitability, "title": "Flood Susceptibility Index"}]
     for key in FACTOR_ORDER:
-        layers_to_classify.append({"name": f"{key}_score", "image": score_images[key], "title": FACTOR_META[key]["label"]})
+        # LULC and Soil Type are categorical, we keep them as score images so they can be parsed as risk,
+        # otherwise use the raw continuous data.
+        if key in ["lulc", "soil_type"]:
+            layers_to_classify.append({"name": f"{key}_score", "image": score_images[key], "title": FACTOR_META[key]["label"] + " Risk Class"})
+        else:
+            layers_to_classify.append({"name": f"{key}_score", "image": raw_images[key], "title": FACTOR_META[key]["label"]})
 
     classify = quantile_classify(
         layers=layers_to_classify, 
@@ -408,7 +439,10 @@ def compute_flood_classify(aoi_config: dict, start_year: int, end_year: int, wei
 
 def compute_flood_export(aoi_config: dict, start_year: int, end_year: int, weights: dict, reverse_flags: dict) -> dict:
     aoi = get_aoi_geometry(aoi_config)
-    suitability, _ = _build_flood_image(aoi, start_year, end_year, weights, reverse_flags)
+    suitability, _, _ = _build_flood_image(aoi, start_year, end_year, weights, reverse_flags)
     
-    download_url = suitability.getDownloadURL({"scale": get_dynamic_scale(aoi), "region": aoi.bounds(), "format": "GEO_TIFF"})
+    from threading import BoundedSemaphore
+    gee_semaphore = BoundedSemaphore(5)
+    with gee_semaphore:
+        download_url = suitability.getDownloadURL({"scale": get_dynamic_scale(aoi), "region": aoi.bounds(), "format": "GEO_TIFF"})
     return {"download_url": download_url}

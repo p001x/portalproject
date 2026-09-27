@@ -63,8 +63,10 @@ const FACTOR_LAYERS = [
   { key: "lithology", label: "Lithology" },
   { key: "soiltype", label: "Soil Type" },
   { key: "landcover", label: "Land Cover" },
+  { key: "ndvi", label: "NDVI (Vegetation)" },
   { key: "twi", label: "TWI" },
-  { key: "dist_roads", label: "Dist. to Roads" }
+  { key: "dist_roads", label: "Dist. to Roads" },
+  { key: "dist_rivers", label: "Dist. to Rivers" }
 ];
 
 
