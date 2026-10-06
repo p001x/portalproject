@@ -1,7 +1,10 @@
 import urllib.request
 import json
+proxy_support = urllib.request.ProxyHandler({})
+opener = urllib.request.build_opener(proxy_support)
+urllib.request.install_opener(opener)
 
-BASE_URL = "http://127.0.0.1:8001"
+BASE_URL = "http://127.0.0.1:8002"
 
 def post_json(endpoint, payload):
     url = f"{BASE_URL}{endpoint}"

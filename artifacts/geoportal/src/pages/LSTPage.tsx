@@ -558,8 +558,8 @@ export function LSTPage() {
 
               {/* Legend */}
               <div className="flex flex-wrap gap-2 text-xs">
-                {palette(data.classify.n_classes).map((color, i) => {
-                  const lbl = customClassNames[i] || getDefaultLabels(data.classify.n_classes)[i] || `Class ${i + 1}`;
+                {palette(activeNClasses).map((color, i) => {
+                  const lbl = customClassNames[i] || getDefaultLabels(activeNClasses)[i] || `Class ${i + 1}`;
                   return (
                     <span key={i} className="flex items-center gap-1.5 px-2.5 py-1 rounded border bg-card shadow-2xs">
                       <span className="w-3 h-3 rounded-xs border border-black/15 shadow-2xs" style={{ background: color }} />
@@ -570,7 +570,7 @@ export function LSTPage() {
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                {data.classify.panels.map((panel) => (
+                {data.classify?.panels?.map((panel) => (
                   <div key={panel.letter} className="border rounded-lg p-4 space-y-3">
                     <div className="flex items-center gap-2">
                       <span className="bg-primary text-primary-foreground font-bold px-2 py-0.5 rounded text-sm">
@@ -593,7 +593,7 @@ export function LSTPage() {
                         data={Object.entries(activeAreas).map(([k, v], i) => ({
                           name: k.split(" (")[0],
                           area: v,
-                          fill: palette(data.classify.n_classes)[i],
+                          fill: palette(activeNClasses)[i],
                         }))}
                       >
                         <XAxis dataKey="name" tick={{ fontSize: 10 }} />
@@ -601,7 +601,7 @@ export function LSTPage() {
                         <Tooltip formatter={(v: number) => [`${v} km²`, "Area"]} />
                         <Bar dataKey="area" radius={[3, 3, 0, 0]}>
                           {Object.keys(panel.areas).map((_, i) => (
-                            <Cell key={i} fill={palette(data.classify.n_classes)[i]} />
+                            <Cell key={i} fill={palette(activeNClasses)[i]} />
                           ))}
                         </Bar>
                       </BarChart>
@@ -618,6 +618,38 @@ export function LSTPage() {
                 <h2 className="font-semibold text-lg mb-1">Professional Cartography</h2>
                 <p className="text-sm text-muted-foreground">High-quality static maps ready for presentation.</p>
               </div>
+              {/* Map Layer Switcher Header */}
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-3 p-2 bg-muted/30 rounded-lg border">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Map Symbology:</span>
+                  <div className="inline-flex items-center rounded-md border bg-background p-0.5 text-xs shadow-2xs">
+                    <button
+                      type="button"
+                      onClick={() => setLayerMode("classified")}
+                      disabled={isContinuous}
+                      className={`px-3 py-1 rounded font-medium transition-all ${
+                        layerMode === "classified" && !isContinuous
+                          ? "bg-primary text-primary-foreground shadow-xs"
+                          : "text-muted-foreground hover:text-foreground disabled:opacity-40"
+                      }`}
+                    >
+                      Classified ({activeNClasses} Classes)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLayerMode("continuous")}
+                      className={`px-3 py-1 rounded font-medium transition-all ${
+                        layerMode === "continuous" || isContinuous
+                          ? "bg-primary text-primary-foreground shadow-xs"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      Continuous Gradient
+                    </button>
+                  </div>
+                </div>
+              </div>
+
               <div className="bg-card border rounded-lg p-4">
               <MapExportControls
                 tileUrl={layerMode === "continuous" || isContinuous ? data.tile_url : (data.classify?.panels?.[0]?.tile_url || data.tile_url)}

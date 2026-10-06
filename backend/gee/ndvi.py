@@ -36,25 +36,21 @@ def compute_ndvi(
     (district, start_date, end_date, n_classes, method, custom_labels) combination.
     """
     labels_tuple = tuple(custom_labels) if custom_labels else None
-    cache_key = (json.dumps(aoi_config, sort_keys=True), start_date, end_date, n_classes, method, labels_tuple)
+    # BUST CACHE TEMPORARILY
+    cache_key = (json.dumps(aoi_config, sort_keys=True), start_date, end_date, n_classes, method, labels_tuple, "bust_cache_6")
 
     with _lock:
         if cache_key in _cache:
             return _cache[cache_key]
 
-    from gee.aoi_utils import get_aoi_geometry
+    from gee.aoi_utils import get_aoi_geometry, get_bounds_and_center
     aoi = get_aoi_geometry(aoi_config)
+    bounds, center = get_bounds_and_center(aoi)
+    ee_bounds = ee.Geometry.Polygon(bounds, "EPSG:4326", False)
+    
     # Calculate dynamic scale based on geometry size (sq km)
-    area_sqkm = aoi.area().divide(1e6).getInfo()
-    if area_sqkm > 10000:
-        dynamic_scale = 500   # Entire Country (High memory footprint)
-    elif area_sqkm > 2000:
-        dynamic_scale = 250   # Province
-    elif area_sqkm > 500:
-        dynamic_scale = 100   # Large District
-    else:
-        dynamic_scale = 30    # Sector or small polygon
-
+    from gee.aoi_utils import get_dynamic_scale
+    dynamic_scale = get_dynamic_scale(aoi)    # Sector or small polygon
 
     from gee.aoi_utils import get_historical_ndvi
     year = int(start_date[:4])
@@ -89,7 +85,7 @@ def compute_ndvi(
                 .combine(ee.Reducer.min(), sharedInputs=True)
                 .combine(ee.Reducer.max(), sharedInputs=True)
                 .combine(ee.Reducer.stdDev(), sharedInputs=True),
-                geometry=aoi,
+                geometry=aoi.bounds(maxError=1000),
                 scale=dynamic_scale,
                 maxPixels=1e10,
             ).getInfo()
@@ -97,7 +93,7 @@ def compute_ndvi(
 
         f_area = executor.submit(
             lambda: area_img.reduceRegion(
-                reducer=ee.Reducer.sum(), geometry=aoi, scale=dynamic_scale, maxPixels=1e10
+                reducer=ee.Reducer.sum(), geometry=aoi.bounds(maxError=1000), scale=dynamic_scale, maxPixels=1e10
             ).getInfo()
         )
 
@@ -113,29 +109,27 @@ def compute_ndvi(
             )
         )
 
-        f_bounds = executor.submit(
-            lambda: aoi.bounds().getInfo()["coordinates"][0]
-        )
-
         f_thumb = executor.submit(
-            lambda: median.getThumbURL({**vis_params, "region": aoi.bounds(), "dimensions": 512, "format": "png"})
+            lambda: median.getThumbURL({**vis_params, "region": ee_bounds, "dimensions": 512, "crs": "EPSG:4326", "format": "png"})
         )
 
         f_download = executor.submit(
             lambda: median.getDownloadURL({
                 "name": "NDVI", 
-                "region": aoi.bounds(), 
-                "scale": 30, 
+                "region": ee_bounds, 
+                "scale": dynamic_scale, 
                 "format": "GEO_TIFF", 
-                "maxPixels": 1e9
-            })
+                "crs": "EPSG:4326"
+            }) if area_sqkm < 50000 else None
         )
 
         stats = f_stats.result()
         area_dict = f_area.result()
         classify = f_classify.result()
-        bounds = f_bounds.result()
-        thumb_url = f_thumb.result()
+        try:
+            thumb_url = f_thumb.result()
+        except Exception:
+            thumb_url = None
         try:
             download_url = f_download.result()
         except Exception:
@@ -146,8 +140,7 @@ def compute_ndvi(
         for i, lbl in enumerate(labels)
     }
 
-    center_lon = (bounds[0][0] + bounds[2][0]) / 2
-    center_lat = (bounds[0][1] + bounds[2][1]) / 2
+    center_lat, center_lon = center[0], center[1]
 
     result = {
         "tile_url": map_id["tile_fetcher"].url_format,

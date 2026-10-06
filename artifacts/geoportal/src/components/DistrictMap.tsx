@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { MapContainer, TileLayer, useMap, CircleMarker, Popup, GeoJSON, useMapEvents, Polygon } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
+import parseGeoraster from "georaster";
+// @ts-ignore
+import GeoRasterLayer from "georaster-layer-for-leaflet";
 
 // Fix Leaflet default icon path broken by bundlers
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -67,20 +70,55 @@ function GEELayer({ tileUrl }: { tileUrl: string }) {
     if (!tileUrl) return;
 
     if (!layersRef.current[tileUrl]) {
-      const layer = L.tileLayer(tileUrl, {
-        attribution: "Google Earth Engine",
-        opacity: 0, // Add hidden initially
-      });
-      layer.addTo(map);
-      layersRef.current[tileUrl] = layer;
+      if (tileUrl.endsWith(".tif") || tileUrl.endsWith(".tiff")) {
+        fetch(tileUrl)
+          .then(response => response.arrayBuffer())
+          .then(arrayBuffer => parseGeoraster(arrayBuffer))
+          .then(georaster => {
+            const layer = new GeoRasterLayer({
+              georaster: georaster,
+              opacity: 0,
+              resolution: 256,
+              pixelValuesToColorFn: (values: any) => {
+                const val = values[0];
+                if (val === georaster.noDataValue || val === null || isNaN(val)) return null;
+                if (val <= 5) return "#1a9641"; // Very Low
+                if (val <= 10) return "#a6d96a"; // Low
+                if (val <= 25) return "#ffffbf"; // Moderate
+                if (val <= 50) return "#fdae61"; // High
+                if (val <= 100) return "#d7191c"; // Very High
+                return "#7b0000"; // Severe
+              }
+            });
+            layer.addTo(map);
+            layersRef.current[tileUrl] = layer;
+            // update opacity if it's still the active one
+            layer.setOpacity(0.85);
+          });
+        // Temp empty layer while loading
+        layersRef.current[tileUrl] = L.layerGroup([]).addTo(map);
+      } else {
+        const layer = L.tileLayer(tileUrl, {
+          attribution: "Google Earth Engine",
+          opacity: 0,
+        });
+        layer.addTo(map);
+        layersRef.current[tileUrl] = layer;
+      }
     }
 
     // Hide all layers
-    Object.values(layersRef.current).forEach(layer => layer.setOpacity(0));
+    Object.values(layersRef.current).forEach(layer => {
+      if (typeof layer.setOpacity === "function") {
+        layer.setOpacity(0);
+      }
+    });
     
     // Show active layer
     const activeLayer = layersRef.current[tileUrl];
-    activeLayer.setOpacity(0.85);
+    if (activeLayer && typeof activeLayer.setOpacity === "function") {
+      activeLayer.setOpacity(0.85);
+    }
 
     // We purposely do NOT return map.removeLayer() here.
     // Keeping inactive layers on the map with opacity 0 ensures Leaflet
@@ -175,14 +213,14 @@ export function DistrictMap({
         <MapEvents onClick={onMapClick} />
         {activeBasemap === "light" && (
           <TileLayer
-            url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
-            attribution='&copy; <a href="https://carto.com/">CARTO</a>'
+            url="https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}"
+            attribution="Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ"
           />
         )}
         {activeBasemap === "dark" && (
           <TileLayer
-            url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-            attribution='&copy; <a href="https://carto.com/">CARTO</a>'
+            url="https://services.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}"
+            attribution="Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ"
           />
         )}
         {activeBasemap === "satellite" && (
@@ -348,8 +386,8 @@ export function DistrictMap({
           onChange={(e) => setActiveBasemap(e.target.value as any)}
           className="text-xs bg-transparent border-none outline-none cursor-pointer py-1 px-2 text-foreground font-medium"
         >
-          <option value="dark">Carto Dark</option>
-          <option value="light">Carto Light</option>
+          <option value="dark">Dark Canvas</option>
+          <option value="light">Light Canvas</option>
           <option value="satellite">Satellite</option>
           <option value="terrain">Terrain</option>
           <option value="osm">OpenStreetMap</option>

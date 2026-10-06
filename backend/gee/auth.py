@@ -5,7 +5,7 @@ import logging
 import ee
 
 # --- Workaround for Google API ConnectionResetError on Windows (IPv6 / Proxies) ---
-os.environ["NO_PROXY"] = "*"
+# os.environ["NO_PROXY"] = "*"
 if os.name == 'nt' and os.path.exists(r"C:\Program Files\QGIS 3.40.11\bin"):
     try:
         os.add_dll_directory(r"C:\Program Files\QGIS 3.40.11\bin")
@@ -27,75 +27,109 @@ _active_project_id: str | None = None
 _active_sa_email: str | None = None
 
 
+import glob
+import threading
+
+_credentials_list = []
+_current_cred_idx = 0
+_auth_lock = threading.Lock()
+
 def initialize_gee(project_id: str | None = None, key_json_override: str | None = None) -> None:
-    """Initialize the Earth Engine API using the service account key from env or custom key.
-
-    Safe to call multiple times — subsequent calls with new parameters will re-initialize GEE.
-    Raises RuntimeError on any configuration problem.
+    """Initialize the Earth Engine API using a pool of service account keys for load balancing.
+    Safe to call multiple times.
     """
-    global _initialized, _active_project_id, _active_sa_email
-
-    key_json = (key_json_override or os.environ.get("GEE_SERVICE_ACCOUNT_KEY", "")).strip()
-    if not key_json:
-        key_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "gee_key.json"))
-        if os.path.exists(key_file_path):
-            with open(key_file_path, "r", encoding="utf-8") as f:
-                key_json = f.read().strip()
-
-    if not key_json:
-        target_project = project_id or os.environ.get("GEE_PROJECT_ID") or "ee-petersonyang87"
-        try:
-            logger.info("No service account key provided. Forcing explicit authentication.")
-            ee.Authenticate(force=True)
-            if target_project:
-                ee.Initialize(project=target_project)
-            else:
-                ee.Initialize()
-                
-            roots = ee.data.getAssetRoots()
+    global _initialized, _active_project_id, _active_sa_email, _credentials_list, _current_cred_idx
+    
+    with _auth_lock:
+        _credentials_list = []
+        
+        if key_json_override:
+            _credentials_list.append(key_json_override)
             
-            _initialized = True
-            _active_project_id = target_project
-            _active_sa_email = "explicit_user_auth"
-            logger.info("GEE initialized successfully with explicit auth. Project: %s, Roots: %s", _active_project_id, roots)
-            print(f"Verified GEE initialization. Account: explicit_user_auth, Project: {target_project}, Roots: {roots}")
-            return
-        except Exception as e:
-            raise RuntimeError(
-                f"GEE_SERVICE_ACCOUNT_KEY is not set, gee_key.json was not found, and explicit auth failed: {e}"
-            )
+        env_key = os.environ.get("GEE_SERVICE_ACCOUNT_KEY", "").strip()
+        if env_key:
+            _credentials_list.append(env_key)
+            
+        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        key_files = glob.glob(os.path.join(base_dir, "gee_key*.json"))
+        for kf in key_files:
+            try:
+                with open(kf, "r", encoding="utf-8") as f:
+                    content = f.read().strip()
+                    if content and content.startswith("{"):
+                        _credentials_list.append(content)
+            except Exception:
+                pass
 
-    if not key_json.startswith("{"):
-        raise RuntimeError(
-            f"GEE_SERVICE_ACCOUNT_KEY does not look like JSON "
-            f"(starts with: {key_json[:40]!r}). "
-            "Paste the entire contents of the downloaded .json key file."
-        )
+        if not _credentials_list:
+            target_project = project_id or os.environ.get("GEE_PROJECT_ID") or "ee-petersonyang87"
+            try:
+                logger.info("No service account keys found. Trying local default credentials.")
+                if target_project:
+                    ee.Initialize(project=target_project)
+                else:
+                    ee.Initialize()
+                roots = ee.data.getAssetRoots()
+                _initialized = True
+                _active_project_id = target_project
+                _active_sa_email = "explicit_user_auth"
+                logger.info("GEE initialized successfully with explicit auth. Project: %s", target_project)
+                return
+            except Exception as e:
+                raise RuntimeError(f"No valid service accounts found and explicit auth failed: {e}")
+                
+        # Activate the first credential in the pool
+        _current_cred_idx = 0
+        _activate_credential_unlocked(_current_cred_idx, project_id)
 
+
+def _activate_credential_unlocked(idx: int, project_id: str | None = None):
+    global _initialized, _active_project_id, _active_sa_email
+    
+    key_json = _credentials_list[idx]
     try:
         key_data = json.loads(key_json)
     except json.JSONDecodeError as exc:
-        raise RuntimeError(f"GEE_SERVICE_ACCOUNT_KEY is not valid JSON: {exc}") from exc
-
+        raise RuntimeError(f"Credential {idx} is not valid JSON: {exc}") from exc
+        
     target_project = project_id or os.environ.get("GEE_PROJECT_ID") or key_data.get("project_id", "") or "ee-petersonyang87"
-
+    
     credentials = ee.ServiceAccountCredentials(
         email=key_data["client_email"],
         key_data=key_json,
     )
-
-    if target_project:
-        ee.Initialize(credentials, project=target_project)
-    else:
-        ee.Initialize(credentials)
-
+    
+    try:
+        if target_project:
+            ee.Initialize(credentials, project=target_project)
+        else:
+            ee.Initialize(credentials)
+    except Exception as e:
+        logger.warning("Failed to initialize with Service Account %s. Error: %s", key_data.get("client_email"), e)
+        raise
+        
     roots = ee.data.getAssetRoots()
-
     _initialized = True
-    _active_project_id = target_project or key_data.get("project_id", "default")
-    _active_sa_email = key_data.get("client_email", "")
-    logger.info("GEE initialized successfully. SA: %s, Project: %s, Roots: %s", _active_sa_email, _active_project_id, roots)
-    print(f"Verified GEE initialization. Account: {_active_sa_email}, Project: {_active_project_id}, Roots: {roots}")
+    _active_project_id = target_project
+    _active_sa_email = key_data["client_email"]
+    logger.info("GEE initialized successfully. Pool Size: %d, Active SA: %s, Project: %s", len(_credentials_list), _active_sa_email, _active_project_id)
+    print(f"Verified GEE initialization. Pool Size: {len(_credentials_list)}, Active SA: {_active_sa_email}")
+
+
+def rotate_credentials():
+    """Rotate to the next service account credential in the pool to bypass concurrency limits."""
+    global _current_cred_idx, _credentials_list
+    with _auth_lock:
+        if len(_credentials_list) > 1:
+            old_email = _active_sa_email
+            _current_cred_idx = (_current_cred_idx + 1) % len(_credentials_list)
+            logger.warning("Rotating GEE Credentials! Switching from %s to credential index %d", old_email, _current_cred_idx)
+            try:
+                _activate_credential_unlocked(_current_cred_idx)
+            except Exception as e:
+                logger.error("Failed to rotate credentials: %s", e)
+        else:
+            logger.warning("Cannot rotate credentials: only 1 credential in pool.")
 
 
 def get_gee_status() -> dict:

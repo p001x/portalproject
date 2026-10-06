@@ -14,15 +14,7 @@ from gee.classify_utils import (
     class_palette,
 )
 
-def get_dynamic_scale(geom):
-    try:
-        area_sqkm = geom.area().divide(1e6).getInfo()
-        if area_sqkm > 10000: return 500
-        elif area_sqkm > 2000: return 250
-        elif area_sqkm > 500: return 100
-        else: return 30
-    except:
-        return 250
+from gee.aoi_utils import get_dynamic_scale
 
 _cache_unified: TTLCache = TTLCache(maxsize=64, ttl=3600)
 _cache_build: TTLCache = TTLCache(maxsize=64, ttl=3600)
@@ -145,7 +137,7 @@ def _classify_all_raw_images(raw_dict: dict, aoi: ee.Geometry, scale: int, n_cla
     all_bands = ee.Image.cat([img.rename(nm) for nm, img in zip(names, images)])
     hist_raw = all_bands.reduceRegion(
         reducer=ee.Reducer.autoHistogram(maxBuckets=100),
-        geometry=aoi, scale=scale, maxPixels=20000, bestEffort=True
+        geometry=aoi.bounds(maxError=1000), scale=scale, maxPixels=20000, bestEffort=True
     ).getInfo()
     
     if not hist_raw:
@@ -229,10 +221,22 @@ def _build_habitat_images(
         roads = ee.FeatureCollection("projects/sat-io/open-datasets/GRIP4/Africa").filterBounds(aoi_buffer)
         roads_dist_km = roads.distance(searchRadius=50000, maxError=50).unmask(50000).divide(1000).clip(aoi)
         
-        dem = ee.Image("USGS/SRTMGL1_003").select("elevation").clip(aoi)
+        dem = ee.Image("USGS/SRTMGL1_003").select("elevation").unmask(ee.ImageCollection("COPERNICUS/DEM/GLO30").select("DEM").mosaic(), False).clip(aoi)
         slope_deg = ee.Terrain.slope(dem).clip(aoi)
         
-        rainfall = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY").filterDate(f"{start_year}-01-01", f"{end_year+1}-01-01").sum().divide(max(1, end_year - start_year + 1)).clip(aoi)
+        try:
+            bounds_coords = aoi.bounds(maxError=1000).coordinates().get(0).getInfo()
+            lats = [pt[1] for pt in bounds_coords]
+            use_era5_precip = max(lats) > 50 or min(lats) < -50
+        except:
+            use_era5_precip = True
+
+        n_years = max(1, end_year - start_year + 1)
+        if use_era5_precip:
+            rainfall = ee.ImageCollection("ECMWF/ERA5_LAND/MONTHLY_AGGR").select("total_precipitation_sum").filterDate(f"{start_year}-01-01", f"{end_year+1}-01-01").sum().multiply(1000).divide(n_years).clip(aoi)
+        else:
+            rainfall = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY").filterDate(f"{start_year}-01-01", f"{end_year+1}-01-01").select("precipitation").sum().divide(n_years).clip(aoi)
+        
         lst_coll = ee.ImageCollection("MODIS/061/MOD11A1").filterDate(f"{start_year}-01-01", f"{end_year+1}-01-01").select("LST_Day_1km")
         lst = lst_coll.mean().multiply(0.02).subtract(273.15).unmask(22.0).clip(aoi)
     
@@ -346,7 +350,7 @@ def compute_habitat(
     stat_labels = list(classes.keys())
     area_img = ee.Image.cat([classes[lbl].multiply(ee.Image.pixelArea()).rename(f"c{i}") for i, lbl in enumerate(stat_labels)])
     area_dict = area_img.reduceRegion(
-        reducer=ee.Reducer.sum(), geometry=aoi, scale=scale, maxPixels=1e10
+        reducer=ee.Reducer.sum(), geometry=aoi.bounds(maxError=1000), scale=scale, maxPixels=1e10
     ).getInfo() or {}
     class_areas = {lbl: round((area_dict.get(f"c{i}") or 0) / 1e6, 2) for i, lbl in enumerate(stat_labels)}
 
@@ -361,7 +365,7 @@ def compute_habitat(
         if palette is None:
             palette = _SCORE_VIS["palette"]
         try:
-            return img.getThumbURL({"min": 1, "max": classes, "palette": palette, "region": aoi.bounds(), "dimensions": 512, "format": "png"})
+            return img.getThumbURL({"min": 1, "max": classes, "palette": palette, "region": aoi.bounds(), "dimensions": 512, "crs": "EPSG:4326", "format": "png"})
         except Exception:
             return None
 

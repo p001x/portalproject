@@ -1,3 +1,4 @@
+from gee.aoi_utils import get_bounds_and_center
 import json
 import math
 import ee
@@ -10,15 +11,7 @@ from gee.aoi_utils import get_aoi_geometry, get_historical_ndvi
 _cache: TTLCache = TTLCache(maxsize=128, ttl=86400)
 _lock = Lock()
 
-def get_dynamic_scale(geom):
-    try:
-        area_sqkm = geom.area().divide(1e6).getInfo()
-        if area_sqkm > 10000: return 500
-        elif area_sqkm > 2000: return 250
-        elif area_sqkm > 500: return 100
-        else: return 30
-    except:
-        return 250
+from gee.aoi_utils import get_dynamic_scale
 
 FLOOD_CLASS_NAMES = ["Very Low", "Low", "Moderate", "High", "Very High"]
 
@@ -105,9 +98,22 @@ def _apply_reverse(img: ee.Image, reverse: bool) -> ee.Image:
     return ee.Image(6).subtract(img)
 
 
-def _build_flood_image(aoi: ee.Geometry, start_year: int, end_year: int, weights: dict, reverse_flags: dict):
+def _build_flood_image(aoi_config: dict, start_year: int, end_year: int, weights: dict, reverse_flags: dict):
+    aoi = get_aoi_geometry(aoi_config)
+    
+    is_global = False
+    try:
+        geom_str = str(aoi.serialize())
+        if "-180" in geom_str and "180" in geom_str and "90" in geom_str and "-90" in geom_str:
+            is_global = True
+    except:
+        pass
+    
+    district = aoi_config.get("district", "")
+    is_rwanda = district != "" or "rwanda" in aoi_config.get("name", "").lower()
+    
     # 1. Elevation & Slope
-    dem = ee.Image("USGS/SRTMGL1_003").select("elevation").clip(aoi)
+    dem = ee.Image("USGS/SRTMGL1_003").select("elevation").unmask(ee.ImageCollection("COPERNICUS/DEM/GLO30").select("DEM").mosaic(), False).clip(aoi)
     slope_deg = ee.Terrain.slope(dem)
     
     # Elevation: lower elevation = higher flood risk (5)
@@ -147,17 +153,36 @@ def _build_flood_image(aoi: ee.Geometry, start_year: int, end_year: int, weights
         .clip(aoi)
     )
 
+    try:
+        bounds_coords = aoi.bounds(maxError=1000).coordinates().get(0).getInfo()
+        lats = [pt[1] for pt in bounds_coords]
+        use_era5_precip = max(lats) > 50 or min(lats) < -50
+    except:
+        use_era5_precip = True
+
     # 3. Rainfall
     n_years = max(1, end_year - start_year + 1)
-    rainfall = (
-        ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY")
-        .filterDate(f"{start_year}-01-01", f"{end_year + 1}-01-01")
-        .filterBounds(aoi).select("precipitation")
-        .sum()
-        .divide(n_years)
-        .reproject(crs="EPSG:4326", scale=5000)
-        .clip(aoi)
-    )
+    if use_era5_precip:
+        rainfall = (
+            ee.ImageCollection("ECMWF/ERA5_LAND/MONTHLY_AGGR")
+            .select("total_precipitation_sum")
+            .filterDate(f"{start_year}-01-01", f"{end_year + 1}-01-01")
+            .filterBounds(aoi)
+            .sum().multiply(1000)
+            .divide(n_years)
+            .reproject(crs="EPSG:4326", scale=5000)
+            .clip(aoi)
+        )
+    else:
+        rainfall = (
+            ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY")
+            .filterDate(f"{start_year}-01-01", f"{end_year + 1}-01-01")
+            .filterBounds(aoi).select("precipitation")
+            .sum()
+            .divide(n_years)
+            .reproject(crs="EPSG:4326", scale=5000)
+            .clip(aoi)
+        )
     # Rainfall: higher rainfall = higher flood risk (5)
     rainfall_score = (
         ee.Image(1)
@@ -184,7 +209,13 @@ def _build_flood_image(aoi: ee.Geometry, start_year: int, end_year: int, weights
     # 5. Distances
     gsw = ee.Image("JRC/GSW1_4/GlobalSurfaceWater").select("occurrence")
     water_mask = gsw.gte(50).unmask(0).Or(lc.eq(80)).Or(lc.eq(90))
-    river_dist_km = _distance_km(water_mask, aoi)
+    
+    if not is_global:
+        river_dist_km = _distance_km(water_mask, aoi)
+    else:
+        # Fallback to extremely coarse simplified distance for global to avoid memory limit
+        river_dist_km = water_mask.fastDistanceTransform(256).multiply(5000).divide(1000).clip(aoi)
+        
     river_dist_score = (
         ee.Image(1)
         .where(river_dist_km.lt(0.2), 5)
@@ -195,9 +226,21 @@ def _build_flood_image(aoi: ee.Geometry, start_year: int, end_year: int, weights
         .clip(aoi)
     )
 
-    roads = ee.FeatureCollection("projects/sat-io/open-datasets/GRIP4/Africa").filterBounds(aoi)
-    road_mask = ee.Image(0).paint(roads, 1).eq(1)
-    road_dist_km = _distance_km(road_mask, aoi)
+    if is_rwanda:
+        roads = ee.FeatureCollection("projects/sat-io/open-datasets/GRIP4/Africa").filterBounds(aoi)
+        soiltype = ee.Image("ISDASOIL/Africa/v1/texture_class").select("texture_0_20").clip(aoi)
+    else:
+        # Use Global equivalents
+        roads = ee.FeatureCollection("projects/sat-io/open-datasets/GRIP4/GlobalRoads").filterBounds(aoi)
+        soiltype = ee.Image("OpenLandMap/SOL/SOL_TEXTURE-CLASS_USDA-315_M/v02").select("b0").clip(aoi)
+
+    if not is_global:
+        road_mask = ee.Image(0).paint(roads, 1).eq(1)
+        road_dist_km = _distance_km(road_mask, aoi)
+    else:
+        road_mask = ee.Image(0).paint(roads, 1).eq(1)
+        road_dist_km = road_mask.fastDistanceTransform(256).multiply(5000).divide(1000).clip(aoi)
+
     road_dist_score = (
         ee.Image(1)
         .where(road_dist_km.lt(0.1), 5)
@@ -209,7 +252,6 @@ def _build_flood_image(aoi: ee.Geometry, start_year: int, end_year: int, weights
     )
 
     # 6. Soil Type
-    soiltype = ee.Image("ISDASOIL/Africa/v1/texture_class").select("texture_0_20").clip(aoi)
     soil_type_score = (
         ee.Image(3)
         .where(soiltype.eq(1), 1)
@@ -292,7 +334,7 @@ def _build_flood_image(aoi: ee.Geometry, start_year: int, end_year: int, weights
     
     suitability = suitability.rename("suitability")
     
-    return suitability, score_images, raw_images
+    return suitability, score_images, raw_images, aoi, is_global
 
 
 def compute_flood_map(aoi_config: dict, start_year: int, end_year: int, weights: dict, reverse_flags: dict) -> dict:
@@ -301,8 +343,7 @@ def compute_flood_map(aoi_config: dict, start_year: int, end_year: int, weights:
         if cache_key in _cache:
             return _cache[cache_key]
 
-    aoi = get_aoi_geometry(aoi_config)
-    suitability, score_images, raw_images = _build_flood_image(aoi, start_year, end_year, weights, reverse_flags)
+    suitability, score_images, raw_images, aoi, is_global = _build_flood_image(aoi_config, start_year, end_year, weights, reverse_flags)
     
     from threading import BoundedSemaphore
     gee_semaphore = BoundedSemaphore(5)
@@ -314,7 +355,7 @@ def compute_flood_map(aoi_config: dict, start_year: int, end_year: int, weights:
             if "Memory limit" in str(e) or "User memory limit" in str(e):
                 raise ValueError("The selected region is too large or complex for real-time visualization. Please select a smaller area.") from e
             raise
-    bounds = aoi.bounds().getInfo()["coordinates"][0]
+    bounds, _ = get_bounds_and_center(aoi)
     
     x_coords = [p[0] for p in bounds]
     y_coords = [p[1] for p in bounds]
@@ -325,10 +366,12 @@ def compute_flood_map(aoi_config: dict, start_year: int, end_year: int, weights:
     for key in FACTOR_ORDER:
         with gee_semaphore:
             try:
+                calc_geom = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False) if is_global else aoi.bounds()
                 img_id = score_images[key].getMapId(_SCORE_VIS)
                 factor_maps[key] = {
                     "label": FACTOR_META[key]["label"],
                     "tile_url": img_id["tile_fetcher"].url_format,
+                    "thumb_url": score_images[key].getThumbURL({**_SCORE_VIS, "region": calc_geom, "dimensions": 512, "crs": "EPSG:4326", "format": "png"}),
                     "reversed": reverse_flags.get(key, False),
                 }
             except ee.EEException:
@@ -338,6 +381,7 @@ def compute_flood_map(aoi_config: dict, start_year: int, end_year: int, weights:
 
     result = {
         "tile_url": map_id["tile_fetcher"].url_format,
+        "thumb_url": suitability.getThumbURL({**_SCORE_VIS, "region": calc_geom, "dimensions": 512, "crs": "EPSG:4326", "format": "png"}),
         "center": center,
         "bbox": bounds,
         "ahp": ahp_data,
@@ -355,8 +399,7 @@ def compute_flood_stats(aoi_config: dict, start_year: int, end_year: int, weight
         if cache_key in _cache:
             return _cache[cache_key]
 
-    aoi = get_aoi_geometry(aoi_config)
-    suitability, _, _ = _build_flood_image(aoi, start_year, end_year, weights, reverse_flags)
+    suitability, _, _, aoi, is_global = _build_flood_image(aoi_config, start_year, end_year, weights, reverse_flags)
 
     # Simplified standard classification for baseline stats
     classes = {
@@ -372,8 +415,9 @@ def compute_flood_stats(aoi_config: dict, start_year: int, end_year: int, weight
         for i, lbl in enumerate(labels)
     ])
 
+    calc_geom = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False) if is_global else aoi.bounds(maxError=1000)
     area_dict = area_img.reduceRegion(
-        reducer=ee.Reducer.sum(), geometry=aoi, scale=get_dynamic_scale(aoi), maxPixels=1e10
+        reducer=ee.Reducer.sum(), geometry=calc_geom, scale=get_dynamic_scale(aoi), maxPixels=1e10
     ).getInfo()
 
     class_areas_km2 = {lbl: (area_dict.get(f"c{i}") or 0) / 1e6 for i, lbl in enumerate(labels)}
@@ -407,8 +451,7 @@ def compute_flood_classify(aoi_config: dict, start_year: int, end_year: int, wei
         if cache_key in _cache:
             return _cache[cache_key]
 
-    aoi = get_aoi_geometry(aoi_config)
-    suitability, score_images, raw_images = _build_flood_image(aoi, start_year, end_year, weights, reverse_flags)
+    suitability, score_images, raw_images, aoi, is_global = _build_flood_image(aoi_config, start_year, end_year, weights, reverse_flags)
 
     layers_to_classify = [{"name": "suitability", "image": suitability, "title": "Flood Susceptibility Index"}]
     for key in FACTOR_ORDER:
@@ -444,5 +487,12 @@ def compute_flood_export(aoi_config: dict, start_year: int, end_year: int, weigh
     from threading import BoundedSemaphore
     gee_semaphore = BoundedSemaphore(5)
     with gee_semaphore:
-        download_url = suitability.getDownloadURL({"scale": get_dynamic_scale(aoi), "region": aoi.bounds(), "format": "GEO_TIFF"})
+        is_global = False
+        try:
+            geom_str = str(aoi.serialize())
+            if "-180" in geom_str and "180" in geom_str and "90" in geom_str and "-90" in geom_str:
+                is_global = True
+        except: pass
+        calc_geom = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False) if is_global else aoi.bounds(maxError=1000)
+        download_url = suitability.getDownloadURL({"scale": get_dynamic_scale(aoi), "region": calc_geom, "format": "GEO_TIFF"})
     return {"download_url": download_url}

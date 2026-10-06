@@ -2,15 +2,7 @@ import json
 """Land Surface Temperature (LST) — no Streamlit dependency."""
 import ee
 
-def get_dynamic_scale(geom):
-    try:
-        area_sqkm = geom.area().divide(1e6).getInfo()
-        if area_sqkm > 10000: return 500
-        elif area_sqkm > 2000: return 250
-        elif area_sqkm > 500: return 100
-        else: return 30
-    except:
-        return 250
+from gee.aoi_utils import get_dynamic_scale
 
 from cachetools import TTLCache
 from threading import Lock
@@ -60,35 +52,48 @@ def lst_image_and_aoi(aoi_config: dict, start_date: str, end_date: str):
     )
 
     modis_celsius = modis_col.median().multiply(0.02).subtract(273.15)
-    modis_baseline = modis_celsius.unmask(modis_climatology).resample("bicubic")
+    modis_baseline = modis_celsius.unmask(modis_climatology).setDefaultProjection(ee.Projection("EPSG:4326").atScale(1000)).resample("bicubic")
 
-    # 2. 30m Topographic Thermal Downscaling using SRTM Digital Elevation Model
+    # 2. 30m Topographic Thermal Downscaling using Copernicus DEM (Global Coverage)
     # Atmospheric lapse rate: -6.5°C per 1,000m of elevation difference
-    srtm_30m = ee.Image("USGS/SRTMGL1_003").select("elevation")
-    srtm_1km = srtm_30m.focalMean(radius=1000, kernelType="circle", units="meters")
-    topo_diff = srtm_30m.subtract(srtm_1km)
-    lapse_correction = topo_diff.multiply(-0.0065)
+    dem_30m = ee.ImageCollection("COPERNICUS/DEM/GLO30").select("DEM").mosaic().setDefaultProjection(ee.Projection("EPSG:4326").atScale(30))
+    dem_1km = dem_30m.focalMean(radius=1000, kernelType="circle", units="meters")
+    topo_diff = dem_30m.subtract(dem_1km)
+    lapse_correction = topo_diff.multiply(-0.0065).unmask(0)
 
-    # 3. 30m Vegetation Cooling Downscaling (Sentinel-2 NDVI)
+    # 3. 30m Vegetation Cooling Downscaling (Sentinel-2 NDVI / MODIS for large areas)
     # Dense forest/vegetation transpires and cools by up to ~3.0°C relative to bare ground/urban
-    s2_col = (
-        ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
-        .filterDate(start_date, end_date)
-        .filterBounds(aoi)
-        .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 30))
-    )
-    s2_median = s2_col.median()
-    ndvi_30m = s2_median.normalizedDifference(["B8", "B4"]).rename("NDVI").clamp(-0.2, 0.9)
+    try:
+        area_sqkm = aoi.bounds().area(maxError=1000).divide(1e6).getInfo()
+    except Exception:
+        area_sqkm = 0
+
+    if area_sqkm > 20000:
+        # For huge regions, avoid Sentinel-2 median (too heavy).
+        modis_ndvi = ee.ImageCollection("MODIS/061/MOD13Q1").filterDate(start_date, end_date).select("NDVI").median().divide(10000)
+        ndvi_30m = modis_ndvi.unmask(0).clamp(-0.2, 0.9)
+        s2_ndwi = ee.Image(0).rename("NDWI")
+    else:
+        s2_col = (
+            ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+            .filterDate(start_date, end_date)
+            .filterBounds(aoi)
+            .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 30))
+        )
+        dummy_s2 = ee.Image.constant([0, 0, 0]).rename(["B3", "B4", "B8"]).updateMask(0)
+        s2_col_safe = s2_col.merge(ee.ImageCollection([dummy_s2]))
+        s2_median = s2_col_safe.median()
+        ndvi_30m = s2_median.normalizedDifference(["B8", "B4"]).rename("NDVI").unmask(0).clamp(-0.2, 0.9)
+        s2_ndwi = s2_median.normalizedDifference(["B3", "B8"]).rename("NDWI")
     ndvi_1km = ndvi_30m.focalMean(radius=1000, kernelType="circle", units="meters")
     ndvi_diff = ndvi_30m.subtract(ndvi_1km)
-    veg_cooling = ndvi_diff.multiply(-3.0)
+    veg_cooling = ndvi_diff.multiply(-3.0).unmask(0)
 
     # High-resolution, seamless 30m LST field without any satellite swath seams
     lst_30m = modis_baseline.add(lapse_correction).add(veg_cooling).rename("LST")
 
     # 4. Clean Surface Water Separation (JRC Water + S2 NDWI)
     jrc_water = ee.Image("JRC/GSW1_4/GlobalSurfaceWater").select("occurrence").gt(50)
-    s2_ndwi = s2_median.normalizedDifference(["B3", "B8"]).rename("NDWI")
     ndwi = s2_ndwi.unmask(jrc_water.multiply(0.5)).rename("NDWI")
 
     # Clip strictly to AOI
@@ -130,13 +135,13 @@ def compute_lst(aoi_config: dict, start_date: str, end_date: str, n_classes: int
                 .combine(ee.Reducer.min(), sharedInputs=True)
                 .combine(ee.Reducer.max(), sharedInputs=True)
                 .combine(ee.Reducer.stdDev(), sharedInputs=True),
-                geometry=aoi, scale=get_dynamic_scale(aoi), maxPixels=1e10,
+                geometry=aoi.bounds(maxError=1000), scale=get_dynamic_scale(aoi), maxPixels=1e10,
             ).getInfo()
         )
 
         f_area = executor.submit(
             lambda: area_img.reduceRegion(
-                reducer=ee.Reducer.sum(), geometry=aoi, scale=get_dynamic_scale(aoi), maxPixels=1e10
+                reducer=ee.Reducer.sum(), geometry=aoi.bounds(maxError=1000), scale=get_dynamic_scale(aoi), maxPixels=1e10
             ).getInfo()
         )
 
@@ -148,17 +153,13 @@ def compute_lst(aoi_config: dict, start_date: str, end_date: str, n_classes: int
             )
         )
 
-        f_bounds = executor.submit(
-            lambda: aoi.bounds().getInfo()["coordinates"][0]
-        )
-
         f_download = executor.submit(
             lambda: lst_median.getDownloadURL({
                 "name": "LST", 
                 "region": aoi.bounds(), 
-                "scale": 30, 
+                "scale": max(30, get_dynamic_scale(aoi)), 
                 "format": "GEO_TIFF", 
-                "maxPixels": 1e9
+                "maxPixels": 1e10
             })
         )
 
@@ -178,7 +179,7 @@ def compute_lst(aoi_config: dict, start_date: str, end_date: str, n_classes: int
             classify = {}
             
         try:
-            bounds = f_bounds.result()
+            bounds = aoi.bounds().getInfo().get("coordinates", [[[0,0]]])[0]
         except Exception:
             bounds = [[0, 0], [0, 0], [0, 0], [0, 0]]
             
@@ -212,7 +213,7 @@ def compute_lst(aoi_config: dict, start_date: str, end_date: str, n_classes: int
     final_viz = ee.ImageCollection([lst_rgb, water_rgb]).mosaic().clip(aoi)
 
     map_id = final_viz.getMapId()
-    thumb_url = final_viz.getThumbURL({"region": aoi.bounds(), "dimensions": 800, "format": "png"})
+    thumb_url = final_viz.getThumbURL({"region": aoi.bounds(), "dimensions": 800, "crs": "EPSG:4326", "format": "png"})
 
     result = {
         "tile_url": map_id["tile_fetcher"].url_format,

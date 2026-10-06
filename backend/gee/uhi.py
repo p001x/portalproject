@@ -28,14 +28,14 @@ NO_DATA_COLOR = "#d0d0d0"
 
 def get_dynamic_scale(geom):
     try:
-        area_sqkm = geom.area().divide(1e6).getInfo()
+        area_sqkm = geom.bounds().area(maxError=1000).divide(1e6).getInfo()
         if area_sqkm > 10000: return 200
         elif area_sqkm > 2000: return 100
         else: return 100
     except:
         return 100
 
-def _get_sectors_fc(aoi_geometry):
+def _get_sectors_fc(aoi_geometry, is_global=False):
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
     shp_path = os.path.join(base_dir, "sectrstu", "villages.shp")
     df = gpd.read_file(shp_path)
@@ -44,10 +44,19 @@ def _get_sectors_fc(aoi_geometry):
     # Dissolve by Sector
     sectors = df.dissolve("NAME_3").reset_index()
     
-    # Filter bounds to AOI locally to reduce payload
-    bounds = aoi_geometry.bounds().getInfo()["coordinates"][0]
-    lon_min, lat_min = bounds[0]
-    lon_max, lat_max = bounds[2]
+    if is_global:
+        lon_min, lat_min = -180, -90
+        lon_max, lat_max = 180, 90
+    else:
+        # Filter bounds to AOI locally to reduce payload
+        try:
+            bounds = aoi_geometry.bounds().getInfo()["coordinates"][0]
+            lon_min, lat_min = bounds[0]
+            lon_max, lat_max = bounds[2]
+        except:
+            lon_min, lat_min = -180, -90
+            lon_max, lat_max = 180, 90
+            
     aoi_box = box(lon_min, lat_min, lon_max, lat_max)
     
     sectors = sectors[sectors.intersects(aoi_box)].copy()
@@ -56,6 +65,22 @@ def _get_sectors_fc(aoi_geometry):
     sectors_simplified = sectors.copy()
     sectors_simplified.geometry = sectors_simplified.geometry.simplify(0.005, preserve_topology=True)
     
+    if len(sectors_simplified) == 0:
+        # Fallback for outside Rwanda: Dynamic 15x15 Grid over Bounding Box
+        grid_polys = []
+        d_lon = (lon_max - lon_min) / 15
+        d_lat = (lat_max - lat_min) / 15
+        for i in range(15):
+            for j in range(15):
+                x0 = lon_min + i * d_lon
+                x1 = x0 + d_lon
+                y0 = lat_min + j * d_lat
+                y1 = y0 + d_lat
+                poly = box(x0, y0, x1, y1)
+                grid_polys.append({"geometry": poly, "NAME_3": f"Grid_{i}_{j}"})
+        sectors_simplified = gpd.GeoDataFrame(grid_polys, crs="EPSG:4326")
+        sectors = sectors_simplified.copy()
+
     features = []
     for i, row in sectors_simplified.iterrows():
         # Clean Sector Name
@@ -63,9 +88,10 @@ def _get_sectors_fc(aoi_geometry):
         features.append(ee.Feature(mapping(row.geometry), {"grid_id": name}))
         
     grid_fc = ee.FeatureCollection(features)
-    # Intersect with exact AOI in GEE
-    grid_fc = grid_fc.map(lambda f: ee.Feature(ee.Geometry(f.geometry()).intersection(aoi_geometry, ee.ErrorMargin(10)), f.toDictionary()))
     
+    # Do NOT intersect grid cells with aoi_geometry. 
+    # The image is already clipped to aoi, so reduceRegions automatically masks pixels outside the AOI.
+    # Intersecting massive polygons causes Earth Engine timeouts.
     return sectors, grid_fc
 
 def _build_uhi_base(aoi_config: dict, start_date: str, end_date: str, grid_size: int, lst_source: str = "hybrid"):
@@ -75,34 +101,50 @@ def _build_uhi_base(aoi_config: dict, start_date: str, end_date: str, grid_size:
     from gee.aoi_utils import get_aoi_geometry
     
     aoi = get_aoi_geometry(aoi_config)
+    is_global = False
+    try:
+        geom_str = str(aoi.serialize())
+        if "-180" in geom_str and "180" in geom_str and "90" in geom_str and "-90" in geom_str:
+            is_global = True
+    except:
+        pass
     
-    if lst_source == "landsat":
-        harmonized = get_harmonized_landsat_collection(start_date, end_date, aoi, max_cloud_cover=100)
-        def scale_temp(img):
-            return img.select("ST_B10").multiply(0.00341802).add(149.0).subtract(273.15).rename("LST")
-        lst = gap_fill(harmonized.map(scale_temp).median()).clip(aoi)
-    elif lst_source == "modis":
+    
+    if is_global:
+        modis_ref = ee.ImageCollection("MODIS/061/MCD43A4").filterDate(start_date, end_date).filterBounds(aoi).median()
+        ndvi = modis_ref.normalizedDifference(["Nadir_Reflectance_Band2", "Nadir_Reflectance_Band1"]).rename("NDVI")
+        ndbi = modis_ref.normalizedDifference(["Nadir_Reflectance_Band6", "Nadir_Reflectance_Band2"]).rename("NDBI")
         m8 = ee.ImageCollection("MODIS/061/MOD11A2").filterDate(start_date, end_date).filterBounds(aoi).select("LST_Day_1km")
         md = ee.ImageCollection("MODIS/061/MOD11A1").filterDate(start_date, end_date).filterBounds(aoi).select("LST_Day_1km")
         lst = m8.merge(md).median().multiply(0.02).subtract(273.15).rename("LST")
     else:
-        # Default to hybrid
-        lst_median_raw, _ = lst_image_and_aoi(aoi_config, start_date, end_date)
-        lst = lst_median_raw.select("LST")
-    
-    ndbi_median_raw, _ = ndbi_image_and_aoi(aoi_config, start_date, end_date)
-    ndbi = ndbi_median_raw.select("NDBI")
-    
-    # Construct gap-filled NDVI using the same harmonized collection as NDBI
-    def compute_ndvi(image):
-        return image.normalizedDifference(["SR_B5", "SR_B4"]).rename("NDVI").copyProperties(image, ["system:time_start"])
-    
-    def apply_scale_factors(image):
-        optical = image.select("SR_B.").multiply(0.0000275).add(-0.2)
-        return image.addBands(optical, None, True)
+        if lst_source == "landsat":
+            harmonized = get_harmonized_landsat_collection(start_date, end_date, aoi, max_cloud_cover=100)
+            def scale_temp(img):
+                return img.select("ST_B10").multiply(0.00341802).add(149.0).subtract(273.15).rename("LST")
+            lst = gap_fill(harmonized.map(scale_temp).median()).clip(aoi)
+        elif lst_source == "modis":
+            m8 = ee.ImageCollection("MODIS/061/MOD11A2").filterDate(start_date, end_date).filterBounds(aoi).select("LST_Day_1km")
+            md = ee.ImageCollection("MODIS/061/MOD11A1").filterDate(start_date, end_date).filterBounds(aoi).select("LST_Day_1km")
+            lst = m8.merge(md).median().multiply(0.02).subtract(273.15).rename("LST")
+        else:
+            # Default to hybrid
+            lst_median_raw, _ = lst_image_and_aoi(aoi_config, start_date, end_date)
+            lst = lst_median_raw.select("LST")
         
-    collection = get_harmonized_landsat_collection(start_date, end_date, aoi, max_cloud_cover=80).map(apply_scale_factors).map(compute_ndvi)
-    ndvi = gap_fill(collection.median()).clip(aoi)
+        ndbi_median_raw, _ = ndbi_image_and_aoi(aoi_config, start_date, end_date)
+        ndbi = ndbi_median_raw.select("NDBI")
+        
+        # Construct gap-filled NDVI using the same harmonized collection as NDBI
+        def compute_ndvi(image):
+            return image.normalizedDifference(["SR_B5", "SR_B4"]).rename("NDVI").copyProperties(image, ["system:time_start"])
+        
+        def apply_scale_factors(image):
+            optical = image.select("SR_B.").multiply(0.0000275).add(-0.2)
+            return image.addBands(optical, None, True)
+            
+        collection = get_harmonized_landsat_collection(start_date, end_date, aoi, max_cloud_cover=80).map(apply_scale_factors).map(compute_ndvi)
+        ndvi = gap_fill(collection.median()).clip(aoi)
 
     # Strictly clip all maps to the exact boundaries of the AOI so there is no edge spillover
     lst = lst.clip(aoi)
@@ -113,13 +155,13 @@ def _build_uhi_base(aoi_config: dict, start_date: str, end_date: str, grid_size:
     combined = lst.addBands(ndbi).addBands(ndvi)
     
     # Admin Boundary Zonal Stats (Sector-level) instead of arbitrary grid
-    sectors_gdf, grid_fc = _get_sectors_fc(aoi)
+    sectors_gdf, grid_fc = _get_sectors_fc(aoi, is_global)
     
     # Reduce at 100m resolution (matching Landsat TIRS native resolution)
     scale = get_dynamic_scale(aoi)
     stats_fc = combined.reduceRegions(collection=grid_fc, reducer=ee.Reducer.mean(), scale=scale)
-    
-    return aoi, lst, ndbi, ndvi, stats_fc, sectors_gdf
+        
+    return aoi, lst, ndbi, ndvi, stats_fc, sectors_gdf, is_global
 
 def _render_bivariate_map(gdf, no_data, aoi, aoi_config, bivar_colors, bivar_labels):
     # Renders the actual Sectors instead of grid cells
@@ -199,18 +241,20 @@ def compute_uhi(aoi_config: dict, start_date: str, end_date: str, grid_size: int
         if cache_key in _cache:
             return _cache[cache_key]
 
-    aoi, lst_median, ndbi_median, ndvi_median, stats_fc, sectors_gdf = _build_uhi_base(aoi_config, start_date, end_date, grid_size, lst_source)
-    bounds = aoi.bounds().getInfo()["coordinates"][0]
-    center = [(bounds[0][1] + bounds[2][1]) / 2, (bounds[0][0] + bounds[2][0]) / 2]
+    aoi, lst_median, ndbi_median, ndvi_median, stats_fc, sectors_gdf, is_global = _build_uhi_base(aoi_config, start_date, end_date, grid_size, lst_source)
+    from gee.aoi_utils import get_bounds_and_center
+
+    bounds, center = get_bounds_and_center(aoi)
     scale = get_dynamic_scale(aoi)
 
+    calc_geom = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False) if is_global else aoi.bounds(maxError=1000)
     # Server-side percentile reduction for LST and NDBI
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         f_lst_pct = executor.submit(
-            lambda: lst_median.reduceRegion(reducer=ee.Reducer.percentile([2, 98]), geometry=aoi, scale=scale, maxPixels=1e10).getInfo()
+            lambda: lst_median.reduceRegion(reducer=ee.Reducer.percentile([2, 98]), geometry=calc_geom, scale=scale, maxPixels=1e10).getInfo()
         )
         f_ndbi_pct = executor.submit(
-            lambda: ndbi_median.reduceRegion(reducer=ee.Reducer.percentile([2, 98]), geometry=aoi, scale=scale, maxPixels=1e10).getInfo()
+            lambda: ndbi_median.reduceRegion(reducer=ee.Reducer.percentile([2, 98]), geometry=calc_geom, scale=scale, maxPixels=1e10).getInfo()
         )
         lst_pct = f_lst_pct.result()
         ndbi_pct = f_ndbi_pct.result()
@@ -227,8 +271,8 @@ def compute_uhi(aoi_config: dict, start_date: str, end_date: str, grid_size: int
     lst_tile_url = lst_median.getMapId(lst_vis_cont)["tile_fetcher"].url_format
     ndbi_tile_url = ndbi_median.getMapId(ndbi_vis_cont)["tile_fetcher"].url_format
     
-    lst_thumb_url = lst_median.getThumbURL({**lst_vis_cont, "region": aoi.bounds(), "dimensions": 800, "format": "png"})
-    ndbi_thumb_url = ndbi_median.getThumbURL({**ndbi_vis_cont, "region": aoi.bounds(), "dimensions": 800, "format": "png"})
+    lst_thumb_url = lst_median.getThumbURL({**lst_vis_cont, "region": calc_geom, "dimensions": 800, "crs": "EPSG:4326", "format": "png"})
+    ndbi_thumb_url = ndbi_median.getThumbURL({**ndbi_vis_cont, "region": calc_geom, "dimensions": 800, "crs": "EPSG:4326", "format": "png"})
 
     # Zonal Stats
     features = stats_fc.getInfo()["features"]

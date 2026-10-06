@@ -106,12 +106,7 @@ from gee.accessibility import (
     compute_accessibility_export,
 )
 from gee.uhi import compute_uhi
-from gee.drought import (
-    compute_drought_map,
-    compute_drought_stats,
-    compute_drought_classify,
-    compute_drought_export
-)
+
 from gee.flood import (
     compute_flood_map,
     compute_flood_stats,
@@ -995,16 +990,14 @@ class DroughtRequest(BaseModel):
     district: Optional[str] = Field(None, examples=["Kayonza"])
     start_year: int = Field(2010, ge=1980, le=2024)
     end_year: int = Field(2024, ge=1980, le=2024)
+    season: str = Field("season_b", description="season_b, season_a, season_c, annual, or custom")
+    start_month: Optional[int] = Field(None, ge=1, le=12)
+    end_month: Optional[int] = Field(None, ge=1, le=12)
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
     n_classes: int = Field(5, ge=1, le=15)
-    method: Optional[str] = Field("natural_breaks", description="Classification method")
+    method: Optional[str] = Field("equal_interval", description="Classification method")
     custom_labels: Optional[list[str]] = Field(None, description="Custom class names/labels")
-    reverse_sm: bool = False
-    reverse_rf: bool = False
-    reverse_ndvi: bool = False
-    reverse_vci: bool = False
-    reverse_lst: bool = False
-    reverse_cdd: bool = False
-    reverse_evi: bool = False
 
 class FloodRequest(BaseModel):
     aoi: dict = Field(default_factory=dict, description="AOI Configuration object")
@@ -1095,12 +1088,32 @@ import functools
 
 @functools.lru_cache(maxsize=64)
 def _download_png(url: str) -> bytes:
+    if url.startswith("data:"):
+        import base64
+        _, encoded = url.split(",", 1)
+        return base64.b64decode(encoded)
     import time
     max_retries = 5
     backoff = 1.0
+    
+    # Try to grab GEE token to pass along since v1 API needs it
+    ee_token = None
+    try:
+        import ee
+        creds = ee.data.get_persistent_credentials()
+        if creds:
+            if not getattr(creds, 'token', None):
+                import google.auth.transport.requests
+                creds.refresh(google.auth.transport.requests.Request())
+            ee_token = getattr(creds, 'token', None)
+    except Exception:
+        pass
+
     for attempt in range(max_retries):
         try:
             req_obj = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
+            if ee_token:
+                req_obj.add_header('Authorization', f'Bearer {ee_token}')
             with urllib.request.urlopen(req_obj, timeout=60) as response:
                 return response.read()
         except urllib.error.HTTPError as err:
@@ -1109,7 +1122,9 @@ def _download_png(url: str) -> bytes:
                 time.sleep(backoff)
                 backoff *= 2.0
             else:
-                raise
+                body = err.read().decode("utf-8")
+                logger.error(f"HTTPError {err.code} on {url}: {body}")
+                raise Exception(f"HTTP Error {err.code}: {body}") from err
         except Exception as err:
             if attempt < max_retries - 1:
                 logger.warning(f"Error downloading image ({err}) (attempt {attempt+1}/{max_retries}), retrying in {backoff}s...")
@@ -1120,11 +1135,24 @@ def _download_png(url: str) -> bytes:
 
 def _parse_bbox(bbox_val):
     if not bbox_val or not isinstance(bbox_val, list): return None
+    # Handle GEE polygon coordinates: [[[lon, lat], ...]]
     if len(bbox_val) > 0 and isinstance(bbox_val[0], list):
         try:
-            lons = [p[0] for p in bbox_val]
-            lats = [p[1] for p in bbox_val]
-            return [min(lons), max(lons), min(lats), max(lats)]
+            coords = bbox_val[0] if isinstance(bbox_val[0][0], list) else bbox_val
+            lons = [p[0] for p in coords]
+            lats = [p[1] for p in coords]
+            
+            # Handle antimeridian crossing
+            # If the span is suspiciously large (e.g. crossing 180), GEE might output negative coordinates for the eastern part.
+            # Convert negative longitudes to >180 if they cross the dateline
+            # We detect this if the distance between min and max is > 180 AND there's a mix of signs.
+            min_lon, max_lon = min(lons), max(lons)
+            if max_lon - min_lon > 180:
+                # Normalise: shift negative longitudes by +360
+                lons = [x + 360 if x < 0 else x for x in lons]
+                min_lon, max_lon = min(lons), max(lons)
+                
+            return [min_lon, max_lon, min(lats), max(lats)]
         except: return None
     return bbox_val
 
@@ -1183,6 +1211,15 @@ class IrrigationRequest(BaseModel):
 @app.post("/api/irrigation/map", tags=["analysis"])
 def irrigation_map_endpoint(req: IrrigationRequest):
     _require_gee()
+    from datetime import datetime
+    try:
+        sd = datetime.strptime(req.start_date, "%Y-%m-%d")
+        ed = datetime.strptime(req.end_date, "%Y-%m-%d")
+        if (ed - sd).days > 365:
+            raise HTTPException(status_code=400, detail="Date range cannot exceed 1 year. Please select a shorter period (e.g. 1-3 months) for Irrigation Scheduling.")
+    except ValueError:
+        pass # ignore if date parsing fails
+
     try:
         res = compute_irrigation_map(
             req.aoi, 
@@ -1202,6 +1239,14 @@ def irrigation_map_endpoint(req: IrrigationRequest):
 @app.post("/api/irrigation/stats", tags=["analysis"])
 def irrigation_stats_endpoint(req: IrrigationRequest):
     _require_gee()
+    from datetime import datetime
+    try:
+        sd = datetime.strptime(req.start_date, "%Y-%m-%d")
+        ed = datetime.strptime(req.end_date, "%Y-%m-%d")
+        if (ed - sd).days > 365:
+            raise HTTPException(status_code=400, detail="Date range cannot exceed 1 year. Please select a shorter period (e.g. 1-3 months) for Irrigation Scheduling.")
+    except ValueError:
+        pass
     try:
         res = compute_irrigation_stats(req.aoi, req.start_date, req.end_date, req.planting_date, req.crop_type)
         return res
@@ -1212,6 +1257,14 @@ def irrigation_stats_endpoint(req: IrrigationRequest):
 @app.post("/api/irrigation/export", tags=["analysis"])
 def irrigation_export_endpoint(req: IrrigationRequest):
     _require_gee()
+    from datetime import datetime
+    try:
+        sd = datetime.strptime(req.start_date, "%Y-%m-%d")
+        ed = datetime.strptime(req.end_date, "%Y-%m-%d")
+        if (ed - sd).days > 365:
+            raise HTTPException(status_code=400, detail="Date range cannot exceed 1 year. Please select a shorter period (e.g. 1-3 months) for Irrigation Scheduling.")
+    except ValueError:
+        pass
     try:
         res = compute_irrigation_export(req.aoi, req.start_date, req.end_date, req.planting_date, req.crop_type)
         return res
@@ -1609,7 +1662,7 @@ def lst_point_endpoint(req: LSTPointRequest, user: dict = Depends(get_current_us
 def rusle_map_endpoint(req: RUSLERequest, user: dict = Depends(get_current_user)):
     _require_gee()
     try:
-        return compute_rusle_map(req.aoi, req.start_year, req.end_year, req.reverse_r, req.reverse_k, req.reverse_ls, req.reverse_c, req.reverse_p)
+        return compute_rusle_map(req.aoi, req.end_year, req.reverse_r, req.reverse_k, req.reverse_ls, req.reverse_c, req.reverse_p)
     except Exception as exc:
         logger.exception("RUSLE map failed for %s", req.district)
         raise HTTPException(500, str(exc)) from exc
@@ -1618,7 +1671,7 @@ def rusle_map_endpoint(req: RUSLERequest, user: dict = Depends(get_current_user)
 def rusle_stats_endpoint(req: RUSLERequest, user: dict = Depends(get_current_user)):
     _require_gee()
     try:
-        return compute_rusle_stats(req.aoi, req.start_year, req.end_year, req.reverse_r, req.reverse_k, req.reverse_ls, req.reverse_c, req.reverse_p)
+        return compute_rusle_stats(req.aoi, req.end_year, req.reverse_r, req.reverse_k, req.reverse_ls, req.reverse_c, req.reverse_p)
     except Exception as exc:
         logger.exception("RUSLE stats failed for %s", req.district)
         raise HTTPException(500, str(exc)) from exc
@@ -1627,7 +1680,7 @@ def rusle_stats_endpoint(req: RUSLERequest, user: dict = Depends(get_current_use
 def rusle_classify_endpoint(req: RUSLERequest, user: dict = Depends(get_current_user)):
     _require_gee()
     try:
-        return compute_rusle_classify(req.aoi, req.start_year, req.end_year, req.n_classes, req.reverse_r, req.reverse_k, req.reverse_ls, req.reverse_c, req.reverse_p, method=req.method, custom_labels=req.custom_labels)
+        return compute_rusle_classify(req.aoi, req.end_year, req.n_classes, req.reverse_r, req.reverse_k, req.reverse_ls, req.reverse_c, req.reverse_p, method=req.method, custom_labels=req.custom_labels)
     except Exception as exc:
         logger.exception("RUSLE classify failed for %s", req.district)
         raise HTTPException(500, str(exc)) from exc
@@ -1636,7 +1689,7 @@ def rusle_classify_endpoint(req: RUSLERequest, user: dict = Depends(get_current_
 def rusle_export_endpoint(req: RUSLERequest, user: dict = Depends(get_current_user)):
     _require_gee()
     try:
-        return compute_rusle_export(req.aoi, req.start_year, req.end_year, req.reverse_r, req.reverse_k, req.reverse_ls, req.reverse_c, req.reverse_p)
+        return compute_rusle_export(req.aoi, req.end_year, req.reverse_r, req.reverse_k, req.reverse_ls, req.reverse_c, req.reverse_p)
     except Exception as exc:
         logger.exception("RUSLE export failed for %s", req.district)
         raise HTTPException(500, str(exc)) from exc
@@ -1649,6 +1702,39 @@ def slope_map_endpoint(req: SlopeRequest):
         return compute_slope_map(req.aoi)
     except Exception as exc:
         logger.exception("Slope map failed for %s", req.district)
+        raise HTTPException(500, str(exc)) from exc
+
+
+from fastapi.responses import FileResponse
+@app.get("/api/public_tif", tags=["datasets"])
+def serve_public_tif_endpoint(key: str):
+    """
+    Serves a TIF file directly from the local Hugging Face cache or local directory.
+    Bypasses CORS and authentication issues for the frontend.
+    """
+    from storage.dataset_storage import get_dataset_local_path
+    import os
+    try:
+        # Check if we have a locally pre-computed map that matches the key
+        # Example key: hf://pi0texy/blacportal-datasets/rusle/global_2024.tif
+        # Filename expected: rusle_global_2024.tif
+        filename = key.split("/")[-1]
+        
+        # We can dynamically check if it exists in our local files folder
+        possible_local_names = [filename, f"rusle_{filename}"]
+        for name in possible_local_names:
+            local_map = os.path.join(os.path.dirname(__file__), "data", "files", name)
+            if os.path.exists(local_map):
+                return FileResponse(local_map, media_type="image/tiff", headers={"Access-Control-Allow-Origin": "*"})
+                
+        # If not, fallback to Hugging Face cache
+        path = get_dataset_local_path(key)
+        if not path or not os.path.exists(path):
+            raise HTTPException(404, "File not found in storage")
+        return FileResponse(path, media_type="image/tiff", headers={"Access-Control-Allow-Origin": "*"})
+    except Exception as exc:
+        logger.exception("Failed to serve TIF for key %s", key)
+        raise HTTPException(500, str(exc)) from exc
         raise HTTPException(500, str(exc)) from exc
 
 @app.post("/api/slope/stats", tags=["analysis"])
@@ -2058,74 +2144,45 @@ def uhi_endpoint(req: UHIRequest):
 def drought_map_endpoint(req: DroughtRequest):
     _require_gee()
     try:
+        from gee.drought import compute_drought_map
         return compute_drought_map(
             req.aoi, req.start_year, req.end_year,
-            reverse_sm=req.reverse_sm,
-            reverse_rf=req.reverse_rf,
-            reverse_ndvi=req.reverse_ndvi,
-            reverse_vci=req.reverse_vci,
-            reverse_lst=req.reverse_lst,
-            reverse_cdd=req.reverse_cdd,
-            reverse_evi=req.reverse_evi,
+            season=req.season, start_month=req.start_month, end_month=req.end_month,
+            start_date=req.start_date, end_date=req.end_date
         )
     except Exception as exc:
-        logger.exception("Drought map failed for %s", req.district)
+        logger.exception("Drought map failed")
         raise HTTPException(500, str(exc)) from exc
 
 @app.post("/api/drought/stats", tags=["analysis"])
 def drought_stats_endpoint(req: DroughtRequest):
     _require_gee()
     try:
+        from gee.drought import compute_drought_stats
         return compute_drought_stats(
             req.aoi, req.start_year, req.end_year,
-            reverse_sm=req.reverse_sm,
-            reverse_rf=req.reverse_rf,
-            reverse_ndvi=req.reverse_ndvi,
-            reverse_vci=req.reverse_vci,
-            reverse_lst=req.reverse_lst,
-            reverse_cdd=req.reverse_cdd,
-            reverse_evi=req.reverse_evi,
+            season=req.season, start_month=req.start_month, end_month=req.end_month,
+            start_date=req.start_date, end_date=req.end_date
         )
     except Exception as exc:
-        logger.exception("Drought stats failed for %s", req.district)
+        logger.exception("Drought stats failed")
         raise HTTPException(500, str(exc)) from exc
 
 @app.post("/api/drought/classify", tags=["analysis"])
 def drought_classify_endpoint(req: DroughtRequest):
     _require_gee()
     try:
+        from gee.drought import compute_drought_classify
         return compute_drought_classify(
-            req.aoi, req.start_year, req.end_year, req.n_classes,
-            reverse_sm=req.reverse_sm,
-            reverse_rf=req.reverse_rf,
-            reverse_ndvi=req.reverse_ndvi,
-            reverse_vci=req.reverse_vci,
-            reverse_lst=req.reverse_lst,
-            reverse_cdd=req.reverse_cdd,
-            reverse_evi=req.reverse_evi,
-            method=req.method, custom_labels=req.custom_labels
+            req.aoi, req.start_year, req.end_year,
+            season=req.season, start_month=req.start_month, end_month=req.end_month,
+            start_date=req.start_date, end_date=req.end_date,
+            n_classes=req.n_classes, method=req.method, custom_labels=req.custom_labels
         )
     except Exception as exc:
-        logger.exception("Drought classify failed for %s", req.district)
+        logger.exception("Drought classify failed")
         raise HTTPException(500, str(exc)) from exc
 
-@app.post("/api/drought/export", tags=["analysis"])
-def drought_export_endpoint(req: DroughtRequest):
-    _require_gee()
-    try:
-        return compute_drought_export(
-            req.aoi, req.start_year, req.end_year,
-            reverse_sm=req.reverse_sm,
-            reverse_rf=req.reverse_rf,
-            reverse_ndvi=req.reverse_ndvi,
-            reverse_vci=req.reverse_vci,
-            reverse_lst=req.reverse_lst,
-            reverse_cdd=req.reverse_cdd,
-            reverse_evi=req.reverse_evi,
-        )
-    except Exception as exc:
-        logger.exception("Drought export failed for %s", req.district)
-        raise HTTPException(500, str(exc)) from exc
 
 
 # ── RARE DATA — Dataset Repository ─────────────────────────────────────────
@@ -4001,6 +4058,64 @@ def api_harvester_delete_task(task_id: str):
     if not ok:
         raise HTTPException(404, "Task not found")
     return {"ok": True, "message": "Task removed."}
+
+class WellscopeRequest(BaseModel):
+    aoi: dict
+    custom_weights: Optional[dict] = None
+    n_classes: Optional[int] = 5
+    method: Optional[str] = "natural_breaks"
+    custom_labels: Optional[list] = None
+
+class WellscopeFactorExportRequest(BaseModel):
+    aoi: dict
+    factor_key: str
+    palette: Optional[list] = None
+
+@app.post("/api/wellscope/map", tags=["analysis"])
+def api_wellscope_map(req: WellscopeRequest):
+    _require_gee()
+    try:
+        return compute_wellscope_map(req.aoi, req.custom_weights)
+    except Exception as e:
+        logger.exception("wellscope map failed")
+        raise HTTPException(500, str(e))
+
+@app.post("/api/wellscope/stats", tags=["analysis"])
+def api_wellscope_stats(req: WellscopeRequest):
+    _require_gee()
+    try:
+        return compute_wellscope_stats(req.aoi, req.custom_weights)
+    except Exception as e:
+        logger.exception("wellscope stats failed")
+        raise HTTPException(500, str(e))
+
+@app.post("/api/wellscope/classify", tags=["analysis"])
+def api_wellscope_classify(req: WellscopeRequest):
+    _require_gee()
+    try:
+        return compute_wellscope_classify(req.aoi, req.custom_weights, req.n_classes, req.method, req.custom_labels)
+    except Exception as e:
+        logger.exception("wellscope classify failed")
+        raise HTTPException(500, str(e))
+
+@app.post("/api/wellscope/export", tags=["analysis"])
+def api_wellscope_export(req: WellscopeRequest):
+    _require_gee()
+    try:
+        return compute_wellscope_export(req.aoi, req.custom_weights)
+    except Exception as e:
+        logger.exception("wellscope export failed")
+        raise HTTPException(500, str(e))
+
+@app.post("/api/wellscope/factor-export", tags=["analysis"])
+def api_wellscope_factor_export(req: WellscopeFactorExportRequest):
+    _require_gee()
+    try:
+        from gee.wellscope import export_factor_map
+        return export_factor_map(req.aoi, req.factor_key, req.palette)
+    except Exception as e:
+        logger.exception("wellscope factor export failed")
+        raise HTTPException(500, str(e))
 
 @app.get("/api/debug/datasets", tags=["debug"])
 def debug_datasets():

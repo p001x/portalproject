@@ -639,22 +639,26 @@ export function SlopePage() {
 
             {/* Static Maps */}
             <TabsContent value="static-map" className="flex-1 overflow-y-auto space-y-4">
-              <div className="flex flex-col gap-2">
-                <span className="text-sm font-medium">Select Map to Export:</span>
-                <div className="flex flex-wrap gap-2 mb-2">
-                  {LAYER_OPTIONS.map(({ key, label }) => (
-                    <button
-                      key={key}
-                      onClick={() => setActiveLayer(key)}
-                      className={`px-3 py-1 rounded text-xs font-medium border transition-colors ${
-                        activeLayer === key
-                          ? "bg-primary text-primary-foreground border-primary"
-                          : "bg-card border-input hover:bg-muted"
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
+
+              {/* Map Layer Switcher Header */}
+              <div className="flex flex-col gap-3 mb-3 p-2 bg-muted/30 rounded-lg border">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider min-w-[90px]">Map Symbology:</span>
+                  <div className="inline-flex flex-wrap items-center rounded-md border bg-background p-0.5 text-xs shadow-2xs">
+                    {LAYER_OPTIONS.map(({ key, label }) => (
+                      <button
+                        key={key}
+                        onClick={() => setActiveLayer(key)}
+                        className={`px-3 py-1 rounded font-medium transition-all ${
+                          activeLayer === key
+                            ? "bg-primary text-primary-foreground shadow-xs"
+                            : "text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
               <MapExportControls

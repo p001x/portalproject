@@ -1,5 +1,6 @@
 import json
 import ee
+import time
 import math
 from cachetools import TTLCache
 from threading import Lock, BoundedSemaphore
@@ -80,15 +81,7 @@ def _normalize_weights(custom: dict | None) -> dict:
     total = sum(raw.values())
     return {k: v / total for k, v in raw.items()}
 
-def get_dynamic_scale(geom):
-    try:
-        area_sqkm = geom.area().divide(1e6).getInfo()
-        if area_sqkm > 10000: return 500
-        elif area_sqkm > 2000: return 250
-        elif area_sqkm > 500: return 100
-        else: return 30
-    except:
-        return 250
+from gee.aoi_utils import get_dynamic_scale
 
 def _build_wellscope_base(aoi_config: dict, custom_weights: dict = None):
     cache_key = (json.dumps(aoi_config, sort_keys=True), json.dumps(custom_weights, sort_keys=True) if custom_weights else None)
@@ -116,46 +109,69 @@ def _build_wellscope_base(aoi_config: dict, custom_weights: dict = None):
         end_year = int(aoi_config.get("end_year", 2024))
         
         # Build raw continuous images
-        chirps = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY")
-        rain = chirps.filterDate(f"{start_year}-01-01", f"{end_year}-12-31") \
-                     .select("precipitation") \
-                     .sum() \
-                     .divide(max(end_year - start_year + 1, 1)) \
-                     .clip(aoi).rename("bio12")
+        try:
+            bounds_coords = aoi.bounds(maxError=1000).coordinates().get(0).getInfo()
+            lats = [pt[1] for pt in bounds_coords]
+            use_era5_precip = max(lats) > 50 or min(lats) < -50
+        except:
+            use_era5_precip = True
+
+        if use_era5_precip:
+            era = ee.ImageCollection("ECMWF/ERA5_LAND/MONTHLY_AGGR").select("total_precipitation_sum")
+            rain = era.filterDate(f"{start_year}-01-01", f"{end_year}-12-31") \
+                         .sum().multiply(1000) \
+                         .divide(max(end_year - start_year + 1, 1)) \
+                         .clip(aoi).rename("bio12")
+        else:
+            chirps = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY")
+            rain = chirps.filterDate(f"{start_year}-01-01", f"{end_year}-12-31") \
+                         .select("precipitation") \
+                         .sum() \
+                         .divide(max(end_year - start_year + 1, 1)) \
+                         .clip(aoi).rename("bio12")
         
-        dem = ee.Image("USGS/SRTMGL1_003").select("elevation").clip(aoi)
+        dem = ee.Image("USGS/SRTMGL1_003").select("elevation").unmask(ee.ImageCollection("COPERNICUS/DEM/GLO30").select("DEM").mosaic(), False).unmask(0).clip(aoi)
         slope = ee.Terrain.slope(dem).rename("slope")
         
-        flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select('b1').clip(aoi)
+        # Use MERIT UPA for global coverage (HydroSHEDS stops at 60N, breaking Russia)
+        merit_upa = ee.Image("MERIT/Hydro/v1_0_1").select('upa')
+        # UPA is in km2. We use it directly as flow accumulation for TWI (relative metric)
+        flow_acc = merit_upa.unmask(1).clip(aoi)
         slope_rad = slope.multiply(math.pi / 180.0)
         tan_slope = slope_rad.tan().max(0.001)
         twi = flow_acc.add(1).divide(tan_slope).log().rename("twi")
         
         # Extract dense stream network (upstream area > 10 km2 for significant streams)
-        merit_upa = ee.Image("MERIT/Hydro/v1_0_1").select('upa')
         streams = merit_upa.gt(10).unmask(0)
         
-        # True Drainage Density via Kernel Density Estimation (Spatial Interpolation)
-        kernel = ee.Kernel.circle(radius=3000, units='meters')
+        # True Drainage Density via Kernel Density Estimation
+        # Dynamic radius: must be at least 2 pixels wide to prevent convolution collapse at large scales
+        drainage_radius = min(max(3000, (dynamic_scale * 2) if dynamic_scale else 3000), 10000)
+        kernel = ee.Kernel.circle(radius=drainage_radius, units='meters')
         drainage_density = streams.convolve(kernel).clip(aoi).rename("drainage")
 
-        rivers = ee.FeatureCollection("WWF/HydroSHEDS/v1/FreeFlowingRivers").filterBounds(aoi)
-        dist_water = rivers.distance(searchRadius=20000, maxError=500).clip(aoi).rename("dist_water")
+        # Use fastDistanceTransform on raster streams instead of FeatureCollection.distance to prevent GEE timeouts on massive AOIs
+        # fastDistanceTransform computes distance to 0, so we use streams.Not() (where rivers are 1 -> 0, background 0 -> 1)
+        # Max 256 pixels distance. Multiplied by pixel resolution to get meters.
+        dist_water = streams.Not().fastDistanceTransform(256).multiply(ee.Image.pixelArea().sqrt()).clip(aoi).rename("dist_water")
         
         clay = ee.Image("OpenLandMap/SOL/SOL_CLAY-WFRACTION_USDA-3A1A1A_M/v02").select("b0").clip(aoi)
         sand = ee.Image("OpenLandMap/SOL/SOL_SAND-WFRACTION_USDA-3A1A1A_M/v02").select("b0").clip(aoi)
-        permeability = sand.subtract(clay).rename("soil_perm")
+        permeability = sand.subtract(clay).unmask(0).rename("soil_perm")
 
-        # Combine for a single histogram pass
-        continuous_bands = ee.Image.cat([rain, slope, twi, drainage_density, dist_water, permeability])
+        # Combine for a single histogram pass and mask to land (rain.mask()) to prevent ocean pixels from skewing Jenks breaks globally
+        continuous_bands = ee.Image.cat([rain, slope, twi, drainage_density, dist_water, permeability]).updateMask(rain.mask())
         
-        scale_hist = dynamic_scale * 2 if dynamic_scale else 100
+        # Fix histogram scale: cap at 5000m so rivers don't completely disappear from sampling
+        scale_hist = min(dynamic_scale * 2 if dynamic_scale else 100, 5000)
         with gee_semaphore:
             hist_raw = continuous_bands.reduceRegion(
                 reducer=ee.Reducer.autoHistogram(maxBuckets=50),
-                geometry=aoi,
+                geometry=aoi.bounds(maxError=1000),
                 scale=scale_hist,
-                maxPixels=10000, bestEffort=True,
+                maxPixels=1e13,
+                tileScale=4,
+                bestEffort=True
             ).getInfo()
 
         def apply_jenks(img, name, reverse=False, n=5):
@@ -172,21 +188,20 @@ def _build_wellscope_base(aoi_config: dict, custom_weights: dict = None):
             return result.updateMask(img.mask()).toFloat()
 
         rain_score = apply_jenks(rain, 'bio12')
-        slope_score = apply_jenks(slope, 'slope', reverse=True)
-        twi_score = apply_jenks(twi, 'twi')
-        drainage_score = apply_jenks(drainage_density, 'drainage')
-        dist_water_score = apply_jenks(dist_water, 'dist_water', reverse=True)
-        soil_score = apply_jenks(permeability, 'soil_perm')
+        slope_score = apply_jenks(slope, 'slope', reverse=True).updateMask(rain.mask())
+        twi_score = apply_jenks(twi, 'twi').updateMask(rain.mask())
+        drainage_score = apply_jenks(drainage_density, 'drainage').updateMask(rain.mask())
+        dist_water_score = apply_jenks(dist_water, 'dist_water', reverse=True).updateMask(rain.mask())
+        soil_score = apply_jenks(permeability, 'soil_perm').updateMask(rain.mask())
 
-        # Categorical variables
-        lith = ee.Image("projects/ee-petersonyang87/assets/litodoloy").clip(aoi)
-        lith_score = lith.remap([1, 2, 3, 4, 5, 6, 7, 8, 9, 10], [3, 4, 5, 2, 1, 3, 4, 2, 5, 1], 3).toFloat().clip(aoi)
+        # Use a constant fallback for lithology since the private asset 'litodoloy' causes 403 errors globally
+        lith_score = ee.Image(3).toFloat().updateMask(rain.mask()).clip(aoi)
         
-        lulc = ee.ImageCollection("ESA/WorldCover/v200").first().select('Map').clip(aoi)
+        lulc = ee.ImageCollection("ESA/WorldCover/v200").first().select('Map').unmask(0).clip(aoi)
         lulc_score = ee.Image(1) \
             .where(lulc.eq(10), 5).where(lulc.eq(90), 5).where(lulc.eq(95), 5) \
             .where(lulc.eq(20), 4).where(lulc.eq(30), 4).where(lulc.eq(40), 3) \
-            .toFloat().clip(aoi)
+            .toFloat().updateMask(rain.mask()).clip(aoi)
 
         score_images = {
             "rainfall": rain_score, "lithology": lith_score, "slope": slope_score,
@@ -230,15 +245,20 @@ def compute_wellscope_map(aoi_config: dict, custom_weights: dict = None) -> dict
     aoi, dynamic_scale, weights, score_images, suitability_100 = _build_wellscope_base(aoi_config, custom_weights)
     ahp_data = compute_ahp_data({k: v * 100 for k, v in weights.items()})
 
-    bounds = aoi.bounds().getInfo()["coordinates"][0]
-    center = [(bounds[0][1] + bounds[2][1]) / 2, (bounds[0][0] + bounds[2][0]) / 2]
+    from gee.aoi_utils import get_bounds_and_center
+
+
+    bounds, center = get_bounds_and_center(aoi)
 
     with gee_semaphore:
         map_id = suitability_100.getMapId(_SUITABILITY_VIS)
         try:
-            thumb_url = suitability_100.getThumbURL({**_SUITABILITY_VIS, "region": aoi.bounds(), "dimensions": 512, "format": "png"})
+            if dynamic_scale and dynamic_scale > 10000:
+                print(f"[WellScope] ThumbURL skipped for massive scale: {dynamic_scale}"); thumb_url = None
+            else:
+                t_thumb = time.time(); print("[WellScope] Getting ThumbURL..."); thumb_url = suitability_100.getThumbURL({**_SUITABILITY_VIS, "region": aoi.bounds(), "dimensions": 512, "crs": "EPSG:4326", "format": "png"})
         except ee.EEException:
-            thumb_url = None
+            print(f"[WellScope] ThumbURL failed: {time.time()-t_thumb:.2f}s"); thumb_url = None
 
     factor_maps = {}
     for key, img in score_images.items():
@@ -248,7 +268,7 @@ def compute_wellscope_map(aoi_config: dict, custom_weights: dict = None) -> dict
                     "label": FACTOR_META[key]["label"],
                     "weight_pct": FACTOR_META[key]["weight_pct"],
                     "tile_url": img.getMapId(_SCORE_VIS)["tile_fetcher"].url_format,
-                    "thumb_url": img.getThumbURL({**_SCORE_VIS, "region": aoi.bounds(), "dimensions": 512, "format": "png"})
+                    "thumb_url": img.getThumbURL({**_SCORE_VIS, "region": aoi.bounds(), "dimensions": 512, "crs": "EPSG:4326", "format": "png"}) if (not dynamic_scale or dynamic_scale <= 10000) else None
                 }
             except ee.EEException:
                 pass
@@ -277,9 +297,11 @@ def compute_wellscope_stats(aoi_config: dict, custom_weights: dict = None) -> di
     with gee_semaphore:
         stats = suitability_100.reduceRegion(
             reducer=ee.Reducer.mean().combine(ee.Reducer.min(), sharedInputs=True).combine(ee.Reducer.max(), sharedInputs=True),
-            geometry=aoi,
+            geometry=aoi.bounds(maxError=1000),
             scale=dynamic_scale,
-            maxPixels=1e10
+            maxPixels=1e13,
+            tileScale=4,
+            bestEffort=True
         ).getInfo()
 
     result = {
@@ -357,9 +379,9 @@ def export_factor_map(aoi_config: dict, factor_key: str, palette: list = None) -
         
     with gee_semaphore:
         try:
-            thumb_url = image.getThumbURL({**vis, "region": aoi.bounds(), "dimensions": 1024, "format": "png"})
+            thumb_url = image.getThumbURL({**vis, "region": aoi.bounds(), "dimensions": 1024, "crs": "EPSG:4326", "format": "png"})
         except Exception:
-            thumb_url = None
+            print(f"[WellScope] ThumbURL failed: {time.time()-t_thumb:.2f}s"); thumb_url = None
             
         try:
             download_url = image.getDownloadURL({"scale": 30, "crs": "EPSG:4326", "region": aoi, "format": "GEO_TIFF"})

@@ -550,38 +550,51 @@ export function FloodPage() {
 
             {/* Static Maps */}
             <TabsContent value="static-map" className="flex-1 overflow-y-auto space-y-4">
-              <div className="flex flex-col gap-2">
-                <span className="text-sm font-medium">Select Map to Export:</span>
-                <div className="flex flex-wrap gap-2 items-center mb-1">
-                  <button
-                    onClick={() => setActiveLayer("continuous")}
-                    className={`px-3 py-1 rounded text-xs font-medium border transition-colors ${
-                      activeLayer === "continuous" ? "bg-primary text-primary-foreground border-primary" : "bg-card border-input hover:bg-muted"
-                    }`}
-                  >
-                    Flood Index (Continuous)
-                  </button>
-                  <button
-                    onClick={() => setActiveLayer("classified")}
-                    className={`px-3 py-1 rounded text-xs font-medium border transition-colors ${
-                      activeLayer === "classified" ? "bg-primary text-primary-foreground border-primary" : "bg-card border-input hover:bg-muted"
-                    }`}
-                  >
-                    Flood Risk (Classified)
-                  </button>
-                </div>
-                <div className="flex flex-wrap gap-2 items-center mb-4">
-                  {Object.entries(dataMap.factor_maps).map(([k, fm]) => (
+              {/* Map Layer Switcher Header */}
+              <div className="flex flex-col gap-3 mb-3 p-2 bg-muted/30 rounded-lg border">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider min-w-[90px]">Map Symbology:</span>
+                  <div className="inline-flex items-center rounded-md border bg-background p-0.5 text-xs shadow-2xs">
                     <button
-                      key={k}
-                      onClick={() => setActiveLayer(k as any)}
-                      className={`px-3 py-1 rounded text-xs font-medium border transition-colors ${
-                        activeLayer === k ? "bg-primary text-primary-foreground border-primary" : "bg-card border-input hover:bg-muted"
+                      onClick={() => setActiveLayer("classified")}
+                      className={`px-3 py-1 rounded font-medium transition-all ${
+                        activeLayer === "classified"
+                          ? "bg-primary text-primary-foreground shadow-xs"
+                          : "text-muted-foreground hover:text-foreground"
                       }`}
                     >
-                      {fm.label}
+                      Flood Risk (Classified)
                     </button>
-                  ))}
+                    <button
+                      onClick={() => setActiveLayer("continuous")}
+                      className={`px-3 py-1 rounded font-medium transition-all ${
+                        activeLayer === "continuous"
+                          ? "bg-primary text-primary-foreground shadow-xs"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      Flood Index (Continuous)
+                    </button>
+                  </div>
+                </div>
+                
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider min-w-[90px]">Factor Maps:</span>
+                  <div className="inline-flex flex-wrap items-center rounded-md border bg-background p-0.5 text-xs shadow-2xs">
+                    {Object.entries(dataMap.factor_maps).map(([k, fm]) => (
+                      <button
+                        key={k}
+                        onClick={() => setActiveLayer(k as any)}
+                        className={`px-3 py-1 rounded font-medium transition-all ${
+                          activeLayer === k
+                            ? "bg-primary text-primary-foreground shadow-xs"
+                            : "text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        {fm.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
 
@@ -591,7 +604,7 @@ export function FloodPage() {
                     title="Flood_Susceptibility"
                     district={aoi.name || "Custom"}
                     tileUrl={dataMap.tile_url}
-                    thumbUrl={dataExport?.download_url || ""}
+                    thumbUrl={dataMap.thumb_url || ""}
                     downloadUrl={dataExport?.download_url || ""}  classAreas={activeAreas}
 
                   />
@@ -601,7 +614,7 @@ export function FloodPage() {
                     title="Flood_Risk_Classified"
                     district={aoi.name || "Custom"}
                     tileUrl={dataClassify.classify.panels[0].tile_url}
-                    thumbUrl={dataExport?.download_url || ""}
+                    thumbUrl={dataClassify.classify.panels[0].thumb_url || ""}
                     downloadUrl={dataExport?.download_url || ""}
                     classAreas={activeAreas}
 
@@ -612,7 +625,7 @@ export function FloodPage() {
                     title={`Flood_Factor_${activeLayer}`}
                     district={aoi.name || "Custom"}
                     tileUrl={dataMap.factor_maps[activeLayer].class_tile_url || dataMap.factor_maps[activeLayer].tile_url}
-                    thumbUrl={dataExport?.download_url || ""}
+                    thumbUrl={dataMap.factor_maps[activeLayer].thumb_url || ""}
                     downloadUrl={dataExport?.download_url || ""}  classAreas={activeAreas}
 
                     

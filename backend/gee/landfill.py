@@ -3,15 +3,7 @@ import json
 import math
 import ee
 
-def get_dynamic_scale(geom):
-    try:
-        area_sqkm = geom.area().divide(1e6).getInfo()
-        if area_sqkm > 10000: return 500
-        elif area_sqkm > 2000: return 250
-        elif area_sqkm > 500: return 100
-        else: return 30
-    except:
-        return 250
+from gee.aoi_utils import get_dynamic_scale
 
 from cachetools import TTLCache
 from threading import Lock
@@ -125,7 +117,7 @@ def _apply_reverse(score_img, flag):
 def _factor_urls(image, key: str, aoi) -> dict:
     return {
         "tile_url": image.getMapId(_SCORE_VIS)["tile_fetcher"].url_format,
-        "thumb_url": image.getThumbURL({**_SCORE_VIS, "region": aoi.bounds(), "dimensions": 512, "format": "png"}),
+        "thumb_url": image.getThumbURL({**_SCORE_VIS, "region": aoi.bounds(), "dimensions": 512, "crs": "EPSG:4326", "format": "png"}),
         "download_url": image.getDownloadURL({
             "name": f"Landfill_{key}_score", "scale": 100,
             "region": aoi.bounds(), "format": "GEO_TIFF", "filePerBand": False,
@@ -155,7 +147,7 @@ def _build_landfill_base(
         "slope": reverse_slope, "road": reverse_road, "lulc": reverse_lulc,
     }
 
-    dem = ee.Image("USGS/SRTMGL1_003").select("elevation")
+    dem = ee.Image("USGS/SRTMGL1_003").select("elevation").unmask(ee.ImageCollection("COPERNICUS/DEM/GLO30").select("DEM").mosaic(), False)
     slope_pct = ee.Terrain.slope(dem).multiply(math.pi / 180).tan().multiply(100)
     slope_score = (
         ee.Image(1)
@@ -248,11 +240,13 @@ def compute_landfill_map(
     
     map_id = suitability.getMapId(_SCORE_VIS)
     final_thumb_url = suitability.getThumbURL({
-        **_SCORE_VIS, "region": aoi.bounds(), "dimensions": 512, "format": "png",
+        **_SCORE_VIS, "region": aoi.bounds(), "dimensions": 512, "crs": "EPSG:4326", "format": "png",
     })
 
-    bounds = aoi.bounds().getInfo()["coordinates"][0]
-    center = [(bounds[0][1] + bounds[2][1]) / 2, (bounds[0][0] + bounds[2][0]) / 2]
+    from gee.aoi_utils import get_bounds_and_center
+
+
+    bounds, center = get_bounds_and_center(aoi)
 
     factor_maps = {}
     for key in FACTOR_ORDER:
@@ -316,7 +310,7 @@ def compute_landfill_stats(
     ])
 
     area_dict = area_img.reduceRegion(
-        reducer=ee.Reducer.sum(), geometry=aoi, scale=get_dynamic_scale(aoi), maxPixels=1e10
+        reducer=ee.Reducer.sum(), geometry=aoi.bounds(maxError=1000), scale=get_dynamic_scale(aoi), maxPixels=1e10
     ).getInfo()
 
     class_areas = {

@@ -1,18 +1,11 @@
+from gee.aoi_utils import get_bounds_and_center
 """Irrigation Scheduling Advisor — FastAPI backend."""
 import json
 import ee
 from typing import Optional
 from gee.classify_utils import quantile_classify
 
-def get_dynamic_scale(geom):
-    try:
-        area_sqkm = geom.area().divide(1e6).getInfo()
-        if area_sqkm > 10000: return 500
-        elif area_sqkm > 2000: return 250
-        elif area_sqkm > 500: return 100
-        else: return 30
-    except:
-        return 250
+from gee.aoi_utils import get_dynamic_scale
 
 from cachetools import TTLCache
 from threading import Lock
@@ -84,20 +77,47 @@ def _build_irrigation_images(aoi_config: dict, start_date: str, end_date: str, p
     kc = ee.Number(kc_val).max(0.1)
 
     # 2. Potential Evapotranspiration (PET)
-    pet_col = ee.ImageCollection("MODIS/061/MOD16A2").filterDate(start_date, end_date).select("PET")
-    pet_total = pet_col.sum().multiply(0.1).clip(aoi).rename("pet")
+    if start_date < "2001-01-01":
+        pet_col = ee.ImageCollection("ECMWF/ERA5_LAND/HOURLY").filterDate(start_date, end_date).select("potential_evaporation")
+        pet_sum = pet_col.sum().multiply(-1000)
+    else:
+        pet_col = ee.ImageCollection("MODIS/061/MOD16A2").filterDate(start_date, end_date).select("PET")
+        pet_sum = pet_col.sum().multiply(0.1)
+
+    pet_total = ee.Image(ee.Algorithms.If(
+        pet_col.size().eq(0),
+        ee.Image.constant(0).rename("pet").clip(aoi),
+        pet_sum.rename("pet").clip(aoi).unmask(0)
+    ))
     
     etc = pet_total.multiply(ee.Image.constant(kc)).rename("etc")
 
-    # 3. Effective Precipitation from CHIRPS
-    precip_col = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY").filterDate(start_date, end_date)
-    def calc_peff(img):
-        # Effective rain: P_eff = P - 5 (if P > 5), 0 otherwise
-        p = img.select(0)
-        peff = p.expression('P > 5 ? (P - 5) : 0', {'P': p})
-        return peff.rename('peff')
-        
-    peff_total = precip_col.map(calc_peff).sum().clip(aoi).rename("precip")
+    try:
+        bounds_coords = aoi.bounds(maxError=1000).coordinates().get(0).getInfo()
+        lats = [pt[1] for pt in bounds_coords]
+        use_era5_precip = max(lats) > 50 or min(lats) < -50
+    except:
+        use_era5_precip = True
+
+    # 3. Effective Precipitation
+    if use_era5_precip or start_date < "1981-01-01":
+        precip_col = ee.ImageCollection("ECMWF/ERA5_LAND/HOURLY").filterDate(start_date, end_date)
+        p = precip_col.select("total_precipitation").sum().multiply(1000)
+        # Simple effective rain for the total block (assumes ~75% effective)
+        peff_sum = p.multiply(0.75)
+    else:
+        precip_col = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY").filterDate(start_date, end_date)
+        def calc_peff(img):
+            p = img.select(0)
+            peff = p.expression('P > 5 ? (P - 5) : 0', {'P': p})
+            return peff.rename('peff')
+        peff_sum = precip_col.map(calc_peff).sum()
+    
+    peff_total = ee.Image(ee.Algorithms.If(
+        precip_col.size().eq(0),
+        ee.Image.constant(0).rename("precip").clip(aoi),
+        peff_sum.rename("precip").clip(aoi).unmask(0)
+    ))
 
     # 4. Soil Water Capacity (TAW)
     fc_img = ee.Image("OpenLandMap/SOL/SOL_WATERCONTENT-33KPA_USDA-4B1C_M/v01").select('b0').divide(100)
@@ -139,7 +159,7 @@ def compute_irrigation_map(
     sm_id = sm.getMapId(_SM_VIS)
 
     centroid = aoi.centroid(maxError=100).coordinates().getInfo()
-    bounds = aoi.bounds().getInfo()["coordinates"][0]
+    bounds, _ = get_bounds_and_center(aoi)
     
     dynamic_scale = get_dynamic_scale(aoi)
 
@@ -192,7 +212,7 @@ def compute_irrigation_stats(
     mean_reducer = ee.Reducer.mean()
     
     def get_mean(img):
-        res = img.reduceRegion(reducer=mean_reducer, geometry=aoi, scale=get_dynamic_scale(aoi), maxPixels=1e10).getInfo()
+        res = img.reduceRegion(reducer=mean_reducer, geometry=aoi.bounds(maxError=1000), scale=get_dynamic_scale(aoi), maxPixels=1e10).getInfo()
         if not res: return 0.0
         vals = list(res.values())
         return vals[0] if vals and vals[0] is not None else 0.0
@@ -253,7 +273,7 @@ def compute_irrigation_export(
 
     def safe_thumb(img, vis):
         try:
-            return img.getThumbURL({**vis, "region": aoi.bounds(), "dimensions": 512, "format": "png"})
+            return img.getThumbURL({**vis, "region": aoi.bounds(), "dimensions": 512, "crs": "EPSG:4326", "format": "png"})
         except Exception:
             return None
             

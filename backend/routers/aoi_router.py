@@ -43,15 +43,10 @@ def get_regions(country: Optional[str] = None, level1: Optional[str] = None):
     try:
         if not country:
             if not _gaul_cache["countries"]:
-                # The user requested to limit the countries to this specific list
-                allowed_countries = [
-                    "Rwanda", 
-                    "Burundi", 
-                    "Democratic Republic of the Congo", 
-                    "Kenya", 
-                    "Uganda"
-                ]
-                _gaul_cache["countries"] = sorted(allowed_countries)
+                fc = ee.FeatureCollection("FAO/GAUL/2015/level0")
+                hist = fc.aggregate_histogram("ADM0_NAME")
+                countries = ee.Dictionary(hist).keys().getInfo()
+                _gaul_cache["countries"] = sorted(countries)
             return {"regions": _gaul_cache["countries"]}
             
         if country and not level1:

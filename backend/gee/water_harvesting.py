@@ -1,16 +1,9 @@
+from gee.aoi_utils import get_bounds_and_center
 """Water Harvesting Calculator — FastAPI backend."""
 import json
 import ee
 
-def get_dynamic_scale(geom):
-    try:
-        area_sqkm = geom.area().divide(1e6).getInfo()
-        if area_sqkm > 10000: return 500
-        elif area_sqkm > 2000: return 250
-        elif area_sqkm > 500: return 100
-        else: return 30
-    except:
-        return 250
+from gee.aoi_utils import get_dynamic_scale
 
 from cachetools import TTLCache
 from threading import Lock
@@ -43,7 +36,7 @@ def apply_natural_breaks(img: ee.Image, aoi: ee.Geometry, scale: int, n_classes:
     from gee.classify_utils import get_jenks_breaks
     hist = img.reduceRegion(
         reducer=ee.Reducer.autoHistogram(maxBuckets=100),
-        geometry=aoi, scale=scale, maxPixels=10000, bestEffort=True
+        geometry=aoi.bounds(maxError=1000), scale=scale, maxPixels=10000, bestEffort=True
     ).getInfo()
     
     band_name = img.bandNames().get(0).getInfo()
@@ -96,12 +89,12 @@ def compute_water_harvesting_map(aoi_config: dict, start_year: int, end_year: in
     map_id = classified_precip.getMapId(vis_params)
     
     centroid = aoi.centroid(maxError=100).coordinates().getInfo()
-    bounds = aoi.bounds().getInfo()["coordinates"][0]
+    bounds, _ = get_bounds_and_center(aoi)
     
     thumb_url = classified_precip.getThumbURL({
         **vis_params,
         "region": aoi.bounds(),
-        "dimensions": 512,
+        "dimensions": 512, "crs": "EPSG:4326",
         "format": "png"
     })
     
@@ -143,7 +136,7 @@ def compute_water_harvesting_stats(aoi_config: dict, start_year: int, end_year: 
     if manual_area_m2 and manual_area_m2 > 0:
         area_m2 = manual_area_m2
     elif use_building_footprint:
-        aoi_area = aoi.area(1).getInfo()
+        aoi_area = aoi.area(maxError=100).getInfo()
         
         # Dynamic scale to allow district-wide building footprint calculations without memory crashes
         calc_scale = 2
@@ -159,7 +152,7 @@ def compute_water_harvesting_stats(aoi_config: dict, start_year: int, end_year: 
             pixel_area = ee.Image.pixelArea().updateMask(building_mask.eq(1))
             area_dict = pixel_area.reduceRegion(
                 reducer=ee.Reducer.sum(),
-                geometry=aoi,
+                geometry=aoi.bounds(maxError=1000),
                 scale=calc_scale,
                 maxPixels=1e11
             ).getInfo()
@@ -170,11 +163,11 @@ def compute_water_harvesting_stats(aoi_config: dict, start_year: int, end_year: 
             area_m2 = 0.0
     else:
         # Calculate area of polygon in square meters
-        area_m2 = aoi.area(1).getInfo()
+        area_m2 = aoi.area(maxError=100).getInfo()
         
     # Extract time series of monthly precipitation over AOI
     def get_monthly(img):
-        val = img.reduceRegion(reducer=ee.Reducer.mean(), geometry=aoi, scale=get_dynamic_scale(aoi), maxPixels=1e10).get('pr')
+        val = img.reduceRegion(reducer=ee.Reducer.mean(), geometry=aoi.bounds(maxError=1000), scale=get_dynamic_scale(aoi), maxPixels=1e10).get('pr')
         return ee.Feature(None, {'pr': val})
     
     fc = precip_col.map(get_monthly)

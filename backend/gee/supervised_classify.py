@@ -31,7 +31,7 @@ def _get_feature_image(aoi, data_source, custom_asset_id):
                 'NIR': composite.select('SR_B5'),
                 'RED': composite.select('SR_B4')
         }).rename('SAVI')
-        srtm = ee.Image("USGS/SRTMGL1_003").clip(aoi)
+        srtm = ee.Image("USGS/SRTMGL1_003").select("elevation").unmask(ee.ImageCollection("COPERNICUS/DEM/GLO30").select("DEM").mosaic(), False).clip(aoi).rename("elevation")
         elevation = srtm.select("elevation")
         slope = ee.Terrain.slope(srtm)
         feature_image = composite.addBands([ndvi, ndbi, ndwi, savi, elevation, slope])
@@ -80,7 +80,7 @@ def _get_feature_image(aoi, data_source, custom_asset_id):
                 'NIR': composite.select('B8'),
                 'RED': composite.select('B4')
         }).rename('SAVI')
-        srtm = ee.Image("USGS/SRTMGL1_003")
+        srtm = ee.Image("USGS/SRTMGL1_003").select("elevation").unmask(ee.ImageCollection("COPERNICUS/DEM/GLO30").select("DEM").mosaic(), False).rename("elevation")
         elevation = srtm.select("elevation")
         slope = ee.Terrain.slope(srtm)
         feature_image = composite.addBands([ndvi, ndbi, ndwi, savi, elevation, slope])
@@ -184,15 +184,8 @@ def train_and_classify(samples: list, aoi=None, data_source="sentinel2", custom_
             from gee.aoi_utils import get_aoi_geometry
             aoi_geom = get_aoi_geometry(aoi)
             # Calculate dynamic scale based on geometry size (sq km)
-            area_sqkm = aoi_geom.area().divide(1e6).getInfo()
-            if area_sqkm > 10000:
-                dynamic_scale = 500   # Entire Country (High memory footprint)
-            elif area_sqkm > 2000:
-                dynamic_scale = 250   # Province
-            elif area_sqkm > 500:
-                dynamic_scale = 100   # Large District
-            else:
-                dynamic_scale = 30    # Sector or small polygon
+            from gee.aoi_utils import get_dynamic_scale
+            dynamic_scale = get_dynamic_scale(aoi_geom)
 
         except Exception as e:
             logger.warning(f"Failed to parse AOI: {e}. Falling back to training bounds.")

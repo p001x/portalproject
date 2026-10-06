@@ -63,11 +63,11 @@ const SUITABILITY_LEGEND: LegendItem[] = [
 ];
 
 const SCORE_LEGEND: LegendItem[] = [
-  { color: "#1a9850", label: "Score 5 â€“ Most suitable" },
+  { color: "#1a9850", label: "Score 5 – Most suitable" },
   { color: "#d9ef8b", label: "Score 4" },
   { color: "#fee08b", label: "Score 3" },
   { color: "#f46d43", label: "Score 2" },
-  { color: "#d73027", label: "Score 1 â€“ Least suitable" },
+  { color: "#d73027", label: "Score 1 – Least suitable" },
 ];
 
 const CLASS_COLOR_LIST = ["#d73027", "#fc8d59", "#fee08b", "#91cf60", "#1a9850"];
@@ -135,7 +135,7 @@ function FactorMapCard({ factorKey, factor, analysisDate }: {
       <div className="text-xs text-muted-foreground flex items-center justify-between">
         <span className="flex items-center gap-1.5">
           <div className="w-16 h-2 rounded-sm bg-gradient-to-r from-[#d73027] via-[#fee08b] to-[#1a9850]" />
-          Low â†’ High Score
+          Low → High Score
         </span>
         <span className="text-[10px] uppercase">{analysisDate}</span>
       </div>
@@ -276,15 +276,15 @@ function printReport(data: any, analysisDate: string) {
   const areaRows = Object.entries(data.class_areas_km2).map(([cls, km2]: any, i) => `
     <tr>
       <td>${cls}</td>
-      <td style="text-align:right">${km2} kmÂ²</td>
-      <td style="text-align:right">${total > 0 ? ((km2 / total) * 100).toFixed(1) : "â€”"}%</td>
+      <td style="text-align:right">${km2} km²</td>
+      <td style="text-align:right">${total > 0 ? ((km2 / total) * 100).toFixed(1) : "—"}%</td>
     </tr>`).join("");
 
   const factorThumbs = Object.entries(data.factor_maps).map(([, f]: any) => `
     <div style="break-inside:avoid;margin-bottom:12px;border:1px solid #ddd;border-radius:6px;padding:8px">
-      <p style="margin:0 0 4px;font-weight:600;font-size:13px">${f.label} â€” Weight: ${f.weight_pct}%</p>
+      <p style="margin:0 0 4px;font-weight:600;font-size:13px">${f.label} — Weight: ${f.weight_pct}%</p>
       <img src="${f.thumb_url}" style="width:100%;border-radius:4px;border:1px solid #eee" alt="${f.label}" />
-      <p style="margin:4px 0 0;font-size:10px;color:#888">Score 1 (Least suitable) â†’ 5 (Most suitable) Â· Source: Google Earth Engine</p>
+      <p style="margin:4px 0 0;font-size:10px;color:#888">Score 1 (Least suitable) → 5 (Most suitable) · Source: Google Earth Engine</p>
     </div>`).join("");
 
   const vhKm2 = (data.class_areas_km2["Very High (80-100)"] as number) ?? 0;
@@ -298,17 +298,17 @@ function printReport(data: any, analysisDate: string) {
 
   const interpretation = `
     The multi-criteria weighted overlay analysis for <strong>${data.district}</strong> identifies 
-    <strong>${hsPct}%</strong> of the study area (${hsKm2.toFixed(2)} kmÂ²) as High to Very High potential for groundwater, 
-    while <strong>${unPct}%</strong> (${unKm2.toFixed(2)} kmÂ²) is classified as Low to Very Low potential. 
+    <strong>${hsPct}%</strong> of the study area (${hsKm2.toFixed(2)} km²) as High to Very High potential for groundwater, 
+    while <strong>${unPct}%</strong> (${unKm2.toFixed(2)} km²) is classified as Low to Very Low potential. 
     The analysis applies AHP-derived weights based on 7 factors, including Rainfall, Lithology, and Topography. 
     The AHP consistency ratio (CR = ${data.ahp_data.cr.toFixed(2)}) confirms the weight assignments are 
-    ${data.ahp_data.consistent ? "acceptable (CR < 0.10)" : "inconsistent â€” consider revising weights"}.`;
+    ${data.ahp_data.consistent ? "acceptable (CR < 0.10)" : "inconsistent — consider revising weights"}.`;
 
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>WellScope Suitability Report â€” ${data.district}</title>
+  <title>WellScope Suitability Report — ${data.district}</title>
   <style>
     * { box-sizing: border-box; }
     body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; color: #222; margin: 0; padding: 24px 36px; }
@@ -342,7 +342,7 @@ function printReport(data: any, analysisDate: string) {
 <body>
   <div class="no-print" style="margin-bottom:16px">
     <button onclick="window.print()" style="background:#1a5c2e;color:#fff;border:none;border-radius:5px;padding:8px 18px;cursor:pointer;font-size:13px">
-      ðŸ–¨ Print / Save as PDF
+      🖨️ Print / Save as PDF
     </button>
   </div>
 
@@ -358,7 +358,7 @@ function printReport(data: any, analysisDate: string) {
       <div class="lbl">Mean Suitability Score</div>
     </div>
     <div class="stat-card">
-      <div class="val">${hsKm2.toFixed(1)} <span style="font-size:12px;font-weight:normal">kmÂ²</span></div>
+      <div class="val">${hsKm2.toFixed(1)} <span style="font-size:12px;font-weight:normal">km²</span></div>
       <div class="lbl">High/Very High Potential Area</div>
     </div>
     <div class="stat-card">
@@ -384,11 +384,11 @@ function printReport(data: any, analysisDate: string) {
 
   <h2>2. Suitability Class Distribution</h2>
   <table>
-    <tr><th>Class</th><th style="text-align:right">Area (kmÂ²)</th><th style="text-align:right">% of Total</th></tr>
+    <tr><th>Class</th><th style="text-align:right">Area (km²)</th><th style="text-align:right">% of Total</th></tr>
     ${areaRows}
     <tr style="font-weight:bold;background:#eee">
       <td>Total Area</td>
-      <td style="text-align:right">${total.toFixed(2)} kmÂ²</td>
+      <td style="text-align:right">${total.toFixed(2)} km²</td>
       <td style="text-align:right">100.0%</td>
     </tr>
   </table>
@@ -416,13 +416,13 @@ function printReport(data: any, analysisDate: string) {
   <div style="background:#f4f4f4; color: #111;padding:12px 16px;border-radius:6px;margin-top:12px">
     <p style="margin:0 0 6px"><strong>Consistency Analysis</strong></p>
     <ul style="margin:0;padding-left:20px;font-size:12px">
-      <li>Principal Eigenvalue (Î»_max) = ${data.ahp_data.lambda_max.toFixed(3)}</li>
+      <li>Principal Eigenvalue (λ_max) = ${data.ahp_data.lambda_max.toFixed(3)}</li>
       <li>Consistency Index (CI) = ${data.ahp_data.ci.toFixed(3)}</li>
       <li>Random Index (RI) = ${data.ahp_data.ri.toFixed(2)}</li>
     </ul>
     <div class="cr-box ${data.ahp_data.consistent ? 'cr-good' : 'cr-bad'}">
       Consistency Ratio (CR) = ${data.ahp_data.cr.toFixed(3)}
-      ${data.ahp_data.consistent ? " âœ“ Acceptable" : " âš  Revision Recommended"}
+      ${data.ahp_data.consistent ? " ✓ Acceptable" : " ⚠️ Revision Recommended"}
     </div>
   </div>
 
@@ -882,8 +882,8 @@ function printReport(data: any, analysisDate: string) {
                             <ResponsiveContainer width="100%" height={250}>
                               <BarChart data={Object.entries(activeAreas).map(([k,v], i) => ({ name: k, area: v, classIndex: i }))}>
                                 <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                                <YAxis unit=" kmÂ²" tick={{ fontSize: 11 }} />
-                                <Tooltip formatter={(v) => [`${v} kmÂ²`, 'Area']} />
+                                <YAxis unit=" km²" tick={{ fontSize: 11 }} />
+                                <Tooltip formatter={(v) => [`${v} km²`, 'Area']} />
                                 <Bar dataKey="area" radius={[4, 4, 0, 0]}>
                                   {Object.keys(activeAreas).map((_, i) => (
                                     <Cell key={i} fill={activeColors[i % activeColors.length]} />
@@ -898,12 +898,12 @@ function printReport(data: any, analysisDate: string) {
                            <h3 className="font-medium text-sm">AHP Consistency Check</h3>
                            {mapData?.ahp_data ? (
                              <div className="bg-muted/40 p-4 rounded text-sm space-y-2">
-                                <div className="flex justify-between"><span>Principal Eigenvalue (Î»_max)</span> <span className="font-medium">{mapData.ahp_data.lambda_max.toFixed(3)}</span></div>
+                                <div className="flex justify-between"><span>Principal Eigenvalue (λ_max)</span> <span className="font-medium">{mapData.ahp_data.lambda_max.toFixed(3)}</span></div>
                                 <div className="flex justify-between"><span>Consistency Index (CI)</span> <span className="font-medium">{mapData.ahp_data.ci.toFixed(3)}</span></div>
                                 <div className="flex justify-between"><span>Random Index (RI)</span> <span className="font-medium">{mapData.ahp_data.ri.toFixed(2)}</span></div>
                                 <div className={"mt-2 pt-2 border-t font-semibold flex justify-between " + (mapData.ahp_data.consistent ? "text-emerald-600" : "text-amber-600")}>
                                   <span>Consistency Ratio (CR)</span>
-                                  <span>{mapData.ahp_data.cr.toFixed(3)} {mapData.ahp_data.consistent ? "âœ“" : "âš "}</span>
+                                  <span>{mapData.ahp_data.cr.toFixed(3)} {mapData.ahp_data.consistent ? "✓" : "⚠️"}</span>
                                 </div>
                              </div>
                            ) : (
@@ -1005,10 +1005,10 @@ function printReport(data: any, analysisDate: string) {
                         stats={{
                           "Mean Suitability": statsData.stats?.["Mean Suitability"] || 0,
                           "Consistency Ratio (CR)": mapData.ahp_data.cr,
-                          "Total Area (kmÂ²)": Object.values(activeAreas).reduce((a: any, b: any) => a + b, 0) as number,
+                          "Total Area (km²)": Object.values(activeAreas).reduce((a: any, b: any) => a + b, 0) as number,
                         }}
                         classAreas={activeAreas}
-                        extraNotes={`The AHP consistency ratio (CR = ${mapData.ahp_data.cr.toFixed(3)}) confirms the weight assignments are ${mapData.ahp_data.consistent ? "acceptable" : "inconsistent â€” consider revising weights"}.`}
+                        extraNotes={`The AHP consistency ratio (CR = ${mapData.ahp_data.cr.toFixed(3)}) confirms the weight assignments are ${mapData.ahp_data.consistent ? "acceptable" : "inconsistent — consider revising weights"}.`}
                         maps={Object.entries(mapData.factor_maps).map(([k, f]: any) => [f.label, f.thumb_url] as [string, string])}
                       />
                     ) : (

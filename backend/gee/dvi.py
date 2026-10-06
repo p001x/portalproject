@@ -2,15 +2,7 @@ import json
 """DVI computation — AHP-Weighted Drought Vulnerability Map"""
 import ee
 
-def get_dynamic_scale(geom):
-    try:
-        area_sqkm = geom.area().divide(1e6).getInfo()
-        if area_sqkm > 10000: return 500
-        elif area_sqkm > 2000: return 250
-        elif area_sqkm > 500: return 100
-        else: return 30
-    except:
-        return 250
+from gee.aoi_utils import get_dynamic_scale
 
 from cachetools import TTLCache
 from threading import Lock
@@ -36,10 +28,9 @@ def maskL8sr(image):
         .And(qa.bitwiseAnd(1 << 3).eq(0)) \
         .And(qa.bitwiseAnd(1 << 4).eq(0)) \
         .And(qa.bitwiseAnd(1 << 5).eq(0))
-    satFree = image.select('QA_RADSAT').eq(0)
     opt = image.select('SR_B.').multiply(0.0000275).add(-0.2)
     thermal = image.select('ST_B.*').multiply(0.00341802).add(149.0)
-    return image.addBands(opt, None, True).addBands(thermal, None, True).updateMask(cloudFree).updateMask(satFree)
+    return image.addBands(opt, None, True).addBands(thermal, None, True).updateMask(cloudFree)
 
 def normInvert(img, lo, hi, name):
     return img.subtract(lo).divide(ee.Number(hi).subtract(lo)).clamp(0, 1).rename(name)
@@ -62,7 +53,7 @@ def compute_dvi(
     from gee.aoi_utils import get_aoi_geometry
     geometry = get_aoi_geometry(aoi_config)
 
-    geometryBuffered = geometry.buffer(500)
+    geometryBuffered = geometry.buffer(500, maxError=5000)
 
     # Date ranges
     seasonStart = start_date
@@ -78,6 +69,31 @@ def compute_dvi(
     baseYearStart = 2013
     baseYearEnd = 2022
 
+    # Seamless MODIS baseline for seamless LST and vegetation gap-fill
+    modis_veg = ee.ImageCollection("MODIS/061/MOD13Q1")
+    modis_lst_col = ee.ImageCollection("MODIS/061/MOD11A2")
+
+    modis_ndvi_curr = modis_veg.filterBounds(geometryBuffered).filterDate(seasonStart, seasonEnd).select("NDVI").median().divide(10000).rename("NDVI")
+    modis_evi_curr = modis_veg.filterBounds(geometryBuffered).filterDate(seasonStart, seasonEnd).select("EVI").median().divide(10000).rename("EVI")
+    modis_lst_curr = modis_lst_col.filterBounds(geometryBuffered).filterDate(seasonStart, seasonEnd).select("LST_Day_1km").median().multiply(0.02).subtract(273.15).rename("LST_C")
+
+    modis_ndvi_base_col = modis_veg.filterBounds(geometryBuffered).filter(ee.Filter.calendarRange(start_month, end_month, "month")).filter(ee.Filter.calendarRange(baseYearStart, baseYearEnd, "year")).select("NDVI").map(lambda img: img.divide(10000))
+    modis_ndvi_min_base = modis_ndvi_base_col.min().rename("NDVI")
+    modis_ndvi_max_base = modis_ndvi_base_col.max().rename("NDVI")
+
+    modis_lst_base_mean = modis_lst_col.filterBounds(geometryBuffered).filter(ee.Filter.calendarRange(start_month, end_month, "month")).filter(ee.Filter.calendarRange(baseYearStart, baseYearEnd, "year")).select("LST_Day_1km").mean().multiply(0.02).subtract(273.15).rename("LST_mean")
+
+    modis_ndvi_clim = modis_veg.filterBounds(geometryBuffered).select("NDVI").median().divide(10000)
+    modis_evi_clim = modis_veg.filterBounds(geometryBuffered).select("EVI").median().divide(10000)
+    modis_lst_clim = modis_lst_col.filterBounds(geometryBuffered).select("LST_Day_1km").median().multiply(0.02).subtract(273.15)
+
+    modis_ndvi_curr = modis_ndvi_curr.unmask(modis_ndvi_clim)
+    modis_evi_curr = modis_evi_curr.unmask(modis_evi_clim)
+    modis_lst_curr = modis_lst_curr.unmask(modis_lst_clim)
+    modis_ndvi_min_base = modis_ndvi_min_base.unmask(modis_ndvi_clim.multiply(0.5))
+    modis_ndvi_max_base = modis_ndvi_max_base.unmask(modis_ndvi_clim.multiply(1.5))
+    modis_lst_base_mean = modis_lst_base_mean.unmask(modis_lst_clim)
+
     # Landsat
     ls8 = ee.ImageCollection('LANDSAT/LC08/C02/T1_L2')
     ls9 = ee.ImageCollection('LANDSAT/LC09/C02/T1_L2')
@@ -85,19 +101,24 @@ def compute_dvi(
 
     comp_primary = allLS.filterBounds(geometryBuffered).filterDate(seasonStart, seasonEnd).map(maskL8sr).median()
     comp_extended = allLS.filterBounds(geometryBuffered).filterDate(extStart, extEnd).map(maskL8sr).median()
-    comp_multiyear = allLS.filterBounds(geometryBuffered).filter(ee.Filter.calendarRange(start_month, end_month, 'month')).filter(ee.Filter.calendarRange(2019, 2022, 'year')).map(maskL8sr).median()
+    comp_multiyear = allLS.filterBounds(geometryBuffered).filter(ee.Filter.calendarRange(start_month, end_month, 'month')).filter(ee.Filter.calendarRange(2019, 2024, 'year')).map(maskL8sr).median()
 
     ls_filled = comp_primary.unmask(comp_extended).unmask(comp_multiyear).clip(geometry)
 
-    # Indices
-    ndvi_current = ls_filled.normalizedDifference(['SR_B5', 'SR_B4']).rename('NDVI').clip(geometry)
-    evi_current = ls_filled.expression(
+    # Indices with seamless MODIS unmask
+    ls_ndvi = ls_filled.normalizedDifference(['SR_B5', 'SR_B4']).rename('NDVI').clip(geometry)
+    ndvi_current = ls_ndvi.unmask(modis_ndvi_curr).clip(geometry)
+
+    ls_evi = ls_filled.expression(
         '2.5 * ((NIR - RED) / (NIR + 6.0 * RED - 7.5 * BLUE + 1.0))', {
             'NIR':  ls_filled.select('SR_B5'),
             'RED':  ls_filled.select('SR_B4'),
             'BLUE': ls_filled.select('SR_B2')
         }).rename('EVI').clip(geometry)
-    lst_current = ls_filled.select('ST_B10').subtract(273.15).rename('LST_C').clip(geometry)
+    evi_current = ls_evi.unmask(modis_evi_curr).clip(geometry)
+
+    ls_lst = ls_filled.select('ST_B10').subtract(273.15).rename('LST_C').clip(geometry)
+    lst_current = ls_lst.unmask(modis_lst_curr).clip(geometry)
 
     # Baseline
     ls_base = ls8.filterBounds(geometryBuffered).filter(ee.Filter.calendarRange(start_month, end_month, 'month')).filter(ee.Filter.calendarRange(baseYearStart, baseYearEnd, 'year')).map(maskL8sr)
@@ -107,52 +128,85 @@ def compute_dvi(
     ndvi_base = ls_base.map(get_ndvi)
     ndvi_base_ext = ls_base_full.map(get_ndvi)
 
-    ndvi_min = ndvi_base.min().unmask(ndvi_base_ext.min()).clip(geometry)
-    ndvi_max = ndvi_base.max().unmask(ndvi_base_ext.max()).clip(geometry)
+    ndvi_min = ndvi_base.min().unmask(ndvi_base_ext.min()).unmask(modis_ndvi_min_base).clip(geometry)
+    ndvi_max = ndvi_base.max().unmask(ndvi_base_ext.max()).unmask(modis_ndvi_max_base).clip(geometry)
 
     denom = ndvi_max.subtract(ndvi_min)
-    vci = ndvi_current.subtract(ndvi_min).divide(denom.where(denom.abs().lt(0.01), 0.01)).multiply(100).clamp(0, 100).rename('VCI').clip(geometry)
+    vci = ndvi_current.subtract(ndvi_min).divide(denom.where(denom.abs().lt(0.01), 0.01)).multiply(100).clamp(0, 100).rename('VCI').unmask(50.0).clip(geometry)
 
-    lst_base_mean = ls_base.select('ST_B10').mean().unmask(ls_base_full.select('ST_B10').mean()).subtract(273.15).rename('LST_mean').clip(geometry)
-    lst_anom = lst_current.subtract(lst_base_mean).rename('LST_ANOM').clip(geometry)
+    lst_base_mean = ls_base.select('ST_B10').mean().unmask(ls_base_full.select('ST_B10').mean()).subtract(273.15).unmask(modis_lst_base_mean).rename('LST_mean').clip(geometry)
+    lst_anom = lst_current.subtract(lst_base_mean).unmask(modis_lst_curr.subtract(modis_lst_base_mean)).rename('LST_ANOM').clip(geometry)
 
-    # CHIRPS
-    chirps_col = ee.ImageCollection('UCSB-CHG/CHIRPS/PENTAD')
-    chirps_current = chirps_col.filterBounds(geometryBuffered).filterDate(seasonStart, seasonEnd).sum().rename('RF_CUMUL').reproject(crs='EPSG:32736', scale=get_dynamic_scale(geometry)).clip(geometry)
+    try:
+        bounds_coords = geometry.bounds(maxError=1000).coordinates().get(0).getInfo()
+        lats = [pt[1] for pt in bounds_coords]
+        use_era5_precip = max(lats) > 50 or min(lats) < -50
+    except:
+        use_era5_precip = True
 
-    years = ee.List.sequence(2001, 2022)
-    def get_chirps_yr(yr):
-        return chirps_col.filterBounds(geometryBuffered).filter(ee.Filter.calendarRange(start_month, end_month, 'month')).filter(ee.Filter.calendarRange(yr, yr, 'year')).sum()
-    chirps_ltm = ee.ImageCollection(years.map(get_chirps_yr)).mean().rename('RF_LTM').reproject(crs='EPSG:32736', scale=get_dynamic_scale(geometry)).clip(geometry)
-    rf_anom = chirps_current.subtract(chirps_ltm).rename('RF_ANOM').clip(geometry)
+    # Precipitation
+    if use_era5_precip:
+        era_col = ee.ImageCollection("ECMWF/ERA5_LAND/MONTHLY_AGGR").select("total_precipitation_sum")
+        chirps_current = era_col.filterBounds(geometryBuffered).filterDate(seasonStart, seasonEnd).sum().multiply(1000).rename('RF_CUMUL').reproject(crs='EPSG:32736', scale=get_dynamic_scale(geometry)).clip(geometry)
+        
+        years = ee.List.sequence(2001, 2022)
+        def get_era_yr(yr):
+            return era_col.filterBounds(geometryBuffered).filter(ee.Filter.calendarRange(start_month, end_month, 'month')).filter(ee.Filter.calendarRange(yr, yr, 'year')).sum()
+        chirps_ltm = ee.ImageCollection(years.map(get_era_yr)).mean().multiply(1000).rename('RF_LTM').reproject(crs='EPSG:32736', scale=get_dynamic_scale(geometry)).clip(geometry)
+        
+        # Monthly dry period calculation logic for ERA5
+        def is_dry_month(img): return img.multiply(1000).lt(10).rename('dry')
+        dry_pentads = era_col.filterBounds(geometryBuffered).filterDate(seasonStart, seasonEnd).map(is_dry_month).sum().rename('CDD').reproject(crs='EPSG:32736', scale=get_dynamic_scale(geometry)).clip(geometry)
+        
+        chirps_current = chirps_current.unmask(chirps_ltm)
+        dry_pentads = dry_pentads.unmask(2.0)
+    else:
+        chirps_col = ee.ImageCollection('UCSB-CHG/CHIRPS/PENTAD')
+        chirps_current = chirps_col.filterBounds(geometryBuffered).filterDate(seasonStart, seasonEnd).sum().rename('RF_CUMUL').reproject(crs='EPSG:32736', scale=get_dynamic_scale(geometry)).clip(geometry)
 
-    def is_dry(img): return img.lt(1).rename('dry')
-    dry_pentads = chirps_col.filterBounds(geometryBuffered).filterDate(seasonStart, seasonEnd).map(is_dry).sum().rename('CDD').reproject(crs='EPSG:32736', scale=get_dynamic_scale(geometry)).clip(geometry)
+        years = ee.List.sequence(2001, 2022)
+        def get_chirps_yr(yr):
+            return chirps_col.filterBounds(geometryBuffered).filter(ee.Filter.calendarRange(start_month, end_month, 'month')).filter(ee.Filter.calendarRange(yr, yr, 'year')).sum()
+        chirps_ltm = ee.ImageCollection(years.map(get_chirps_yr)).mean().rename('RF_LTM').reproject(crs='EPSG:32736', scale=get_dynamic_scale(geometry)).clip(geometry)
+
+        def is_dry(img): return img.lt(1).rename('dry')
+        dry_pentads = chirps_col.filterBounds(geometryBuffered).filterDate(seasonStart, seasonEnd).map(is_dry).sum().rename('CDD').reproject(crs='EPSG:32736', scale=get_dynamic_scale(geometry)).clip(geometry)
+        dry_pentads = dry_pentads.unmask(2.0)
+        
+    rf_anom = chirps_current.subtract(chirps_ltm).rename('RF_ANOM').unmask(0.0).clip(geometry)
 
     # ERA5
     era5 = ee.ImageCollection('ECMWF/ERA5_LAND/MONTHLY_AGGR').select('volumetric_soil_water_layer_1')
     sm_current = era5.filterBounds(geometryBuffered).filterDate(seasonStart, seasonEnd).mean().rename('SM').reproject(crs='EPSG:32736', scale=get_dynamic_scale(geometry)).clip(geometry)
     sm_ltm = era5.filterBounds(geometryBuffered).filter(ee.Filter.calendarRange(start_month, end_month, 'month')).filter(ee.Filter.calendarRange(2001, 2022, 'year')).mean().rename('SM_LTM').reproject(crs='EPSG:32736', scale=get_dynamic_scale(geometry)).clip(geometry)
-    sm_anom = sm_current.subtract(sm_ltm).rename('SM_ANOM').clip(geometry)
+    sm_current = sm_current.unmask(sm_ltm)
+    sm_anom = sm_current.subtract(sm_ltm).rename('SM_ANOM').unmask(0.0).clip(geometry)
 
-    # Normalize
-    sm_norm = normPositive(sm_anom, -0.10, 0.10, 'SM_norm')
-    rf_norm = normPositive(rf_anom, -250, 150, 'RF_norm')
-    ndvi_norm = normPositive(ndvi_current, -0.10, 0.85, 'NDVI_norm')
-    vci_norm = normPositive(vci, 0, 100, 'VCI_norm')
-    lst_norm = normInvert(lst_anom, -5, 12, 'LST_norm')
-    cdd_norm = normInvert(dry_pentads, 0, 12, 'CDD_norm')
-    evi_norm = normPositive(evi_current, -0.10, 0.85, 'EVI_norm')
+    # Normalize (protected with unmask(0.5))
+    sm_norm = normPositive(sm_anom, -0.10, 0.10, 'SM_norm').unmask(0.5)
+    rf_norm = normPositive(rf_anom, -250, 150, 'RF_norm').unmask(0.5)
+    ndvi_norm = normPositive(ndvi_current, -0.10, 0.85, 'NDVI_norm').unmask(0.5)
+    vci_norm = normPositive(vci, 0, 100, 'VCI_norm').unmask(0.5)
+    lst_norm = normInvert(lst_anom, -5, 12, 'LST_norm').unmask(0.5)
+    cdd_norm = normInvert(dry_pentads, 0, (4 if use_era5_precip else 12), 'CDD_norm').unmask(0.5)
+    evi_norm = normPositive(evi_current, -0.10, 0.85, 'EVI_norm').unmask(0.5)
 
     # DVI
-    DVI = sm_norm.multiply(0.400) \
+    DVI_raw = sm_norm.multiply(0.400) \
         .add(rf_norm.multiply(0.220)) \
         .add(ndvi_norm.multiply(0.110)) \
         .add(vci_norm.multiply(0.110)) \
         .add(lst_norm.multiply(0.065)) \
         .add(cdd_norm.multiply(0.065)) \
         .add(evi_norm.multiply(0.030)) \
-        .rename('DVI').clip(geometry)
+        .clamp(0, 1) \
+        .rename('DVI')
+
+    DVI = DVI_raw.unmask(DVI_raw.focalMean(radius=500, kernelType='circle', units='meters')) \
+        .unmask(0.5) \
+        .clamp(0, 1) \
+        .rename('DVI') \
+        .clip(geometry)
 
     vuln_class = ee.Image(0) \
         .where(DVI.lte(0.20), 1) \
@@ -177,12 +231,12 @@ def compute_dvi(
         combined = ee.Dictionary({
             "stats": DVI.reduceRegion(
                 reducer=ee.Reducer.mean().combine(ee.Reducer.min(), sharedInputs=True).combine(ee.Reducer.max(), sharedInputs=True).combine(ee.Reducer.stdDev(), sharedInputs=True),
-                geometry=geometry,
+                geometry=geometry.bounds(maxError=1000),
                 scale=get_dynamic_scale(geometry), 
                 maxPixels=1e10,
             ),
             "areas": class_area_bands.reduceRegion(
-                reducer=ee.Reducer.sum(), geometry=geometry, scale=get_dynamic_scale(geometry), maxPixels=1e10
+                reducer=ee.Reducer.sum(), geometry=geometry.bounds(maxError=1000), scale=get_dynamic_scale(geometry), maxPixels=1e10
             ),
             "bounds": geometry.bounds()
         })
@@ -215,8 +269,8 @@ def compute_dvi(
     result = {
         "tile_url": dvi_map_id["tile_fetcher"].url_format,
         "class_tile_url": class_map_id["tile_fetcher"].url_format,
-        "thumb_url": DVI.getThumbURL({"min": 0, "max": 1, "palette": dvi_pal, "region": geometry.bounds(), "dimensions": 800, "format": "png"}),
-        "class_thumb_url": vuln_class.getThumbURL({"min": 1, "max": 5, "palette": class_pal, "region": geometry.bounds(), "dimensions": 800, "format": "png"}),
+        "thumb_url": DVI.getThumbURL({"min": 0, "max": 1, "palette": dvi_pal, "region": geometry.bounds(), "dimensions": 800, "crs": "EPSG:4326", "format": "png"}),
+        "class_thumb_url": vuln_class.getThumbURL({"min": 1, "max": 5, "palette": class_pal, "region": geometry.bounds(), "dimensions": 800, "crs": "EPSG:4326", "format": "png"}),
         "stats": {
             "Mean DVI": round(stats.get("DVI_mean") or 0, 4),
             "Min DVI": round(stats.get("DVI_min") or 0, 4),

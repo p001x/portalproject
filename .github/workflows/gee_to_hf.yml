@@ -1,0 +1,33 @@
+name: Sync GEE RUSLE to Hugging Face
+
+on:
+  workflow_dispatch: # Allows you to trigger this manually from the GitHub Actions tab
+
+jobs:
+  sync_to_hf:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: |
+          pip install earthengine-api huggingface_hub requests cachetools
+
+      - name: Authenticate with Google Earth Engine
+        env:
+          GEE_SERVICE_ACCOUNT_KEY: ${{ secrets.GEE_SERVICE_ACCOUNT_KEY }}
+        run: |
+          echo "$GEE_SERVICE_ACCOUNT_KEY" > backend/gee_key.json
+
+      - name: Run Direct GEE to Hugging Face Sync
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python sync_gee_to_hf.py

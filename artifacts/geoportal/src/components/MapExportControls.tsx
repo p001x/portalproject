@@ -102,7 +102,7 @@ export function MapExportControls({ tileUrl, thumbUrl, district, title, classAre
     let timeoutId: any = null;
 
     const debounceTimer = setTimeout(() => {
-      timeoutId = setTimeout(() => abortController.abort(), 35000);
+      timeoutId = setTimeout(() => abortController.abort(), 90000);
 
       fetch(`${BASE}/static-map`, {
         method: "POST",
@@ -153,9 +153,13 @@ export function MapExportControls({ tileUrl, thumbUrl, district, title, classAre
           }
         })
         .catch((err) => {
-          if (active && err.name !== "AbortError") {
+          if (active) {
             console.error("Error generating static map preview:", err);
-            setError(err.message || "Preview failed to load. Please try again.");
+            if (err.name === "AbortError") {
+              setError("Preview generation timed out. Try a smaller study area or simpler parameters.");
+            } else {
+              setError(err.message || "Preview failed to load. Please try again.");
+            }
           }
         })
         .finally(() => {

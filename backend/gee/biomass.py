@@ -8,28 +8,36 @@ _VIS = {"min": 0, "max": 100, "palette": _PALETTE}
 
 def _build_biomass_base(aoi_config: dict, buffer_km: float = 3.0, start_year: int = 2019, end_year: int = 2023):
     aoi = get_aoi_geometry(aoi_config)
-    area_sqkm = aoi.area().divide(1e6).getInfo()
-    if area_sqkm > 10000:
-        dynamic_scale = 500
-    elif area_sqkm > 2000:
-        dynamic_scale = 250
-    elif area_sqkm > 500:
-        dynamic_scale = 100
-    else:
-        dynamic_scale = 30
+    from gee.aoi_utils import get_dynamic_scale
+    dynamic_scale = get_dynamic_scale(aoi)
+
+    is_global = False
+    try:
+        geom_str = str(aoi.serialize())
+        if "-180" in geom_str and "180" in geom_str and "90" in geom_str and "-90" in geom_str:
+            is_global = True
+    except:
+        pass
+
+    district = aoi_config.get("district", "")
+    is_rwanda = district != "" or "rwanda" in aoi_config.get("name", "").lower()
 
     # 1. POPULATION & TERRAIN-WEIGHTED ROAD ACCESSIBILITY
     roads_fc = None
-    try:
-        from .crom_service import get_district_vectors
-        district_name = aoi_config.get("district", aoi_config.get("name", "Unknown"))
-        gdb_data = get_district_vectors(district_name)
-        roads_geojson = gdb_data.get("roads")
-        if roads_geojson and roads_geojson.get("features"):
-            roads_fc = ee.FeatureCollection(roads_geojson["features"])
-    except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning(f"Failed to load roads from GDB: {e}")
+    if is_rwanda:
+        try:
+            from .crom_service import get_district_vectors
+            district_name = aoi_config.get("district", aoi_config.get("name", "Unknown"))
+            gdb_data = get_district_vectors(district_name)
+            roads_geojson = gdb_data.get("roads")
+            if roads_geojson and roads_geojson.get("features"):
+                roads_fc = ee.FeatureCollection(roads_geojson["features"])
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to load roads from GDB: {e}")
+    else:
+        # Fallback to GlobalRoads for non-rwanda custom polygons
+        roads_fc = ee.FeatureCollection("projects/sat-io/open-datasets/GRIP4/GlobalRoads").filterBounds(aoi)
 
     # Use WorldPop population density for weighting demand
     pop = ee.ImageCollection("WorldPop/GP/100m/pop") \
@@ -60,7 +68,7 @@ def _build_biomass_base(aoi_config: dict, buffer_km: float = 3.0, start_year: in
         proximity_base = ee.Image(1).subtract(normalized_dist).pow(1.5).unmask(0)
 
     # Elevation & Slope accessibility penalty
-    dem = ee.Image("NASA/NASADEM_HGT/001").select('elevation')
+    dem = ee.Image("NASA/NASADEM_HGT/001").select('elevation').unmask(0, False)
     slope_deg = ee.Terrain.slope(dem)
     slope_penalty = slope_deg.divide(30).clamp(0, 1)
 
@@ -125,27 +133,33 @@ def _build_biomass_base(aoi_config: dict, buffer_km: float = 3.0, start_year: in
     depletion_score = depletion_score.clip(aoi).rename('depletion_risk')
     
     # 6. EXCLUDE NATIONAL PARKS (Protected Areas)
-    try:
-        from .crom_service import get_district_vectors
-        district_name = aoi_config.get("district", aoi_config.get("name", "Unknown"))
-        gdb_data = get_district_vectors(district_name)
-        parks_geojson = gdb_data.get("parks")
-        if parks_geojson and parks_geojson.get("features"):
-            # Create ee.FeatureCollection from geojson features
-            parks_fc = ee.FeatureCollection(parks_geojson["features"])
-            parks_mask = ee.Image().paint(parks_fc, 1).unmask(0)
-            # updateMask(0) hides the area
-            depletion_score = depletion_score.updateMask(parks_mask.Not())
-    except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning(f"Failed to mask parks from GDB: {e}")
+    if is_rwanda:
+        try:
+            from .crom_service import get_district_vectors
+            district_name = aoi_config.get("district", aoi_config.get("name", "Unknown"))
+            gdb_data = get_district_vectors(district_name)
+            parks_geojson = gdb_data.get("parks")
+            if parks_geojson and parks_geojson.get("features"):
+                # Create ee.FeatureCollection from geojson features
+                parks_fc = ee.FeatureCollection(parks_geojson["features"])
+                parks_mask = ee.Image().paint(parks_fc, 1).unmask(0)
+                # updateMask(0) hides the area
+                depletion_score = depletion_score.updateMask(parks_mask.Not())
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to mask parks from GDB: {e}")
+    else:
+        # Global Protected Areas
+        parks_fc = ee.FeatureCollection("WCMC/WDPA/current/polygons").filterBounds(aoi)
+        parks_mask = ee.Image().paint(parks_fc, 1).unmask(0)
+        depletion_score = depletion_score.updateMask(parks_mask.Not())
 
     depletion_score = depletion_score.updateMask(depletion_score.gt(0))
     
-    return aoi, dynamic_scale, depletion_score, proximity_risk, recent_loss, degradation_risk, forest_mask, clear_cut, gradual_gathering, future_loss_pred, agb_tonnes_ha, pop
+    return aoi, dynamic_scale, depletion_score, proximity_risk, recent_loss, degradation_risk, forest_mask, clear_cut, gradual_gathering, future_loss_pred, agb_tonnes_ha, pop, is_global
 
 def compute_biomass_map(aoi_config: dict, buffer_km: float = 3.0, start_year: int = 2019, end_year: int = 2023) -> dict:
-    aoi, dynamic_scale, depletion_score, proximity_risk, recent_loss, degradation_risk, forest_mask, clear_cut, gradual_gathering, future_loss_pred, agb_tonnes_ha, pop = _build_biomass_base(aoi_config, buffer_km, start_year, end_year)
+    aoi, dynamic_scale, depletion_score, proximity_risk, recent_loss, degradation_risk, forest_mask, clear_cut, gradual_gathering, future_loss_pred, agb_tonnes_ha, pop, is_global = _build_biomass_base(aoi_config, buffer_km, start_year, end_year)
 
     classes = ee.Image(0) \
         .where(depletion_score.gt(0).And(depletion_score.lte(25)), 1) \
@@ -157,9 +171,10 @@ def compute_biomass_map(aoi_config: dict, buffer_km: float = 3.0, start_year: in
     _CLASS_VIS = {"min": 1, "max": 4, "palette": ["#0000ff", "#00ff00", "#ffff00", "#ff0000"]}
     map_id = classes.getMapId(_CLASS_VIS)
     
+    calc_geom = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False) if is_global else aoi.bounds(maxError=1000)
     thumb_url = classes.getThumbURL({
         "min": _CLASS_VIS["min"], "max": _CLASS_VIS["max"], "palette": _CLASS_VIS["palette"],
-        "dimensions": 512, "region": aoi.bounds(), "format": "png"
+        "dimensions": 512, "crs": "EPSG:4326", "region": calc_geom, "format": "png"
     })
     
     factor_maps = {
@@ -230,7 +245,7 @@ def compute_biomass_map(aoi_config: dict, buffer_km: float = 3.0, start_year: in
             f_thumb = img.getThumbURL({
                 "min": f_vis["min"], "max": f_vis["max"], 
                 "palette": f_vis["palette"], 
-                "dimensions": 512, "region": aoi.bounds(), "format": "png"
+                "dimensions": 512, "crs": "EPSG:4326", "region": calc_geom, "format": "png"
             })
             return key, {
                 "title": f_data["title"],
@@ -249,9 +264,13 @@ def compute_biomass_map(aoi_config: dict, buffer_km: float = 3.0, start_year: in
             k, result_dict = future.result()
             factor_results[k] = result_dict
 
-    bounds = aoi.bounds().getInfo()["coordinates"][0]
-    center_lon = (bounds[0][0] + bounds[2][0]) / 2
-    center_lat = (bounds[0][1] + bounds[2][1]) / 2
+    from gee.aoi_utils import get_bounds_and_center
+
+
+    bounds, center = get_bounds_and_center(aoi)
+
+
+    center_lat, center_lon = center[0], center[1]
 
     return {
         "tile_url": map_id["tile_fetcher"].url_format,
@@ -266,7 +285,7 @@ def compute_biomass_map(aoi_config: dict, buffer_km: float = 3.0, start_year: in
     }
 
 def compute_biomass_stats(aoi_config: dict, buffer_km: float = 3.0, start_year: int = 2019, end_year: int = 2023) -> dict:
-    aoi, dynamic_scale, depletion_score, proximity_risk, recent_loss, degradation_risk, forest_mask, clear_cut, gradual_gathering, future_loss_pred, agb_tonnes_ha, pop = _build_biomass_base(aoi_config, buffer_km, start_year, end_year)
+    aoi, dynamic_scale, depletion_score, proximity_risk, recent_loss, degradation_risk, forest_mask, clear_cut, gradual_gathering, future_loss_pred, agb_tonnes_ha, pop, is_global = _build_biomass_base(aoi_config, buffer_km, start_year, end_year)
 
     pixel_area_ha = ee.Image.pixelArea().divide(10000)
     standing_biomass_img = agb_tonnes_ha.multiply(forest_mask).multiply(pixel_area_ha)
@@ -274,6 +293,7 @@ def compute_biomass_stats(aoi_config: dict, buffer_km: float = 3.0, start_year: 
     forest_area_km2 = forest_mask.multiply(ee.Image.pixelArea()).divide(1e6)
     pop_img = pop.unmask(0)
 
+    calc_geom = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False) if is_global else aoi.bounds(maxError=1000)
     stats_raw = ee.Image.cat([
         depletion_score.rename('depletion_risk'),
         standing_biomass_img.rename('standing_biomass_tonnes'),
@@ -282,7 +302,7 @@ def compute_biomass_stats(aoi_config: dict, buffer_km: float = 3.0, start_year: 
         pop_img.rename('population_total')
     ]).reduceRegion(
         reducer=ee.Reducer.mean().combine(ee.Reducer.max(), sharedInputs=True).combine(ee.Reducer.sum(), sharedInputs=True),
-        geometry=aoi,
+        geometry=calc_geom,
         scale=dynamic_scale,
         maxPixels=1e10
     ).getInfo()
@@ -326,7 +346,7 @@ def compute_biomass_stats(aoi_config: dict, buffer_km: float = 3.0, start_year: 
     }
 
 def compute_biomass_classify(aoi_config: dict, buffer_km: float = 3.0, start_year: int = 2019, end_year: int = 2023, n_classes: int = 4, method: str = "natural_breaks", custom_labels: list = None) -> dict:
-    aoi, dynamic_scale, depletion_score, proximity_risk, recent_loss, degradation_risk, forest_mask, clear_cut, gradual_gathering, future_loss_pred, agb_tonnes_ha, pop = _build_biomass_base(aoi_config, buffer_km, start_year, end_year)
+    aoi, dynamic_scale, depletion_score, proximity_risk, recent_loss, degradation_risk, forest_mask, clear_cut, gradual_gathering, future_loss_pred, agb_tonnes_ha, pop, is_global = _build_biomass_base(aoi_config, buffer_km, start_year, end_year)
 
     layers = [{
         "name": "risk_index",
@@ -351,7 +371,7 @@ def compute_biomass_export(aoi_config: dict, buffer_km: float = 3.0, start_year:
     url = depletion_score.getDownloadURL({
         "name": "biomass_depletion_risk",
         "scale": dynamic_scale,
-        "region": aoi.bounds(),
+        "region": calc_geom,
         "format": "GEO_TIFF",
         "crs": "EPSG:4326"
     })
@@ -362,7 +382,8 @@ def compute_biomass_export(aoi_config: dict, buffer_km: float = 3.0, start_year:
     }
 
 def export_factor_map(aoi_config: dict, factor_key: str, palette: list = None, buffer_km: float = 3.0, start_year: int = 2019, end_year: int = 2023):
-    aoi, dynamic_scale, _, proximity_risk, recent_loss, degradation_risk, forest_mask, clear_cut, gradual_gathering, future_loss_pred, agb_tonnes_ha, pop = _build_biomass_base(aoi_config, buffer_km, start_year, end_year)
+    aoi, dynamic_scale, _, proximity_risk, recent_loss, degradation_risk, forest_mask, clear_cut, gradual_gathering, future_loss_pred, agb_tonnes_ha, pop, is_global = _build_biomass_base(aoi_config, buffer_km, start_year, end_year)
+    calc_geom = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False) if is_global else aoi.bounds(maxError=1000)
     
     if factor_key == "proximity":
         img = proximity_risk.clip(aoi).multiply(100).round()
@@ -390,8 +411,8 @@ def export_factor_map(aoi_config: dict, factor_key: str, palette: list = None, b
         
     if palette:
         styled = img.visualize(min=vis_min, max=vis_max, palette=palette)
-        url = styled.getDownloadURL({"name": f"biomass_{factor_key}_styled", "scale": dynamic_scale, "region": aoi.bounds(), "format": "GEO_TIFF"})
+        url = styled.getDownloadURL({"name": f"biomass_{factor_key}_styled", "scale": dynamic_scale, "region": calc_geom, "format": "GEO_TIFF"})
     else:
-        url = img.toFloat().getDownloadURL({"name": f"biomass_{factor_key}_raw", "scale": dynamic_scale, "region": aoi.bounds(), "format": "GEO_TIFF"})
+        url = img.toFloat().getDownloadURL({"name": f"biomass_{factor_key}_raw", "scale": dynamic_scale, "region": calc_geom, "format": "GEO_TIFF"})
         
     return {"download_url": url}

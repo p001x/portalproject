@@ -770,7 +770,6 @@ def get_dataset_local_path(storage_key: str) -> Optional[str]:
         
     if storage_key.startswith("hf://"):
         import os
-        from huggingface_hub import hf_hub_download
         hf_token = os.environ.get("HF_TOKEN")
         parts = storage_key.replace("hf://", "").split("/", 2)
         if len(parts) == 3:
@@ -780,7 +779,25 @@ def get_dataset_local_path(storage_key: str) -> Optional[str]:
             r_id = os.environ.get("HF_REPO_ID", "pi0texy/blacportal-datasets")
             filename = storage_key.replace("hf://", "")
         try:
+            from huggingface_hub import hf_hub_download
             return hf_hub_download(repo_id=r_id, repo_type="dataset", filename=filename, token=hf_token)
+        except ImportError:
+            # Fallback for environments where pip is broken and huggingface_hub is missing
+            import requests, tempfile
+            cache_dir = os.path.join(tempfile.gettempdir(), "hf_cache", r_id.replace("/", "_"))
+            os.makedirs(cache_dir, exist_ok=True)
+            local_path = os.path.join(cache_dir, filename.replace("/", "_"))
+            if os.path.exists(local_path):
+                return local_path
+            url = f"https://huggingface.co/datasets/{r_id}/resolve/main/{filename}?download=true"
+            headers = {"Authorization": f"Bearer {hf_token}"} if hf_token else {}
+            resp = requests.get(url, headers=headers, stream=True)
+            if resp.status_code == 200:
+                with open(local_path, "wb") as f:
+                    for chunk in resp.iter_content(chunk_size=1024*1024):
+                        f.write(chunk)
+                return local_path
+            return None
         except Exception:
             return None
             

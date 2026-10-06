@@ -23,8 +23,6 @@ _cache_classify: TTLCache = TTLCache(maxsize=64, ttl=3600)
 _cache_export: TTLCache = TTLCache(maxsize=64, ttl=3600)
 _cache_build: TTLCache = TTLCache(maxsize=64, ttl=3600)
 _lock = Lock()
-import threading
-gee_semaphore = threading.BoundedSemaphore(5) # Throttle concurrent tile/export URL generation
 
 FACTOR_VIS = {
     "R": {"label": "R — Rainfall Erosivity", "unit": "MJ·mm·ha⁻¹·h⁻¹·yr⁻¹",
@@ -74,17 +72,11 @@ def _class_palette(n: int) -> list:
     return [full[round(i * step)] for i in range(n)]
 
 def _build_rusle_images(
-    aoi_config: dict, start_year: int, end_year: int,
+    aoi_config: dict, year: int,
     reverse_r: bool = False, reverse_k: bool = False, reverse_ls: bool = False,
-    reverse_c: bool = False, reverse_p: bool = False,
-    c_factor_method: str = "van_der_knijff", weights: dict = None
+    reverse_c: bool = False, reverse_p: bool = False
 ):
-    weights = weights or {"R": 1, "K": 1, "LS": 1, "C": 1, "P": 1}
-    cache_key = (
-        json.dumps(aoi_config, sort_keys=True), start_year, end_year, 
-        reverse_r, reverse_k, reverse_ls, reverse_c, reverse_p, 
-        c_factor_method, json.dumps(weights, sort_keys=True)
-    )
+    cache_key = (json.dumps(aoi_config, sort_keys=True), year, reverse_r, reverse_k, reverse_ls, reverse_c, reverse_p)
     is_first = False
     with _lock:
         if cache_key in _cache_build:
@@ -99,11 +91,59 @@ def _build_rusle_images(
 
     try:
         from gee.aoi_utils import get_aoi_geometry
+        import hashlib
+        from gee.auth import get_gee_status
+        
         aoi = get_aoi_geometry(aoi_config)
         dynamic_scale = get_dynamic_scale(aoi)
+        
+        project_id = get_gee_status()["project_id"]
+        is_cacheable = aoi_config.get("type") in ["admin", "district", "province", "world"]
+        asset_id = None
+        
+        def _apply_reverse(img, key, reverse_flag):
+            if reverse_flag:
+                v = FACTOR_VIS[key]
+                return ee.Image(v["max"] + v["min"]).subtract(img).rename(key)
+            return img.rename(key)
+            
+        if is_cacheable:
+            config_str = json.dumps(aoi_config, sort_keys=True)
+            config_hash = hashlib.md5(config_str.encode()).hexdigest()[:10]
+            # Store in the root of the project to avoid needing to create folders
+            asset_id = f"projects/{project_id}/assets/AutoCache_RUSLE_{year}_{config_hash}"
+            
+            try:
+                # Check if it already exists
+                ee.data.getAsset(asset_id)
+                print(f"[+] CACHE HIT: Loading {asset_id} directly from Earth Engine Assets!")
+                cached_img = ee.Image(asset_id)
+                
+                # Reconstruct the dictionary from the multi-band asset
+                factor_images = {
+                    "R": _apply_reverse(cached_img.select("R"), "R", reverse_r).clip(aoi),
+                    "K": _apply_reverse(cached_img.select("K"), "K", reverse_k).clip(aoi),
+                    "LS": _apply_reverse(cached_img.select("LS"), "LS", reverse_ls).clip(aoi),
+                    "C": _apply_reverse(cached_img.select("C"), "C", reverse_c).clip(aoi),
+                    "P": _apply_reverse(cached_img.select("P"), "P", reverse_p).clip(aoi),
+                    "A": cached_img.select("A").clip(aoi),
+                }
+                risk_index = cached_img.select("risk_index").clip(aoi)
+                
+                res = {
+                    "aoi": aoi,
+                    "scale": dynamic_scale,
+                    "factor_images": factor_images,
+                    "risk_index": risk_index,
+                }
+                cached.set_result(res)
+                return res
+            except Exception:
+                # Doesn't exist yet, compute it!
+                pass
 
-        start = f"{start_year}-01-01"
-        end = f"{end_year}-12-31"
+        start = f"{year}-01-01"
+        end = f"{year}-12-31"
 
         chirps_annual = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY").filterDate(start, end).filterBounds(aoi).sum()
         R = chirps_annual.multiply(0.35).add(38.5).rename("R")
@@ -119,71 +159,44 @@ def _build_rusle_images(
         slope_deg = ee.Terrain.slope(dem)
         slope_rad = slope_deg.multiply(math.pi / 180)
         sin_theta = slope_rad.sin()
-        flow_acc = ee.Image("MERIT/Hydro/v1_0_1").select("upa").max(0)
-        # MERIT Hydro 'upa' is upstream drainage area in km^2. Convert to m^2.
-        As = flow_acc.multiply(1000000.0).add(450.0)
+        flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select("b1").max(0)
+        cell_area_m2 = 450.0 * 450.0
+        As = flow_acc.add(0.5).multiply(cell_area_m2)
         L = As.divide(22.13).pow(0.4)
         S_gentle = sin_theta.multiply(10.8).add(0.03)
         S_steep = sin_theta.multiply(16.8).subtract(0.50)
         S = S_gentle.where(slope_deg.gte(5.14), S_steep).max(0.03)
         LS = L.multiply(S).min(300).rename("LS")
 
-        if end_year >= 2016:
-            def mask_s2_clouds(image):
-                qa = image.select('QA60')
-                cloud_bit_mask = 1 << 10
-                cirrus_bit_mask = 1 << 11
-                mask = qa.bitwiseAnd(cloud_bit_mask).eq(0).And(qa.bitwiseAnd(cirrus_bit_mask).eq(0))
-                return image.updateMask(mask)
-            
+        if year >= 2016:
             s2_ndvi_col = (
                 ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
                 .filterDate(start, end)
                 .filterBounds(aoi)
                 .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 30))
-                .map(mask_s2_clouds)
                 .map(lambda img: img.normalizedDifference(["B8", "B4"]).rename("NDVI"))
             )
             ndvi = s2_ndvi_col.median()
         elif year >= 2014:
-            def mask_l8_clouds(image):
-                qa = image.select('QA_PIXEL')
-                cloud_shadow_bit_mask = 1 << 4
-                clouds_bit_mask = 1 << 3
-                mask = qa.bitwiseAnd(cloud_shadow_bit_mask).eq(0).And(qa.bitwiseAnd(clouds_bit_mask).eq(0))
-                return image.updateMask(mask)
-                
             l8_ndvi_col = (
                 ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
                 .filterDate(start, end)
                 .filterBounds(aoi)
                 .filter(ee.Filter.lt("CLOUD_COVER", 30))
-                .map(mask_l8_clouds)
                 .map(lambda img: img.normalizedDifference(["SR_B5", "SR_B4"]).rename("NDVI"))
             )
             ndvi = l8_ndvi_col.median()
         else:
-            def mask_l7_clouds(image):
-                qa = image.select('QA_PIXEL')
-                cloud_shadow_bit_mask = 1 << 4
-                clouds_bit_mask = 1 << 3
-                mask = qa.bitwiseAnd(cloud_shadow_bit_mask).eq(0).And(qa.bitwiseAnd(clouds_bit_mask).eq(0))
-                return image.updateMask(mask)
-                
             l7_ndvi_col = (
                 ee.ImageCollection("LANDSAT/LE07/C02/T1_L2")
                 .filterDate(start, end)
                 .filterBounds(aoi)
                 .filter(ee.Filter.lt("CLOUD_COVER", 30))
-                .map(mask_l7_clouds)
                 .map(lambda img: img.normalizedDifference(["SR_B4", "SR_B3"]).rename("NDVI"))
             )
             ndvi = l7_ndvi_col.median()
         ndvi_safe = ndvi.max(0.001).min(0.990)
-        if c_factor_method == "linear":
-            C = ee.Image(1.0).subtract(ndvi_safe).divide(2.0).max(0.001).min(1.0).rename("C")
-        else:
-            C = ndvi_safe.multiply(-2).divide(ndvi_safe.multiply(-1).add(1)).exp().max(0.001).min(1.0).rename("C")
+        C = ndvi_safe.multiply(-2).divide(ndvi_safe.multiply(-1).add(1)).exp().max(0.001).min(1.0).rename("C")
 
         P = (ee.Image(1.0).where(slope_deg.lt(5), 0.10).where(slope_deg.gte(5).And(slope_deg.lt(10)), 0.12)
              .where(slope_deg.gte(10).And(slope_deg.lt(15)), 0.14).where(slope_deg.gte(15).And(slope_deg.lt(20)), 0.19)
@@ -192,12 +205,6 @@ def _build_rusle_images(
 
         A = R.multiply(K).multiply(LS).multiply(C).multiply(P).rename("A")
         A = A.where(A.lt(0), 0).clip(aoi)
-        
-        def _apply_reverse(img, key, reverse_flag):
-            if reverse_flag:
-                v = FACTOR_VIS[key]
-                return ee.Image(v["max"] + v["min"]).subtract(img).rename(key)
-            return img.rename(key)
         
         factor_images = {
             "R": _apply_reverse(R, "R", reverse_r).clip(aoi),
@@ -208,22 +215,32 @@ def _build_rusle_images(
             "A": A,
         }
         
-        def _normalize(img, factor_key):
-            v_min = FACTOR_VIS[factor_key]["min"]
-            v_max = FACTOR_VIS[factor_key]["max"]
-            return img.subtract(v_min).divide(v_max - v_min).clamp(0, 1)
-
-        norm_R = _normalize(factor_images["R"], "R").multiply(weights["R"])
-        norm_K = _normalize(factor_images["K"], "K").multiply(weights["K"])
-        norm_LS = _normalize(factor_images["LS"], "LS").multiply(weights["LS"])
-        norm_C = _normalize(factor_images["C"], "C").multiply(weights["C"])
-        norm_P = _normalize(factor_images["P"], "P").multiply(weights["P"])
-        
-        sum_weights = sum(weights.values())
         risk_index = (
-            norm_R.add(norm_K).add(norm_LS).add(norm_C).add(norm_P)
-            .divide(sum_weights).clip(aoi).rename("RiskIndex")
+            factor_images["R"].add(factor_images["K"]).add(factor_images["LS"])
+            .add(factor_images["C"]).add(factor_images["P"]).divide(5.0).clip(aoi).rename("RiskIndex")
         )
+        
+        # --- CACHING TRIGGER ---
+        if is_cacheable and asset_id:
+            try:
+                print(f"[*] CACHE MISS: Triggering background export to save {asset_id} permanently...")
+                export_img = ee.Image.cat([
+                    R.rename("R"), K.rename("K"), LS.rename("LS"),
+                    C.rename("C"), P.rename("P"), A.rename("A"),
+                    risk_index.rename("risk_index")
+                ])
+                task = ee.batch.Export.image.toAsset(
+                    image=export_img.toFloat(), # Convert to 32-bit float to save storage space
+                    description=f"AutoCache_RUSLE_{year}_{config_hash}",
+                    assetId=asset_id,
+                    region=aoi.bounds(),
+                    scale=dynamic_scale,
+                    maxPixels=1e13
+                )
+                task.start()
+            except Exception as e:
+                print(f"[!] Failed to start background caching task: {e}")
+        # ------------------------
 
         res = {
             "aoi": aoi,
@@ -233,38 +250,25 @@ def _build_rusle_images(
         }
         cached.set_result(res)
         return res
-    except ee.EEException as e:
-        cached.set_exception(e)
-        error_msg = str(e)
-        if "memory limit exceeded" in error_msg.lower() or "computation timed out" in error_msg.lower():
-            raise ValueError("The selected region is too large or complex for real-time analysis. Please select a smaller area.") from e
-        raise e
     except Exception as e:
         cached.set_exception(e)
         raise e
     finally:
-        pass
+        with _lock:
+            if cache_key in _cache_build:
+                del _cache_build[cache_key]
 
 def compute_rusle_map(
-    aoi_config: dict, start_year: int, end_year: int,
+    aoi_config: dict, year: int,
     reverse_r: bool = False, reverse_k: bool = False, reverse_ls: bool = False,
-    reverse_c: bool = False, reverse_p: bool = False,
-    c_factor_method: str = "van_der_knijff", weights: dict = None
+    reverse_c: bool = False, reverse_p: bool = False
 ):
-    weights = weights or {"R": 1, "K": 1, "LS": 1, "C": 1, "P": 1}
-    cache_key = (
-        json.dumps(aoi_config, sort_keys=True), start_year, end_year, 
-        reverse_r, reverse_k, reverse_ls, reverse_c, reverse_p,
-        c_factor_method, json.dumps(weights, sort_keys=True)
-    )
+    cache_key = (json.dumps(aoi_config, sort_keys=True), year, reverse_r, reverse_k, reverse_ls, reverse_c, reverse_p)
     with _lock:
         if cache_key in _cache_map:
             return _cache_map[cache_key]
     
-    res = _build_rusle_images(
-        aoi_config, start_year, end_year, reverse_r, reverse_k, reverse_ls, reverse_c, reverse_p, 
-        c_factor_method, weights
-    )
+    res = _build_rusle_images(aoi_config, year, reverse_r, reverse_k, reverse_ls, reverse_c, reverse_p)
     aoi = res["aoi"]
     factor_images = res["factor_images"]
     
@@ -274,12 +278,9 @@ def compute_rusle_map(
         vis = FACTOR_VIS[key]
         vp = {"min": vis["min"], "max": vis["max"], "palette": vis["palette"]}
         smoothed = img.focal_mean(150, 'circle', 'meters')
-        with gee_semaphore:
-            tile_url = smoothed.getMapId(vp)["tile_fetcher"].url_format
-            thumb_url = smoothed.getThumbURL({**vp, "region": aoi.bounds(), "dimensions": 512, "format": "png"})
         return {
-            "tile_url": tile_url,
-            "thumb_url": thumb_url
+            "tile_url": smoothed.getMapId(vp)["tile_fetcher"].url_format,
+            "thumb_url": smoothed.getThumbURL({**vp, "region": aoi.bounds(), "dimensions": 512, "format": "png"})
         }
         
     with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
@@ -300,25 +301,16 @@ def compute_rusle_map(
     return result
 
 def compute_rusle_stats(
-    aoi_config: dict, start_year: int, end_year: int,
+    aoi_config: dict, year: int,
     reverse_r: bool = False, reverse_k: bool = False, reverse_ls: bool = False,
-    reverse_c: bool = False, reverse_p: bool = False,
-    c_factor_method: str = "van_der_knijff", weights: dict = None
+    reverse_c: bool = False, reverse_p: bool = False
 ):
-    weights = weights or {"R": 1, "K": 1, "LS": 1, "C": 1, "P": 1}
-    cache_key = (
-        json.dumps(aoi_config, sort_keys=True), start_year, end_year, 
-        reverse_r, reverse_k, reverse_ls, reverse_c, reverse_p,
-        c_factor_method, json.dumps(weights, sort_keys=True)
-    )
+    cache_key = (json.dumps(aoi_config, sort_keys=True), year, reverse_r, reverse_k, reverse_ls, reverse_c, reverse_p)
     with _lock:
         if cache_key in _cache_stats:
             return _cache_stats[cache_key]
             
-    res = _build_rusle_images(
-        aoi_config, start_year, end_year, reverse_r, reverse_k, reverse_ls, reverse_c, reverse_p,
-        c_factor_method, weights
-    )
+    res = _build_rusle_images(aoi_config, year, reverse_r, reverse_k, reverse_ls, reverse_c, reverse_p)
     aoi = res["aoi"]
     scale = res["scale"]
     factor_images = res["factor_images"]
@@ -360,27 +352,17 @@ def compute_rusle_stats(
     return result
 
 def compute_rusle_classify(
-    aoi_config: dict, start_year: int, end_year: int, n_classes: int = 5,
+    aoi_config: dict, year: int, n_classes: int = 5,
     reverse_r: bool = False, reverse_k: bool = False, reverse_ls: bool = False,
     reverse_c: bool = False, reverse_p: bool = False,
-    method: str = "natural_breaks", custom_labels: list = None,
-    c_factor_method: str = "van_der_knijff", weights: dict = None
+    method: str = "natural_breaks", custom_labels: list = None
 ):
-    weights = weights or {"R": 1, "K": 1, "LS": 1, "C": 1, "P": 1}
-    cache_key = (
-        json.dumps(aoi_config, sort_keys=True), start_year, end_year, n_classes, 
-        reverse_r, reverse_k, reverse_ls, reverse_c, reverse_p, 
-        method, tuple(custom_labels) if custom_labels else None,
-        c_factor_method, json.dumps(weights, sort_keys=True)
-    )
+    cache_key = (json.dumps(aoi_config, sort_keys=True), year, n_classes, reverse_r, reverse_k, reverse_ls, reverse_c, reverse_p, method, tuple(custom_labels) if custom_labels else None)
     with _lock:
         if cache_key in _cache_classify:
             return _cache_classify[cache_key]
             
-    res = _build_rusle_images(
-        aoi_config, start_year, end_year, reverse_r, reverse_k, reverse_ls, reverse_c, reverse_p,
-        c_factor_method, weights
-    )
+    res = _build_rusle_images(aoi_config, year, reverse_r, reverse_k, reverse_ls, reverse_c, reverse_p)
     aoi = res["aoi"]
     scale = res["scale"]
     A = res["factor_images"]["A"]
@@ -407,15 +389,11 @@ def compute_rusle_classify(
         vis = {"min": 1, "max": len(labels), "palette": _class_palette(len(labels))}
         smoothed = cls.focal_mode(150, 'circle', 'meters')
         
-        with gee_semaphore:
-            tile_url = smoothed.getMapId(vis)["tile_fetcher"].url_format
-            thumb_url = smoothed.getThumbURL({**vis, "region": aoi.bounds(), "dimensions": 512, "format": "png"})
-        
         result = {
             "panels": [{
                 "name": "A",
-                "tile_url": tile_url,
-                "thumb_url": thumb_url,
+                "tile_url": smoothed.getMapId(vis)["tile_fetcher"].url_format,
+                "thumb_url": smoothed.getThumbURL({**vis, "region": aoi.bounds(), "dimensions": 512, "format": "png"}),
                 "class_areas": {lbl: round((areas.get(f"c{i}") or 0)/1e6, 2) for i, lbl in enumerate(labels)}
             }]
         }
@@ -437,32 +415,22 @@ def compute_rusle_classify(
     return result
 
 def compute_rusle_export(
-    aoi_config: dict, start_year: int, end_year: int,
+    aoi_config: dict, year: int,
     reverse_r: bool = False, reverse_k: bool = False, reverse_ls: bool = False,
-    reverse_c: bool = False, reverse_p: bool = False,
-    c_factor_method: str = "van_der_knijff", weights: dict = None
+    reverse_c: bool = False, reverse_p: bool = False
 ):
-    weights = weights or {"R": 1, "K": 1, "LS": 1, "C": 1, "P": 1}
-    cache_key = (
-        json.dumps(aoi_config, sort_keys=True), start_year, end_year, 
-        reverse_r, reverse_k, reverse_ls, reverse_c, reverse_p,
-        c_factor_method, json.dumps(weights, sort_keys=True)
-    )
+    cache_key = (json.dumps(aoi_config, sort_keys=True), year, reverse_r, reverse_k, reverse_ls, reverse_c, reverse_p)
     with _lock:
         if cache_key in _cache_export:
             return _cache_export[cache_key]
 
-    res = _build_rusle_images(
-        aoi_config, start_year, end_year, reverse_r, reverse_k, reverse_ls, reverse_c, reverse_p,
-        c_factor_method, weights
-    )
+    res = _build_rusle_images(aoi_config, year, reverse_r, reverse_k, reverse_ls, reverse_c, reverse_p)
     aoi = res["aoi"]
     factor_images = res["factor_images"]
     risk_index = res["risk_index"]
 
     def get_dl_url(img):
-        with gee_semaphore:
-            return img.getDownloadURL({"region": aoi.bounds(), "scale": 250, "format": "GEO_TIFF", "crs": "EPSG:4326"})
+        return img.getDownloadURL({"region": aoi.bounds(), "scale": 250, "format": "GEO_TIFF", "crs": "EPSG:4326"})
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=7) as dl_executor:
         f_dls = {k: dl_executor.submit(lambda k=k: get_dl_url(factor_images[k])) for k in RECLASS_FACTOR_ORDER + ["A"]}

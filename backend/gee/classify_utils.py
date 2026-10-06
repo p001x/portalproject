@@ -9,7 +9,27 @@ import io
 import requests
 import base64
 from PIL import Image, ImageDraw
+from .aoi_utils import get_bounds_and_center, safe_get_info
+import threading
+import time
+import random
 
+gee_semaphore = threading.BoundedSemaphore(5)
+
+def _safe_gee_call(func, *args, **kwargs):
+    from gee.auth import rotate_credentials
+    retries = 5
+    for i in range(retries):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            err_str = str(e)
+            if "429" in err_str or "Too Many Requests" in err_str or "concurrency" in err_str.lower() or "quota" in err_str.lower():
+                rotate_credentials()
+                if i < retries - 1:
+                    time.sleep((2 ** i) + random.uniform(0, 1))
+                    continue
+            raise
 PANEL_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 def hex_to_rgb(h: str):
@@ -80,8 +100,8 @@ def class_labels(n: int, reverse: bool = False) -> list:
 
 def add_legend_to_image(thumb_url: str, labels: list, palette: list) -> str:
     try:
-        print(f"Fetching thumb_url with timeout=30...")
-        resp = requests.get(thumb_url, timeout=30)
+        print(f"Fetching thumb_url with timeout=90...")
+        resp = requests.get(thumb_url, timeout=90)
         resp.raise_for_status()
         img = Image.open(io.BytesIO(resp.content)).convert("RGBA")
     except Exception as e:
@@ -90,20 +110,36 @@ def add_legend_to_image(thumb_url: str, labels: list, palette: list) -> str:
         
     item_height = 20
     padding = 10
+    legend_width = 180
     legend_height = padding + (len(labels) * item_height) + padding
     
-    new_img = Image.new("RGBA", (img.width, img.height + legend_height), (255, 255, 255, 255))
-    new_img.paste(img, (0, 0))
+    # Create a transparent overlay for the legend
+    overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
     
-    draw = ImageDraw.Draw(new_img)
-    y_offset = img.height + padding
+    # Calculate position (bottom-left corner)
+    margin = 15
+    x0 = margin
+    y0 = img.height - legend_height - margin
+    x1 = x0 + legend_width
+    y1 = y0 + legend_height
+    
+    # Draw semi-transparent rounded rectangle
+    if hasattr(draw, "rounded_rectangle"):
+        draw.rounded_rectangle([x0, y0, x1, y1], radius=8, fill=(255, 255, 255, 210), outline=(200, 200, 200, 255))
+    else:
+        draw.rectangle([x0, y0, x1, y1], fill=(255, 255, 255, 210), outline=(200, 200, 200, 255))
+    
+    y_offset = y0 + padding
     for lbl, color_hex in zip(labels, palette):
-        draw.rectangle([padding, y_offset, padding + 15, y_offset + 15], fill=color_hex, outline="black")
-        draw.text((padding + 25, y_offset + 1), lbl, fill="black")
+        draw.rectangle([x0 + padding, y_offset, x0 + padding + 15, y_offset + 15], fill=color_hex, outline="black")
+        draw.text((x0 + padding + 25, y_offset + 1), lbl, fill="black")
         y_offset += item_height
         
+    img = Image.alpha_composite(img, overlay)
+    
     buf = io.BytesIO()
-    new_img.save(buf, format="PNG")
+    img.save(buf, format="PNG")
     b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
     return f"data:image/png;base64,{b64}"
 
@@ -197,12 +233,27 @@ def quantile_classify(layers: list, aoi, scale: int, n_classes: int, reverse_pal
 
     all_bands = ee.Image.cat([img.rename(nm) for nm, img in zip(names, images)])
     
-    hist_raw = all_bands.reduceRegion(
+    is_global = False
+    try:
+        geom_str = str(aoi.serialize())
+        if "-180" in geom_str and "180" in geom_str and "90" in geom_str and "-90" in geom_str:
+            is_global = True
+    except:
+        pass
+
+    try:
+        area_sqkm = 1e9 if is_global else safe_get_info(aoi.area(maxError=1000).divide(1e6))
+    except Exception:
+        area_sqkm = 0
+
+    calc_geom = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False) if is_global else aoi.bounds(maxError=1000)
+
+    hist_raw = safe_get_info(all_bands.reduceRegion(
         reducer=ee.Reducer.autoHistogram(maxBuckets=100),
-        geometry=aoi,
+        geometry=calc_geom,
         scale=scale,
-        maxPixels=1e9, bestEffort=True,
-    ).getInfo()
+        maxPixels=1e8, bestEffort=True, tileScale=4
+    ))
 
     classified = []
     area_bands = []
@@ -227,10 +278,20 @@ def quantile_classify(layers: list, aoi, scale: int, n_classes: int, reverse_pal
         else:
             bps = []
         
-        cls = ee.Image(1)
-        for i, bp in enumerate(bps):
-            cls = cls.where(img.gt(bp), i + 2)
-        cls = cls.updateMask(img.mask()).clip(aoi)
+        if not bps:
+            cls = ee.Image(1).updateMask(img.mask())
+        else:
+            # Optimize classification by evaluating the potentially complex input image ONCE
+            # instead of chaining multiple .where() conditions that duplicate the graph.
+            thresholds = ee.Image.constant(bps)
+            # img.gt(thresholds) evaluates the 1-band img against all N bands simultaneously.
+            # reduce(ee.Reducer.sum()) counts how many thresholds are passed.
+            # add(1) converts the count into a 1-indexed class (1 to N).
+            cls = img.gt(thresholds).reduce(ee.Reducer.sum()).add(1).updateMask(img.mask())
+        
+        if not is_global:
+            cls = cls.clip(aoi)
+            
         classified.append({"bps": bps, "cls": cls})
         for ci in range(n):
             area_bands.append(
@@ -238,39 +299,65 @@ def quantile_classify(layers: list, aoi, scale: int, n_classes: int, reverse_pal
             )
 
     area_img  = ee.Image.cat(area_bands)
-    area_raw  = area_img.reduceRegion(
-        reducer=ee.Reducer.sum(), geometry=aoi, scale=scale, maxPixels=1e10, bestEffort=True
-    ).getInfo()
+    area_raw  = safe_get_info(area_img.reduceRegion(
+        reducer=ee.Reducer.sum(), geometry=calc_geom, scale=scale, maxPixels=1e8, bestEffort=True, tileScale=4
+    ))
 
     panels = [None] * len(names)
     import concurrent.futures
-    
-    def process_panel(j, nm, title, bps, cls):
+
+    # Pre-compute the AOI region geometry ONCE outside threads to avoid N redundant getInfo() calls.
+    # Each process_panel thread would otherwise call get_bounds_and_center(aoi) independently.
+    if is_global:
+        _panel_region = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False)
+    else:
+        try:
+            _aoi_bounds, _ = get_bounds_and_center(aoi)
+            _panel_region = ee.Geometry.Polygon([_aoi_bounds], "EPSG:4326", False)
+        except Exception:
+            _panel_region = aoi.bounds(maxError=1000)
+
+    def process_panel(j, nm, title, bps, cls, area_sqkm):
         print(f"[{nm}] process_panel start")
+        
+        # Removed hillshade to fix tiling strip artifacts
+        cls_rgb = cls.visualize(**vis).uint8()
+
         if water_mask is not None:
-            cls_rgb = cls.visualize(**vis)
             water_rgb = water_mask.updateMask(water_mask).visualize(palette=["#08306b"])
-            final_panel = ee.ImageCollection([cls_rgb, water_rgb]).mosaic().clip(aoi)
-            tile_url = final_panel.getMapId()["tile_fetcher"].url_format
-            thumb_url = final_panel.getThumbURL({
-                "region": aoi.bounds(), "dimensions": 1024, "format": "png",
-            })
+            final_panel = ee.ImageCollection([cls_rgb, water_rgb]).mosaic()
+            if not is_global:
+                final_panel = final_panel.clip(aoi)
+                
+            # Pass vis to getMapId so classified tiles are properly coloured (was missing, causing unstyled maps)
+            # NOTE: final_panel is already an RGB-visualized mosaic (3 bands), so getMapId must NOT
+            # receive a palette-bearing vis dict — that only works on single-band images.
+            with gee_semaphore:
+                tile_url = _safe_gee_call(lambda: final_panel.getMapId()["tile_fetcher"].url_format)
+                thumb_url = _safe_gee_call(lambda: final_panel.getThumbURL({
+                    "region": _panel_region, "dimensions": 512, "crs": "EPSG:4326", "format": "png",
+                }))
         else:
-            tile_url  = cls.getMapId(vis)["tile_fetcher"].url_format
-            thumb_url = cls.getThumbURL({
-                **vis, "region": aoi.bounds(), "dimensions": 1024, "format": "png",
-            })
+            with gee_semaphore:
+                tile_url  = _safe_gee_call(lambda: cls.getMapId(vis)["tile_fetcher"].url_format)
+                thumb_url = _safe_gee_call(lambda: cls_rgb.getThumbURL({
+                    "region": _panel_region, "dimensions": 512, "crs": "EPSG:4326", "format": "png",
+                }))
         print(f"[{nm}] getMapId and getThumbURL done")
         try:
-            print(f"[{nm}] getDownloadURL start")
-            download_url = cls.getDownloadURL({"scale": scale, "region": aoi.bounds(), "format": "GEO_TIFF"}) if hasattr(cls, "getDownloadURL") else None
-            print(f"[{nm}] getDownloadURL done")
+            if is_global or area_sqkm > 50000:
+                download_url = None
+            else:
+                print(f"[{nm}] getDownloadURL start")
+                with gee_semaphore:
+                    download_url = _safe_gee_call(lambda: cls.getDownloadURL({"scale": scale, "region": calc_geom, "format": "GEO_TIFF", "crs": "EPSG:4326"})) if hasattr(cls, "getDownloadURL") else None
+                print(f"[{nm}] getDownloadURL done")
         except Exception as e:
             print(f"[{nm}] getDownloadURL error:", e)
             download_url = None
             
-        # Add legend to the downloaded static map only if requested
-        if add_legend:
+        # Add legend to the downloaded static map only if requested and thumb_url exists
+        if add_legend and thumb_url:
             thumb_url_with_legend = add_legend_to_image(thumb_url, lbls, pal)
         else:
             thumb_url_with_legend = thumb_url
@@ -303,7 +390,7 @@ def quantile_classify(layers: list, aoi, scale: int, n_classes: int, reverse_pal
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(names), 10)) as executor:
         futures = {
             executor.submit(
-                process_panel, j, names[j], titles[j], classified[j]["bps"], classified[j]["cls"]
+                process_panel, j, names[j], titles[j], classified[j]["bps"], classified[j]["cls"], area_sqkm
             ): j for j in range(len(names))
         }
         concurrent.futures.wait(futures.keys())

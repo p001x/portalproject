@@ -68,6 +68,12 @@ def recolor_image(img_array: np.ndarray,
 
 def get_lon_formatter(span: float):
     def format_lon(x, pos):
+        # Wrap longitudes > 180 back to negative (West)
+        while x > 180:
+            x -= 360
+        while x < -180:
+            x += 360
+            
         val = abs(x)
         deg = int(val)
         rem = (val - deg) * 60
@@ -238,7 +244,12 @@ def _cached_cartography(
             else:
                 orig_pal = ["#4575b4", "#d73027", "#fc8d59", "#fee08b", "#91cf60", "#1a9850"]
         elif "dvi" in title_lower or "drought" in title_lower:
-            orig_pal = ["#1a9850", "#d9ef8b", "#fee08b", "#f46d43", "#a50026"]
+            if is_categorical:
+                # Matches class_palette(5) in classify_utils.py
+                orig_pal = ["#1a9850", "#a6d96a", "#ffffbf", "#fdae61", "#a50026"]
+            else:
+                # Matches DVI_VIS in drought.py
+                orig_pal = ["#1a9641", "#a6d96a", "#ffffbf", "#fdae61", "#d7191c"]
         elif "no2" in title_lower or "air quality" in title_lower:
             orig_pal = ["#000004", "#3b0f70", "#8c2981", "#de4968", "#fe9f6d", "#fcfdbf"]
         elif "change" in title_lower:

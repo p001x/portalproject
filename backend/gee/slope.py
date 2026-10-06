@@ -13,38 +13,52 @@ _lock = Lock()
 def _build_slope_base(aoi_config: dict):
     from gee.aoi_utils import get_aoi_geometry
     aoi = get_aoi_geometry(aoi_config)
-    area_sqkm = aoi.area().divide(1e6).getInfo()
-    if area_sqkm > 10000:
-        dynamic_scale = 500
-    elif area_sqkm > 2000:
-        dynamic_scale = 250
-    elif area_sqkm > 500:
-        dynamic_scale = 100
-    else:
-        dynamic_scale = 30
+    from gee.aoi_utils import get_dynamic_scale
+    dynamic_scale = get_dynamic_scale(aoi)
 
-    dem = ee.Image("USGS/SRTMGL1_003").select("elevation").clip(aoi)
+    is_world = aoi_config.get("type") == "world"
+
+    dem = ee.Image("USGS/SRTMGL1_003").select("elevation").unmask(ee.ImageCollection("COPERNICUS/DEM/GLO30").select("DEM").mosaic(), False)
+    if not is_world:
+        dem = dem.clip(aoi)
+        
     terrain = ee.Terrain.products(dem)
-    slope = terrain.select("slope").clip(aoi)
-    aspect = terrain.select("aspect").clip(aoi)
-    hillshade = terrain.select("hillshade").clip(aoi)
+    slope = terrain.select("slope")
+    aspect = terrain.select("aspect")
+    hillshade = terrain.select("hillshade")
+    if not is_world:
+        slope = slope.clip(aoi)
+        aspect = aspect.clip(aoi)
+        hillshade = hillshade.clip(aoi)
 
-    focal_mean = dem.reduceNeighborhood(reducer=ee.Reducer.mean(), kernel=ee.Kernel.circle(radius=300, units='meters'))
-    tpi = dem.subtract(focal_mean).rename('tpi').clip(aoi)
-    tri = dem.reduceNeighborhood(reducer=ee.Reducer.stdDev(), kernel=ee.Kernel.square(radius=1, units='pixels')).rename('tri').clip(aoi)
+    # Use pixels for kernel so it scales perfectly up to global level
+    focal_mean = dem.reduceNeighborhood(reducer=ee.Reducer.mean(), kernel=ee.Kernel.circle(radius=10, units='pixels'))
+    tpi = dem.subtract(focal_mean).rename('tpi')
+    tri = dem.reduceNeighborhood(reducer=ee.Reducer.stdDev(), kernel=ee.Kernel.square(radius=1, units='pixels')).rename('tri')
+    if not is_world:
+        tpi = tpi.clip(aoi)
+        tri = tri.clip(aoi)
 
-    merit = ee.Image("MERIT/Hydro/v1_0_1").clip(aoi)
-    upa = merit.select("upa").rename("upa").clip(aoi)
-    dir = merit.select("dir").rename("dir").clip(aoi)
+    merit = ee.Image("MERIT/Hydro/v1_0_1")
+    if not is_world:
+        merit = merit.clip(aoi)
+    upa = merit.select("upa").rename("upa")
+    dir = merit.select("dir").rename("dir")
 
-    contours = dem.mod(50).lt(2).rename("contours").clip(aoi)
+    contours = dem.mod(50).lt(2).rename("contours")
+    if not is_world:
+        contours = contours.clip(aoi)
 
     # Landslide Susceptibility Index (LSI): composite of slope, tri, and upa
     # Normalized roughly: slope(0-45)*0.5 + tri(0-20)*1.0 + upa(0-100)*0.2
-    lsi = slope.multiply(0.5).add(tri.multiply(1.0)).add(upa.multiply(0.2)).rename('lsi').clip(aoi)
+    lsi = slope.multiply(0.5).add(tri.multiply(1.0)).add(upa.multiply(0.2)).rename('lsi')
+    if not is_world:
+        lsi = lsi.clip(aoi)
 
     # Solar Insolation (Synthetic): Hillshade at different azimuths (morning + afternoon)
-    solar = ee.Terrain.hillshade(dem, 120, 45).add(ee.Terrain.hillshade(dem, 240, 45)).rename('solar').clip(aoi)
+    solar = ee.Terrain.hillshade(dem, 120, 45).add(ee.Terrain.hillshade(dem, 240, 45)).rename('solar')
+    if not is_world:
+        solar = solar.clip(aoi)
 
     return aoi, dynamic_scale, dem, slope, aspect, hillshade, tpi, tri, upa, dir, contours, lsi, solar
 
@@ -78,30 +92,42 @@ def compute_slope_map(aoi_config: dict) -> dict:
     contours_masked = contours.updateMask(contours)
     contours_map_id = contours_masked.getMapId({"palette": ["#000000"]})
 
-    bounds = aoi.bounds().getInfo()["coordinates"][0]
-    center = [(bounds[0][1] + bounds[2][1]) / 2, (bounds[0][0] + bounds[2][0]) / 2]
+    try:
+        bounds_info = aoi.bounds(maxError=1000).getInfo()
+        if bounds_info.get("type") == "Polygon":
+            bounds = bounds_info.get("coordinates", [[[0,0]]])[0]
+        elif bounds_info.get("type") == "MultiPolygon":
+            bounds = bounds_info.get("coordinates", [[[[0,0]]]])[0][0]
+        else:
+            bounds = [[0,0],[0,0],[0,0],[0,0]]
+            
+        center_coords = aoi.centroid(maxError=1000).getInfo().get("coordinates", [0, 0])
+        center = [center_coords[1], center_coords[0]]
+    except Exception:
+        bounds = [[0,0],[0,0],[0,0],[0,0]]
+        center = [0, 0]
 
     result = {
         "slope_tile_url": slope_map_id["tile_fetcher"].url_format,
-        "slope_thumb_url": slope.getThumbURL({**slope_vis, "region": aoi.bounds(), "dimensions": 800, "format": "png"}),
+        "slope_thumb_url": slope.getThumbURL({**slope_vis, "region": aoi.bounds(), "dimensions": 800, "crs": "EPSG:4326", "format": "png"}),
         "hillshade_tile_url": hillshade_map_id["tile_fetcher"].url_format,
-        "hillshade_thumb_url": hillshade.getThumbURL({**hillshade_vis, "region": aoi.bounds(), "dimensions": 800, "format": "png"}),
+        "hillshade_thumb_url": hillshade.getThumbURL({**hillshade_vis, "region": aoi.bounds(), "dimensions": 800, "crs": "EPSG:4326", "format": "png"}),
         "aspect_tile_url": aspect_map_id["tile_fetcher"].url_format,
-        "aspect_thumb_url": aspect.getThumbURL({**aspect_vis, "region": aoi.bounds(), "dimensions": 800, "format": "png"}),
+        "aspect_thumb_url": aspect.getThumbURL({**aspect_vis, "region": aoi.bounds(), "dimensions": 800, "crs": "EPSG:4326", "format": "png"}),
         "tpi_tile_url": tpi_map_id["tile_fetcher"].url_format,
-        "tpi_thumb_url": tpi.getThumbURL({**tpi_vis, "region": aoi.bounds(), "dimensions": 800, "format": "png"}),
+        "tpi_thumb_url": tpi.getThumbURL({**tpi_vis, "region": aoi.bounds(), "dimensions": 800, "crs": "EPSG:4326", "format": "png"}),
         "tri_tile_url": tri_map_id["tile_fetcher"].url_format,
-        "tri_thumb_url": tri.getThumbURL({**tri_vis, "region": aoi.bounds(), "dimensions": 800, "format": "png"}),
+        "tri_thumb_url": tri.getThumbURL({**tri_vis, "region": aoi.bounds(), "dimensions": 800, "crs": "EPSG:4326", "format": "png"}),
         "upa_tile_url": upa_map_id["tile_fetcher"].url_format,
-        "upa_thumb_url": upa.getThumbURL({**upa_vis, "region": aoi.bounds(), "dimensions": 800, "format": "png"}),
+        "upa_thumb_url": upa.getThumbURL({**upa_vis, "region": aoi.bounds(), "dimensions": 800, "crs": "EPSG:4326", "format": "png"}),
         "dir_tile_url": dir_map_id["tile_fetcher"].url_format,
-        "dir_thumb_url": dir.getThumbURL({**dir_vis, "region": aoi.bounds(), "dimensions": 800, "format": "png"}),
+        "dir_thumb_url": dir.getThumbURL({**dir_vis, "region": aoi.bounds(), "dimensions": 800, "crs": "EPSG:4326", "format": "png"}),
         "lsi_tile_url": lsi_map_id["tile_fetcher"].url_format,
-        "lsi_thumb_url": lsi.getThumbURL({**lsi_vis, "region": aoi.bounds(), "dimensions": 800, "format": "png"}),
+        "lsi_thumb_url": lsi.getThumbURL({**lsi_vis, "region": aoi.bounds(), "dimensions": 800, "crs": "EPSG:4326", "format": "png"}),
         "solar_tile_url": solar_map_id["tile_fetcher"].url_format,
-        "solar_thumb_url": solar.getThumbURL({**solar_vis, "region": aoi.bounds(), "dimensions": 800, "format": "png"}),
+        "solar_thumb_url": solar.getThumbURL({**solar_vis, "region": aoi.bounds(), "dimensions": 800, "crs": "EPSG:4326", "format": "png"}),
         "contours_tile_url": contours_map_id["tile_fetcher"].url_format,
-        "contours_thumb_url": contours_masked.getThumbURL({"palette": ["#000000"], "region": aoi.bounds(), "dimensions": 800, "format": "png"}),
+        "contours_thumb_url": contours_masked.getThumbURL({"palette": ["#000000"], "region": aoi.bounds(), "dimensions": 800, "crs": "EPSG:4326", "format": "png"}),
         "center": center,
         "bbox": bounds,
         "district": aoi_config.get("district", aoi_config.get("name", "Custom AOI")),
@@ -138,12 +164,12 @@ def compute_slope_stats(aoi_config: dict) -> dict:
                 .combine(ee.Reducer.max(), sharedInputs=True)
                 .combine(ee.Reducer.percentile([25, 75]), sharedInputs=True)
                 .combine(ee.Reducer.min(), sharedInputs=True),
-                geometry=aoi, scale=dynamic_scale, maxPixels=1e10,
+                geometry=aoi.bounds(maxError=1000), scale=dynamic_scale, maxPixels=1e10,
             ).getInfo()
         )
         f_area = executor.submit(
             lambda: area_img.reduceRegion(
-                reducer=ee.Reducer.sum(), geometry=aoi, scale=dynamic_scale, maxPixels=1e10
+                reducer=ee.Reducer.sum(), geometry=aoi.bounds(maxError=1000), scale=dynamic_scale, maxPixels=1e10
             ).getInfo()
         )
         combined_stats = f_stats.result()
@@ -328,7 +354,7 @@ def delineate_watershed(lat: float, lon: float, level: int = 12) -> dict:
     props = geojson.get("properties", {})
     area_km2 = props.get("SUB_AREA")
     if area_km2 is None:
-        area_km2 = basin.area().divide(1e6).getInfo()
+        area_km2 = basin.bounds().area(maxError=1000).divide(1e6).getInfo()
         
     return {
         "geojson": geojson,
@@ -351,7 +377,7 @@ def compute_earthwork(polygon_coords: list, target_elevation: float) -> dict:
 
     
     # 30m SRTM DEM
-    dem = ee.Image("USGS/SRTMGL1_003").select("elevation").clip(poly)
+    dem = ee.Image("USGS/SRTMGL1_003").select("elevation").unmask(ee.ImageCollection("COPERNICUS/DEM/GLO30").select("DEM").mosaic(), False).clip(poly)
     
     # Difference = DEM - Target
     # Positive means DEM is higher than target -> Cut

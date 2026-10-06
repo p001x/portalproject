@@ -3,15 +3,7 @@ import json
 import math
 import ee
 
-def get_dynamic_scale(geom):
-    try:
-        area_sqkm = geom.area().divide(1e6).getInfo()
-        if area_sqkm > 10000: return 500
-        elif area_sqkm > 2000: return 250
-        elif area_sqkm > 500: return 100
-        else: return 30
-    except:
-        return 250
+from gee.aoi_utils import get_dynamic_scale
 
 from cachetools import TTLCache
 from threading import Lock, BoundedSemaphore
@@ -71,38 +63,96 @@ def _build_lsi_images(
         from gee.aoi_utils import get_aoi_geometry
         aoi = get_aoi_geometry(aoi_config)
 
-        lithology_img = ee.Image(LITHOLOGY_ASSET).clip(aoi)
-        dem = ee.Image("USGS/SRTMGL1_003").select("elevation").clip(aoi)
+        is_global = False
+        try:
+            geom_str = str(aoi.serialize())
+            if "-180" in geom_str and "180" in geom_str and "90" in geom_str and "-90" in geom_str:
+                is_global = True
+        except:
+            pass
+
+        district = aoi_config.get("district", "")
+        is_rwanda = district != "" or "rwanda" in aoi_config.get("name", "").lower()
+
+        lithology_img = ee.Image(1).clip(aoi)
+        dem = ee.Image("USGS/SRTMGL1_003").select("elevation").unmask(ee.ImageCollection("COPERNICUS/DEM/GLO30").select("DEM").mosaic(), False).clip(aoi)
         slope = ee.Terrain.slope(dem)
         flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").clip(aoi)
         slope_rad = slope.multiply(math.pi / 180)
         twi = flow_acc.add(1).log().subtract(slope_rad.tan().add(0.001).log()).rename("TWI")
 
+        try:
+            from gee.aoi_utils import get_bounds_and_center
+            b, _ = get_bounds_and_center(aoi)
+            lats = [pt[1] for pt in b]
+            use_era5_precip = max(lats) > 50 or min(lats) < -50
+        except:
+            use_era5_precip = True
+
         n_years = max(1, end_year - start_year + 1)
-        rainfall = (
-            ee.ImageCollection("UCSB-CHG/CHIRPS/PENTAD")
-            .filterDate(f"{start_year}-01-01", f"{end_year + 1}-01-01")
-            .filterBounds(aoi).select("precipitation")
-            .sum().divide(n_years).clip(aoi).rename("rainfall")
-        )
+        if use_era5_precip:
+            rainfall = (
+                ee.ImageCollection("ECMWF/ERA5_LAND/MONTHLY_AGGR")
+                .select("total_precipitation_sum")
+                .filterDate(f"{start_year}-01-01", f"{end_year + 1}-01-01")
+                .filterBounds(aoi)
+                .sum().multiply(1000).divide(n_years).clip(aoi).rename("rainfall")
+            )
+        else:
+            rainfall = (
+                ee.ImageCollection("UCSB-CHG/CHIRPS/PENTAD")
+                .filterDate(f"{start_year}-01-01", f"{end_year + 1}-01-01")
+                .filterBounds(aoi).select("precipitation")
+                .sum().divide(n_years).clip(aoi).rename("rainfall")
+            )
 
         landcover = ee.Image("ESA/WorldCover/v200/2021").select("Map").clip(aoi)
-        soiltype = ee.Image("ISDASOIL/Africa/v1/texture_class").select("texture_0_20").clip(aoi)
-
-        roads = ee.FeatureCollection("projects/sat-io/open-datasets/GRIP4/Africa").filterBounds(aoi)
-        dist_roads = roads.distance(searchRadius=20000, maxError=500).clip(aoi).rename("dist_roads")
-
-        # NDVI (Dynamic Vegetation)
-        if start_year >= 2016:
-            s2 = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED").filterDate(f"{start_year}-01-01", f"{end_year + 1}-01-01").filterBounds(aoi).median()
-            ndvi = s2.normalizedDifference(["B8", "B4"]).rename("ndvi")
+        
+        if is_rwanda:
+            soiltype = ee.Image("ISDASOIL/Africa/v1/texture_class").select("texture_0_20").clip(aoi)
+            roads = ee.FeatureCollection("projects/sat-io/open-datasets/GRIP4/Africa").filterBounds(aoi)
         else:
-            l8 = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").filterDate(f"{start_year}-01-01", f"{end_year + 1}-01-01").filterBounds(aoi).median()
-            ndvi = l8.normalizedDifference(["SR_B5", "SR_B4"]).rename("ndvi")
+            soiltype = ee.Image("OpenLandMap/SOL/SOL_TEXTURE-CLASS_USDA-315_M/v02").select("b0").clip(aoi)
+            roads = ee.FeatureCollection("projects/sat-io/open-datasets/GRIP4/GlobalRoads").filterBounds(aoi)
+        
+        if not is_global:
+            dist_roads = roads.distance(searchRadius=20000, maxError=500).clip(aoi).rename("dist_roads")
+        else:
+            road_mask = ee.Image(0).paint(roads, 1).eq(1)
+            dist_roads = road_mask.fastDistanceTransform(256).multiply(5000).divide(1000).clip(aoi).rename("dist_roads")
+
+        # NDVI (Dynamic Vegetation) with Cloud Masking
+        if is_global:
+            # Fallback to MODIS for large/global areas to avoid S2/L8 memory limits
+            modis = ee.ImageCollection("MODIS/061/MOD13Q1").filterDate(f"{start_year}-01-01", f"{end_year + 1}-01-01").filterBounds(aoi).select("NDVI").median()
+            ndvi = modis.divide(10000).rename("ndvi")
+        else:
+            if start_year >= 2016:
+                def mask_s2_clouds(image):
+                    qa = image.select('QA60')
+                    cloudBitMask = 1 << 10
+                    cirrusBitMask = 1 << 11
+                    mask = qa.bitwiseAnd(cloudBitMask).eq(0).And(qa.bitwiseAnd(cirrusBitMask).eq(0))
+                    return image.updateMask(mask)
+                s2 = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED").filterDate(f"{start_year}-01-01", f"{end_year + 1}-01-01").filterBounds(aoi).map(mask_s2_clouds).median()
+                ndvi = s2.normalizedDifference(["B8", "B4"]).rename("ndvi")
+            else:
+                def mask_l8_clouds(image):
+                    qa = image.select('QA_PIXEL')
+                    cloud_shadow_bit_mask = 1 << 4
+                    clouds_bit_mask = 1 << 3
+                    mask = qa.bitwiseAnd(cloud_shadow_bit_mask).eq(0).And(qa.bitwiseAnd(clouds_bit_mask).eq(0))
+                    return image.updateMask(mask)
+                l8 = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2").filterDate(f"{start_year}-01-01", f"{end_year + 1}-01-01").filterBounds(aoi).map(mask_l8_clouds).median()
+                ndvi = l8.normalizedDifference(["SR_B5", "SR_B4"]).rename("ndvi")
             
         # Rivers (HydroSHEDS Free Flowing Rivers)
         rivers = ee.FeatureCollection("WWF/HydroSHEDS/v1/FreeFlowingRivers").filterBounds(aoi)
-        dist_rivers = rivers.distance(searchRadius=20000, maxError=500).clip(aoi).rename("dist_rivers")
+        if not is_global:
+            dist_rivers = rivers.distance(searchRadius=20000, maxError=500).clip(aoi).rename("dist_rivers")
+        else:
+            river_mask = ee.Image(0).paint(rivers, 1).eq(1)
+            dist_rivers = river_mask.fastDistanceTransform(256).multiply(5000).divide(1000).clip(aoi).rename("dist_rivers")
 
         scale = get_dynamic_scale(aoi)
         continuous_bands = ee.Image.cat([
@@ -115,9 +165,10 @@ def _build_lsi_images(
         ])
         
         scale_hist = scale * 2 if scale else 100
+        calc_geom = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False) if is_global else aoi.bounds(maxError=1000)
         hist_raw = continuous_bands.reduceRegion(
             reducer=ee.Reducer.autoHistogram(maxBuckets=50),
-            geometry=aoi,
+            geometry=calc_geom,
             scale=scale_hist,
             maxPixels=10000, bestEffort=True,
         ).getInfo()
@@ -152,7 +203,7 @@ def _build_lsi_images(
             .where(landcover.eq(40), 4).where(landcover.eq(60), 5)
             .clip(aoi).rename("landcover_r")
         )
-        litho_r = lithology_img.remap([1,2,3,4,5,6,7,8,9,10], [3,4,5,2,1,3,4,2,5,1], 1).clip(aoi).rename("litho_r")
+        litho_r = ee.Image(1).clip(aoi).rename("litho_r")
         soiltype_r = soiltype.remap([1,2,3,4,5,6,7,8,9,10,11,12], [4,4,3,3,2,3,4,5,5,2,2,1], 1).clip(aoi).rename("soiltype_r")
 
         if reverse_slope: slope_r = ee.Image(6).subtract(slope_r).rename("slope_r")
@@ -173,7 +224,7 @@ def _build_lsi_images(
 
         lsi_hist = lsi.reduceRegion(
             reducer=ee.Reducer.autoHistogram(maxBuckets=50),
-            geometry=aoi,
+            geometry=calc_geom,
             scale=scale_hist,
             maxPixels=10000, bestEffort=True,
         ).getInfo()
@@ -213,7 +264,15 @@ def _build_lsi_images(
             "landcover": landcover,
         }
 
-        res = (aoi, lsi, lsi_class, factors, raw_factors)
+        res = {
+            "is_global": is_global,
+            "aoi": aoi,
+            "scale": scale,
+            "lsi": lsi,
+            "lsi_class": lsi_class,
+            "factors": factors,
+            "raw_factors": raw_factors
+        }
         try:
             cached.set_result(res)
         except concurrent.futures.InvalidStateError:
@@ -244,10 +303,11 @@ def compute_landslide_map(
         if cache_key in _cache_map:
             return _cache_map[cache_key]
 
-    aoi, lsi, lsi_class, factors, raw_factors = _build_lsi_images(
+    res = _build_lsi_images(
         aoi_config, start_year, end_year, reverse_slope, reverse_rainfall,
         reverse_litho, reverse_soiltype, reverse_landcover, reverse_twi, reverse_dist, weights=weights
     )
+    aoi, lsi, lsi_class, factors, raw_factors, is_global = res["aoi"], res["lsi"], res["lsi_class"], res["factors"], res["raw_factors"], res["is_global"]
 
     with gee_semaphore:
         try:
@@ -271,7 +331,8 @@ def compute_landslide_map(
                 pass
 
     centroid = aoi.centroid(maxError=100).coordinates().getInfo()
-    bounds = aoi.bounds().getInfo()["coordinates"][0]
+    from gee.aoi_utils import get_bounds_and_center
+    bounds, center = get_bounds_and_center(aoi)
 
     result = {
         "lsi_tile_url": lsi_class_map_id["tile_fetcher"].url_format,
@@ -302,26 +363,28 @@ def compute_landslide_stats(
         if cache_key in _cache_stats:
             return _cache_stats[cache_key]
 
-    aoi, lsi, lsi_class, factors, raw_factors = _build_lsi_images(
+    res = _build_lsi_images(
         aoi_config, start_year, end_year, reverse_slope, reverse_rainfall,
         reverse_litho, reverse_soiltype, reverse_landcover, reverse_twi, reverse_dist, weights=weights
     )
+    aoi, lsi, lsi_class, factors, raw_factors, is_global = res["aoi"], res["lsi"], res["lsi_class"], res["factors"], res["raw_factors"], res["is_global"]
 
     class_area_bands = ee.Image.cat(
         [lsi_class.eq(i + 1).multiply(ee.Image.pixelArea()).rename(f"c{i}") for i in range(5)]
     )
 
+    calc_geom = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False) if is_global else aoi.bounds(maxError=1000)
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         f_stats = executor.submit(
             lambda: lsi.reduceRegion(
                 reducer=ee.Reducer.mean().combine(ee.Reducer.min(), sharedInputs=True)
                 .combine(ee.Reducer.max(), sharedInputs=True).combine(ee.Reducer.stdDev(), sharedInputs=True),
-                geometry=aoi, scale=get_dynamic_scale(aoi), maxPixels=1e10,
+                geometry=calc_geom, scale=get_dynamic_scale(aoi), maxPixels=1e10,
             ).getInfo()
         )
         f_area = executor.submit(
             lambda: class_area_bands.reduceRegion(
-                reducer=ee.Reducer.sum(), geometry=aoi, scale=get_dynamic_scale(aoi), maxPixels=1e10,
+                reducer=ee.Reducer.sum(), geometry=calc_geom, scale=get_dynamic_scale(aoi), maxPixels=1e10,
             ).getInfo()
         )
         stats_raw = f_stats.result()
@@ -419,7 +482,7 @@ def compute_landslide_export(
 
     def fetch_urls(key, img):
         palette = custom_palettes.get(key, LSI_VIS["palette"])
-        vis = {"min": 1, "max": 5, "palette": palette, "region": aoi.bounds(), "dimensions": 800, "format": "png"}
+        vis = {"min": 1, "max": 5, "palette": palette, "region": calc_geom, "dimensions": 800, "crs": "EPSG:4326", "format": "png"}
         with gee_semaphore:
             try:
                 thumb = img.getThumbURL(vis)
@@ -427,7 +490,7 @@ def compute_landslide_export(
                 thumb = None
                 print(f"[{key}] Thumb error: {e}")
             try:
-                dl = img.getDownloadURL({"region": aoi.bounds(), "scale": 100, "format": "GEO_TIFF", "crs": "EPSG:4326"})
+                dl = img.getDownloadURL({"region": calc_geom, "scale": 100, "format": "GEO_TIFF", "crs": "EPSG:4326"})
             except Exception as e:
                 dl = None
                 print(f"[{key}] DL error: {e}")
@@ -444,9 +507,9 @@ def compute_landslide_export(
             with gee_semaphore:
                 return img.getDownloadURL(params)
 
-        f_lsi_thumb = executor.submit(lambda: safe_thumb(lsi_class, {**LSI_VIS, "region": aoi.bounds(), "dimensions": 800, "format": "png"}))
-        f_lsi_dl = executor.submit(lambda: safe_dl(lsi_class, {"region": aoi.bounds(), "scale": 100, "format": "GEO_TIFF", "crs": "EPSG:4326"}))
-        f_lsi_class_thumb = executor.submit(lambda: safe_thumb(lsi_class, {**LSI_VIS, "min":1, "max":5, "region": aoi.bounds(), "dimensions": 800, "format": "png"}))
+        f_lsi_thumb = executor.submit(lambda: safe_thumb(lsi_class, {**LSI_VIS, "region": calc_geom, "dimensions": 800, "crs": "EPSG:4326", "format": "png"}))
+        f_lsi_dl = executor.submit(lambda: safe_dl(lsi_class, {"region": calc_geom, "scale": 100, "format": "GEO_TIFF", "crs": "EPSG:4326"}))
+        f_lsi_class_thumb = executor.submit(lambda: safe_thumb(lsi_class, {**LSI_VIS, "min":1, "max":5, "region": calc_geom, "dimensions": 800, "crs": "EPSG:4326", "format": "png"}))
 
         for f in concurrent.futures.as_completed(futures_factors):
             k, urls = f.result()

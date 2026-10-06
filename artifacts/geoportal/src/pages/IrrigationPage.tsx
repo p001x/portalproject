@@ -156,6 +156,11 @@ export function IrrigationPage() {
   const continuousTileUrl = mapData?.tile_url;
   const activeTileUrl = (layerMode === "classified" && !isContinuous) ? classifiedTileUrl : continuousTileUrl;
   
+  const activeAreas = useMemo(() => {
+    if (layerMode !== "classified" || !mapData?.classify?.class_areas) return undefined;
+    return mapData.classify.class_areas;
+  }, [mapData, layerMode]);
+  
   const dynamicLegend = useMemo(() => {
     if (isContinuous) return DEFICIT_LEGEND;
     return Array.from({ length: activeNClasses }).map((_, i) => ({
@@ -612,11 +617,12 @@ export function IrrigationPage() {
                   <div className="bg-card border rounded-lg p-4">
                     <MapExportControls
                       tileUrl={activeLayer === "deficit" ? (activeTileUrl || mapData.tile_url) : mapData.factor_maps?.[activeLayer]?.tile_url || mapData.tile_url}
-                      thumbUrl={activeLayer === "deficit" ? exportData.thumb_url : exportData.factors[activeLayer]?.thumb_url}
-                      downloadUrl={activeLayer === "deficit" ? exportData.download_url : exportData.factors[activeLayer]?.download_url}
+                      thumbUrl={activeLayer === "deficit" ? (layerMode === "classified" && !isContinuous ? (mapData?.classify?.panels?.[0]?.clean_thumb_url || mapData?.classify?.panels?.[0]?.thumb_url) : exportData.thumb_url) : exportData.factors[activeLayer]?.thumb_url}
+                      downloadUrl={activeLayer === "deficit" ? (layerMode === "classified" && !isContinuous ? (mapData?.classify?.panels?.[0]?.download_url || exportData.download_url) : exportData.download_url) : exportData.factors[activeLayer]?.download_url}
                       district={effectiveDistrictName}
-                      title={activeLayer === "deficit" ? "Irrigation Deficit (mm)" : activeLayer === "etc" ? "Crop ET (mm)" : "Precipitation (mm)"}
+                      title={activeLayer === "deficit" ? (layerMode === "classified" && !isContinuous ? "Irrigation Deficit Classes" : "Irrigation Deficit (mm)") : activeLayer === "etc" ? "Crop ET (mm)" : "Precipitation (mm)"}
                       bbox={mapData?.bbox as unknown as number[][]}
+                      classAreas={activeLayer === "deficit" && layerMode === "classified" && !isContinuous ? activeAreas : undefined}
                     />
                   </div>
                 ) : (
@@ -640,4 +646,5 @@ export function IrrigationPage() {
     </div>
   );
 }
+
 

@@ -6,15 +6,7 @@ import geopandas as gpd
 import pandas as pd
 import requests
 
-def get_dynamic_scale(geom):
-    try:
-        area_sqkm = geom.area().divide(1e6).getInfo()
-        if area_sqkm > 10000: return 500
-        elif area_sqkm > 2000: return 250
-        elif area_sqkm > 500: return 100
-        else: return 30
-    except:
-        return 250
+from gee.aoi_utils import get_dynamic_scale
 
 from cachetools import TTLCache
 from threading import Lock
@@ -794,9 +786,9 @@ def compute_accessibility_export(aoi_config: dict, amenities: list[str], dest_am
     acc_final = acc_rgb.blend(roads_rgb).blend(points_rgb)
 
     result = {
-        "travel_time_thumb_url": tt_final.getThumbURL({"region": aoi.bounds(), "dimensions": 800, "format": "png"}),
+        "travel_time_thumb_url": tt_final.getThumbURL({"region": aoi.bounds(), "dimensions": 800, "crs": "EPSG:4326", "format": "png"}),
         "travel_time_download_url": travel_time.getDownloadURL({"region": aoi.bounds(), "scale": 100, "format": "GEO_TIFF", "crs": "EPSG:4326"}),
-        "acc_class_thumb_url": acc_final.getThumbURL({"region": aoi.bounds(), "dimensions": 800, "format": "png"}),
+        "acc_class_thumb_url": acc_final.getThumbURL({"region": aoi.bounds(), "dimensions": 800, "crs": "EPSG:4326", "format": "png"}),
         "factor_maps": {},
     }
     with _lock:

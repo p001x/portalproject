@@ -92,7 +92,7 @@ def compute_air_pollution_map(aoi_config: dict, start_date: str, end_date: str) 
 
     result = {
         "tile_url": map_id["tile_fetcher"].url_format,
-        "thumb_url": comp_no2.getThumbURL({**vis_params, "region": aoi.bounds(), "dimensions": 800, "format": "png"}),
+        "thumb_url": comp_no2.getThumbURL({**vis_params, "region": aoi.bounds(), "dimensions": 800, "crs": "EPSG:4326", "format": "png"}),
         "center": center,
         "bbox": bounds,
         "start_date": start_date,
@@ -121,7 +121,7 @@ def compute_air_pollution_stats(aoi_config: dict, start_date: str, end_date: str
         reducer=ee.Reducer.mean()
         .combine(ee.Reducer.max(), sharedInputs=True)
         .combine(ee.Reducer.percentile([90]), sharedInputs=True),
-        geometry=aoi, scale=dynamic_scale, maxPixels=1e10, tileScale=4,
+        geometry=aoi.bounds(maxError=1000), scale=dynamic_scale, maxPixels=1e10, tileScale=4,
     ).getInfo()
 
     mean_no2 = round(stats.get("NO2_umol_m2_mean") or 0, 2)
@@ -229,7 +229,7 @@ def compute_air_pollution_timeseries(aoi_config: dict, start_date: str, end_date
         
         stats = combined.reduceRegion(
             reducer=ee.Reducer.mean(),
-            geometry=aoi,
+            geometry=aoi.bounds(maxError=1000),
             scale=dynamic_scale,
             maxPixels=1e9,
             tileScale=2

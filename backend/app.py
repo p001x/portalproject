@@ -666,8 +666,8 @@ def drought_endpoint():
     try:
         res = compute_agricultural_drought(
             req.district, req.year, req.n_classes,
-            req.reverse_sm, req.reverse_rf, req.reverse_ndvi,
-            req.reverse_vci, req.reverse_lst, req.reverse_cdd, req.reverse_evi
+            rev_sm=req.reverse_sm, rev_rf=req.reverse_rf, rev_ndvi=req.reverse_ndvi,
+            rev_vci=req.reverse_vci, rev_lst=req.reverse_lst, rev_cdd=req.reverse_cdd, rev_evi=req.reverse_evi
         )
         return jsonify(res)
     except Exception as exc:

@@ -41,7 +41,11 @@ def compute_landslide_task(aoi_config, start_year, end_year, n_classes, rev_slp,
 
 @celery_app.task(name='compute_drought_task')
 def compute_drought_task(aoi_config, year, n_classes, rev_sm, rev_rf, rev_ndvi, rev_vci, rev_lst, rev_cdd, rev_evi):
-    return compute_agricultural_drought(aoi_config, year, n_classes, rev_sm, rev_rf, rev_ndvi, rev_vci, rev_lst, rev_cdd, rev_evi)
+    return compute_agricultural_drought(
+        aoi_config, year, n_classes,
+        rev_sm=rev_sm, rev_rf=rev_rf, rev_ndvi=rev_ndvi, rev_vci=rev_vci,
+        rev_lst=rev_lst, rev_cdd=rev_cdd, rev_evi=rev_evi
+    )
 
 @celery_app.task(name='compute_flood_task')
 def compute_flood_task(aoi_config, start_year, end_year, n_classes, rev_rf, rev_twi, rev_lulc, rev_elev, rev_slp, rev_riv, rev_rd, rev_soil, rev_drain, rev_ndvi, weights):

@@ -61,7 +61,7 @@ export default defineConfig({
     },
     proxy: {
       "/api": {
-        target: "http://127.0.0.1:8001",
+        target: "http://127.0.0.1:8002",
         changeOrigin: true,
         proxyTimeout: 1000 * 60 * 10,
         timeout: 1000 * 60 * 10,
@@ -74,6 +74,6 @@ export default defineConfig({
     allowedHosts: true,
   },
   optimizeDeps: {
-    exclude: ["geotiff", "georaster", "georaster-layer-for-leaflet"],
+    // exclude: ["geotiff", "georaster", "georaster-layer-for-leaflet"],
   },
 });

@@ -635,6 +635,38 @@ export function NDVIPage() {
                 <h2 className="font-semibold text-lg mb-1">Professional Cartography</h2>
                 <p className="text-sm text-muted-foreground">High-quality static maps ready for presentation.</p>
               </div>
+              {/* Map Layer Switcher Header */}
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-3 p-2 bg-muted/30 rounded-lg border">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Map Symbology:</span>
+                  <div className="inline-flex items-center rounded-md border bg-background p-0.5 text-xs shadow-2xs">
+                    <button
+                      type="button"
+                      onClick={() => setLayerMode("classified")}
+                      disabled={isContinuous}
+                      className={`px-3 py-1 rounded font-medium transition-all ${
+                        layerMode === "classified" && !isContinuous
+                          ? "bg-primary text-primary-foreground shadow-xs"
+                          : "text-muted-foreground hover:text-foreground disabled:opacity-40"
+                      }`}
+                    >
+                      Classified ({activeNClasses} Classes)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLayerMode("continuous")}
+                      className={`px-3 py-1 rounded font-medium transition-all ${
+                        layerMode === "continuous" || isContinuous
+                          ? "bg-primary text-primary-foreground shadow-xs"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      Continuous Gradient
+                    </button>
+                  </div>
+                </div>
+              </div>
+              
               <div className="bg-card border rounded-lg p-4">
               <MapExportControls
                 tileUrl={layerMode === "continuous" || isContinuous ? data.tile_url : (data.classify?.panels?.[0]?.tile_url || data.tile_url)}

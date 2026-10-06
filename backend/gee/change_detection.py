@@ -8,15 +8,7 @@ _cache: TTLCache = TTLCache(maxsize=128, ttl=3600)
 _lock = Lock()
 
 
-def get_dynamic_scale(geom):
-    try:
-        area_sqkm = geom.area().divide(1e6).getInfo()
-        if area_sqkm > 10000: return 500
-        elif area_sqkm > 2000: return 250
-        elif area_sqkm > 500: return 100
-        else: return 30
-    except Exception:
-        return 250
+from gee.aoi_utils import get_dynamic_scale
 
 
 def mask_s2_clouds(image):
@@ -101,7 +93,7 @@ def get_harmonized_composite(aoi, start_date: str, end_date: str):
             .multiply(0.0000275).add(-0.2)
         )
         composite = l8_median.unmask(fallback_l8)
-    else:
+    elif year >= 1999:
         l7_col = (
             ee.ImageCollection("LANDSAT/LE07/C02/T1_L2")
             .filterDate(start_date, end_date)
@@ -128,6 +120,41 @@ def get_harmonized_composite(aoi, start_date: str, end_date: str):
             .multiply(0.0000275).add(-0.2)
         )
         composite = l7_median.unmask(fallback_l7)
+    else:
+        # Landsat 5 TM (1984-2012) and Landsat 4 (1982-1993)
+        l5_col = (
+            ee.ImageCollection("LANDSAT/LT05/C02/T1_L2")
+            .merge(ee.ImageCollection("LANDSAT/LT05/C02/T2_L2"))
+            if year >= 1984 else
+            ee.ImageCollection("LANDSAT/LT04/C02/T1_L2")
+            .merge(ee.ImageCollection("LANDSAT/LT05/C02/T1_L2"))
+        )
+        l5_filtered = (
+            l5_col
+            .filterDate(start_date, end_date)
+            .filterBounds(aoi)
+            .filter(ee.Filter.lt("CLOUD_COVER", 75))
+            .map(mask_l8_clouds)
+            .select(
+                ["SR_B1", "SR_B2", "SR_B3", "SR_B4", "SR_B5", "SR_B7"],
+                ["B2", "B3", "B4", "B8", "B11", "B12"]
+            )
+        )
+        l5_median = l5_filtered.median().multiply(0.0000275).add(-0.2)
+        fallback_l5 = (
+            l5_col
+            .filterDate(f"{year-1}-01-01", f"{year+1}-12-31")
+            .filterBounds(aoi)
+            .filter(ee.Filter.lt("CLOUD_COVER", 60))
+            .map(mask_l8_clouds)
+            .select(
+                ["SR_B1", "SR_B2", "SR_B3", "SR_B4", "SR_B5", "SR_B7"],
+                ["B2", "B3", "B4", "B8", "B11", "B12"]
+            )
+            .median()
+            .multiply(0.0000275).add(-0.2)
+        )
+        composite = l5_median.unmask(fallback_l5)
         
     return composite.clip(aoi)
 
@@ -306,7 +333,7 @@ def compute_change_detection(
                 .combine(ee.Reducer.min(), sharedInputs=True)
                 .combine(ee.Reducer.max(), sharedInputs=True)
                 .combine(ee.Reducer.stdDev(), sharedInputs=True),
-                geometry=aoi,
+                geometry=aoi.bounds(maxError=1000),
                 scale=dynamic_scale,
                 maxPixels=1e10,
                 tileScale=4,
@@ -315,7 +342,7 @@ def compute_change_detection(
 
         f_area = executor.submit(
             lambda: area_img.reduceRegion(
-                reducer=ee.Reducer.sum(), geometry=aoi, scale=dynamic_scale, maxPixels=1e10, tileScale=4
+                reducer=ee.Reducer.sum(), geometry=aoi.bounds(maxError=1000), scale=dynamic_scale, maxPixels=1e10, tileScale=4
             ).getInfo() if method == "threshold" else {}
         )
         
@@ -331,12 +358,8 @@ def compute_change_detection(
             ) if method != "threshold" else {}
         )
 
-        f_bounds = executor.submit(
-            lambda: aoi.bounds().getInfo()["coordinates"][0]
-        )
-
         f_thumb = executor.submit(
-            lambda: diff_final_viz.getThumbURL({"region": aoi.bounds(), "dimensions": 512, "format": "png"})
+            lambda: diff_final_viz.getThumbURL({"region": aoi.bounds(), "dimensions": 512, "crs": "EPSG:4326", "format": "png"})
         )
 
         f_download = executor.submit(
@@ -365,7 +388,7 @@ def compute_change_detection(
             classify_res = {}
 
         try:
-            bounds = f_bounds.result()
+            bounds = aoi.bounds().getInfo().get("coordinates", [[[0,0]]])[0]
         except Exception:
             bounds = [[0, 0], [0, 0], [0, 0], [0, 0]]
 
@@ -418,8 +441,11 @@ def compute_change_detection(
     }
 
     try:
-        center_lon = (bounds[0][0] + bounds[2][0]) / 2
-        center_lat = (bounds[0][1] + bounds[2][1]) / 2
+        from gee.aoi_utils import get_bounds_and_center
+
+        bounds, center = get_bounds_and_center(aoi)
+
+        center_lat, center_lon = center[0], center[1]
     except Exception:
         center_lon, center_lat = 29.87, -1.94
 

@@ -2,12 +2,12 @@
 title Starting Rwanda GeoPortal...
 cd /d "%~dp0"
 
-echo [1/3] Freeing ports 8001 and 5000 if in use...
-powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 8001, 5000 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }" >nul 2>&1
+echo [1/3] Freeing ports 8002 and 5000 if in use...
+powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 8002, 5000 -ErrorAction SilentlyContinue | ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }" >nul 2>&1
 
-echo [2/3] Starting FastAPI Backend on http://localhost:8001 ...
+echo [2/3] Starting FastAPI Backend on http://localhost:8002 ...
 set PATH=C:\Program Files\QGIS 3.40.11\bin;%PATH%
-start "GeoPortal Backend (Port 8001)" /D "%~dp0backend" cmd /k ""%~dp0.venv\Scripts\python.exe" -m uvicorn main:app --host 127.0.0.1 --port 8001 --reload"
+start "GeoPortal Backend (Port 8002)" /D "%~dp0backend" cmd /k ""%~dp0.venv\Scripts\python.exe" -m uvicorn main:app --host 127.0.0.1 --port 8002 --reload"
 
 echo [3/3] Starting Vite Frontend on http://localhost:5000 ...
 set PORT=5000
@@ -17,7 +17,7 @@ start "GeoPortal Frontend (Port 5000)" /D "%~dp0artifacts\geoportal" cmd /k "npx
 echo.
 echo ========================================================
 echo   Rwanda Environmental GeoPortal Started Automatically!
-echo   - Backend API:  http://localhost:8001
+echo   - Backend API:  http://localhost:8002
 echo   - Frontend UI:  http://localhost:5000
 echo ========================================================
 echo.

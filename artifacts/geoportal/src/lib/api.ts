@@ -423,20 +423,21 @@ export interface AccessibilityExportResult {
   factor_maps?: Record<string, any>;
 }
 
-export interface DroughtResult {
-  dvi_tile_url: string;
-  dvi_download_url?: string;
-  dvi_thumb_url: string;
-  dvi_class_tile_url: string;
-  dvi_class_thumb_url: string;
-  stats: Record<string, number>;
-  class_areas_km2: Record<string, number>;
-  classify: { panels: ClassifyPanel[]; n_classes: number; percentile_steps: number[] };
-  center: [number, number];
-  bbox?: number[];
-  aoi: AOIConfig;
-  district?: string;
-  year: number;
+export interface DroughtMapResult {
+  tile_url: string;
+  season_label: string;
+}
+
+export interface DroughtStatsResult {
+  "Mean VHI": number;
+  "Min VHI": number;
+  "Max VHI": number;
+}
+
+export interface DroughtClassifyResult {
+  panels: ClassifyPanel[];
+  n_classes: number;
+  percentile_steps: number[];
 }
 export interface FloodFactorMap {
   label: string;
@@ -771,6 +772,13 @@ export const api = {
       custom_dem_id?: string;
     }) => post<any[]>("/earthwork/profile", req),
   },
+  wellscope: {
+    map: (req: any) => post<any>("/wellscope/map", req),
+    stats: (req: any) => post<any>("/wellscope/stats", req),
+    classify: (req: any) => post<any>("/wellscope/classify", req),
+    export: (req: any) => post<any>("/wellscope/export", req),
+    factorExport: async (req: any) => { const data = await post<any>("/wellscope/factor-export", req); return { data }; },
+  },
   landfill: {
     map: (req: any) => post<any>("/landfill/map", req),
     stats: (req: any) => post<any>("/landfill/stats", req),
@@ -797,10 +805,9 @@ export const api = {
     export: (req: AccessibilityRequest) => post<AccessibilityExportResult>("/accessibility/export", req),
   },
   drought: {
-    map: (req: any) => post<any>("/drought/map", req),
-    stats: (req: any) => post<any>("/drought/stats", req),
-    classify: (req: any) => post<any>("/drought/classify", req),
-    export: (req: any) => post<any>("/drought/export", req),
+    map: (req: any) => post<DroughtMapResult>("/drought/map", req),
+    stats: (req: any) => post<DroughtStatsResult>("/drought/stats", req),
+    classify: (req: any) => post<DroughtClassifyResult>("/drought/classify", req),
   },
   flood: {
     map: (req: any) => post<FloodMapResult>("/flood/map", req),
