@@ -455,7 +455,7 @@ export function FloodPage() {
 
               <div className="h-[520px] rounded-lg overflow-hidden border relative">
                 {currentTileUrl ? (
-                  <DistrictMap tileUrl={currentTileUrl} center={dataMap.center} />
+                  <DistrictMap aoi={aoi} tileUrl={currentTileUrl} center={dataMap.center} bbox={dataMap.bbox} />
                 ) : (
                   <div className="flex-1 h-full flex items-center justify-center bg-muted">
                     <span className="text-muted-foreground">Map data unavailable</span>

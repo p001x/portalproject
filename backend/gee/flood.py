@@ -98,19 +98,26 @@ def _apply_reverse(img: ee.Image, reverse: bool) -> ee.Image:
     return ee.Image(6).subtract(img)
 
 
+def _classify_aoi(aoi_config):
+    aoi_type = aoi_config.get("type", "")
+    country = (aoi_config.get("country") or "").strip()
+
+    if aoi_type == "world":
+        return "global", True
+
+    if country.lower() == "rwanda" or aoi_type in ("rwanda", "district", "province"):
+        return "rwanda", False
+
+    return "custom", False
+
+
 def _build_flood_image(aoi_config: dict, start_year: int, end_year: int, weights: dict, reverse_flags: dict):
     aoi = get_aoi_geometry(aoi_config)
     
-    is_global = False
-    try:
-        geom_str = str(aoi.serialize())
-        if "-180" in geom_str and "180" in geom_str and "90" in geom_str and "-90" in geom_str:
-            is_global = True
-    except:
-        pass
+    corridor, is_global = _classify_aoi(aoi_config)
+    is_rwanda = corridor == "rwanda"
     
-    district = aoi_config.get("district", "")
-    is_rwanda = district != "" or "rwanda" in aoi_config.get("name", "").lower()
+    # _classify_aoi handles corridor detection
     
     # 1. Elevation & Slope
     dem = ee.Image("USGS/SRTMGL1_003").select("elevation").unmask(ee.ImageCollection("COPERNICUS/DEM/GLO30").select("DEM").mosaic(), False).clip(aoi)
@@ -363,25 +370,32 @@ def compute_flood_map(aoi_config: dict, start_year: int, end_year: int, weights:
 
     # We also return factor map urls here for fast access in the frontend
     factor_maps = {}
+    # Use python list bounds for region to avoid AttributeError in earthengine-api
+    calc_geom_list = [[-180, -89], [180, -89], [180, 89], [-180, 89], [-180, -89]] if is_global else bounds
+
     for key in FACTOR_ORDER:
         with gee_semaphore:
             try:
-                calc_geom = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False) if is_global else aoi.bounds()
                 img_id = score_images[key].getMapId(_SCORE_VIS)
                 factor_maps[key] = {
                     "label": FACTOR_META[key]["label"],
                     "tile_url": img_id["tile_fetcher"].url_format,
-                    "thumb_url": score_images[key].getThumbURL({**_SCORE_VIS, "region": calc_geom, "dimensions": 512, "crs": "EPSG:4326", "format": "png"}),
+                    "thumb_url": score_images[key].getThumbURL({**_SCORE_VIS, "region": calc_geom_list, "dimensions": 512, "crs": "EPSG:4326", "format": "png"}),
                     "reversed": reverse_flags.get(key, False),
                 }
-            except ee.EEException:
+            except Exception:
                 pass
 
     ahp_data = compute_ahp_data(weights)
 
+    try:
+        thumb_url = suitability.getThumbURL({**_SCORE_VIS, "region": calc_geom_list, "dimensions": 512, "crs": "EPSG:4326", "format": "png"})
+    except Exception:
+        thumb_url = None
+
     result = {
         "tile_url": map_id["tile_fetcher"].url_format,
-        "thumb_url": suitability.getThumbURL({**_SCORE_VIS, "region": calc_geom, "dimensions": 512, "crs": "EPSG:4326", "format": "png"}),
+        "thumb_url": thumb_url,
         "center": center,
         "bbox": bounds,
         "ahp": ahp_data,
