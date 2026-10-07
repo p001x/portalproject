@@ -4,7 +4,7 @@ import math
 import ee
 import concurrent.futures
 from threading import Lock
-from cachetools import TTLCache
+from gee.persistent_cache import PersistentCache
 
 from gee.classify_utils import (
     quantile_classify,
@@ -16,8 +16,8 @@ from gee.classify_utils import (
 
 from gee.aoi_utils import get_dynamic_scale
 
-_cache_unified: TTLCache = TTLCache(maxsize=64, ttl=3600)
-_cache_build: TTLCache = TTLCache(maxsize=64, ttl=3600)
+_cache_unified = PersistentCache(ttl=3600)
+_cache_build = PersistentCache(ttl=3600)
 _lock = Lock()
 
 # Default AHP weights matching scientific crane conservation literature

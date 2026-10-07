@@ -5,12 +5,12 @@ import ee
 
 from gee.aoi_utils import get_dynamic_scale
 
-from cachetools import TTLCache
+from gee.persistent_cache import PersistentCache
 from threading import Lock
 
-_cache_map = TTLCache(maxsize=64, ttl=3600)
-_cache_stats = TTLCache(maxsize=64, ttl=3600)
-_cache_export = TTLCache(maxsize=64, ttl=3600)
+_cache_map = PersistentCache(ttl=3600)
+_cache_stats = PersistentCache(ttl=3600)
+_cache_export = PersistentCache(ttl=3600)
 _lock = Lock()
 
 _PRECIP_VIS = {"min": 0, "max": 200, "palette": ["#f7fbff", "#c6dbef", "#6baed6", "#2171b5", "#08306b"]}

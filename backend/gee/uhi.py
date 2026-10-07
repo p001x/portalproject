@@ -13,10 +13,10 @@ import geopandas as gpd
 from shapely.geometry import mapping, box
 from shapely.geometry import shape as shapely_shape
 from scipy import stats as scipy_stats
-from cachetools import TTLCache
+from gee.persistent_cache import PersistentCache
 from threading import Lock
 
-_cache: TTLCache = TTLCache(maxsize=32, ttl=3600)
+_cache = PersistentCache(ttl=3600)
 _lock = Lock()
 
 _c_ll = (232, 232, 232)

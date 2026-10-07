@@ -439,6 +439,12 @@ export interface DroughtClassifyResult {
   n_classes: number;
   percentile_steps: number[];
 }
+
+export interface DroughtExportResult {
+  drought_thumb_url: string;
+  drought_download_url: string;
+  factor_maps: Record<string, { thumb_url: string; download_url: string }>;
+}
 export interface FloodFactorMap {
   label: string;
   tile_url: string;
@@ -689,6 +695,16 @@ export const api = {
     return get(url);
   },
 
+  async getAOIBounds(aoi_config: AOIConfig): Promise<{bbox: number[][], center: [number, number]}> {
+    const res = await fetch(`${BASE}/aoi/bounds`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ aoi_config })
+    });
+    if (!res.ok) throw new Error("Failed to get bounds");
+    return res.json();
+  },
+
   async getRwandaHierarchy(): Promise<Record<string, Record<string, string[]>>> {
     return get("/aoi/rwanda-hierarchy");
   },
@@ -808,6 +824,7 @@ export const api = {
     map: (req: any) => post<DroughtMapResult>("/drought/map", req),
     stats: (req: any) => post<DroughtStatsResult>("/drought/stats", req),
     classify: (req: any) => post<DroughtClassifyResult>("/drought/classify", req),
+    export: (req: any) => post<DroughtExportResult>("/drought/export", req),
   },
   flood: {
     map: (req: any) => post<FloodMapResult>("/flood/map", req),

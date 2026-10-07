@@ -7,12 +7,12 @@ from gee.classify_utils import quantile_classify
 
 from gee.aoi_utils import get_dynamic_scale
 
-from cachetools import TTLCache
+from gee.persistent_cache import PersistentCache
 from threading import Lock
 
-_cache_map: TTLCache = TTLCache(maxsize=64, ttl=3600)
-_cache_stats: TTLCache = TTLCache(maxsize=64, ttl=3600)
-_cache_export: TTLCache = TTLCache(maxsize=64, ttl=3600)
+_cache_map = PersistentCache(ttl=3600)
+_cache_stats = PersistentCache(ttl=3600)
+_cache_export = PersistentCache(ttl=3600)
 _lock = Lock()
 
 _DEFICIT_VIS = {"min": -20, "max": 20, "palette": ["#0000ff", "#a3ccff", "#ffffff", "#ff9999", "#ff0000"]}

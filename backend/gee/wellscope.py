@@ -2,17 +2,17 @@ import json
 import ee
 import time
 import math
-from cachetools import TTLCache
+from gee.persistent_cache import PersistentCache
 from threading import Lock, BoundedSemaphore
 import concurrent.futures
 
 gee_semaphore = BoundedSemaphore(5)
 
-_cache_map = TTLCache(maxsize=64, ttl=3600)
-_cache_stats = TTLCache(maxsize=64, ttl=3600)
-_cache_classify = TTLCache(maxsize=64, ttl=3600)
-_cache_export = TTLCache(maxsize=64, ttl=3600)
-_cache_build = TTLCache(maxsize=64, ttl=3600)
+_cache_map = PersistentCache(ttl=3600)
+_cache_stats = PersistentCache(ttl=3600)
+_cache_classify = PersistentCache(ttl=3600)
+_cache_export = PersistentCache(ttl=3600)
+_cache_build = PersistentCache(ttl=3600)
 _lock = Lock()
 
 FACTOR_ORDER = ["rainfall", "lithology", "slope", "twi", "drainage", "dist_water", "soil", "lulc"]

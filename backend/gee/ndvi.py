@@ -1,7 +1,7 @@
 import json
 """NDVI computation — no Streamlit dependency. Uses in-memory TTL cache."""
 import ee
-from cachetools import TTLCache
+from gee.persistent_cache import PersistentCache
 from typing import Optional
 from threading import Lock
 import concurrent.futures
@@ -16,7 +16,7 @@ RWANDA_DISTRICTS = [
     "Ruhango", "Rulindo", "Rusizi", "Rutsiro", "Rwamagana",
 ]
 
-_cache: TTLCache = TTLCache(maxsize=128, ttl=3600)
+_cache = PersistentCache(ttl=3600)
 _lock = Lock()
 
 

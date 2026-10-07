@@ -262,3 +262,40 @@ def get_rwanda_full_hierarchy():
         return _rwanda_micro_hierarchy
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error reading Rwanda villages shapefile: {str(e)}")
+
+from pydantic import BaseModel
+class AOIRequest(BaseModel):
+    aoi_config: dict
+
+@router.post("/bounds")
+def get_aoi_bounds(req: AOIRequest):
+    """
+    Returns the bounding box and center of the given AOI.
+    """
+    try:
+        from gee.aoi_utils import get_aoi_geometry
+        from gee.native_classify import get_bounds_and_center
+        from main import _require_gee
+        _require_gee()
+        
+        geom = get_aoi_geometry(req.aoi_config)
+        
+        # If it's a huge global map
+        if req.aoi_config.get("type") == "world":
+             return {
+                 "bbox": [[-180, -90], [180, -90], [180, 90], [-180, 90], [-180, -90]],
+                 "center": [0, 0]
+             }
+             
+        try:
+            bounds, center = get_bounds_and_center(geom)
+            return {"bbox": bounds, "center": center}
+        except Exception:
+            # Fallback
+            return {
+                 "bbox": [[-180, -90], [180, -90], [180, 90], [-180, 90], [-180, -90]],
+                 "center": [0, 0]
+            }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error computing bounds: {str(e)}")
+

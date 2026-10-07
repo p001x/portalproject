@@ -4,12 +4,12 @@ import ee
 
 from gee.aoi_utils import get_dynamic_scale
 
-from cachetools import TTLCache
+from gee.persistent_cache import PersistentCache
 from threading import Lock
 import concurrent.futures
 from gee.classify_utils import quantile_classify
 
-_cache: TTLCache = TTLCache(maxsize=128, ttl=3600)
+_cache = PersistentCache(ttl=3600)
 _cache.clear()
 _lock = Lock()
 

@@ -5,7 +5,7 @@ import ee
 
 from gee.aoi_utils import get_dynamic_scale
 
-from cachetools import TTLCache
+from gee.persistent_cache import PersistentCache
 from threading import Lock, BoundedSemaphore
 import concurrent.futures
 from gee.classify_utils import quantile_classify, get_jenks_breaks
@@ -22,11 +22,11 @@ gee_semaphore = BoundedSemaphore(5)
 LSI_VIS = {"min": 1, "max": 5, "palette": ["#1a9850", "#91cf60", "#fee08b", "#fc8d59", "#d73027"]}
 LSI_CLASS_NAMES = ["Very Low", "Low", "Moderate", "High", "Very High"]
 
-_cache_map: TTLCache = TTLCache(maxsize=64, ttl=3600)
-_cache_stats: TTLCache = TTLCache(maxsize=64, ttl=3600)
-_cache_classify: TTLCache = TTLCache(maxsize=64, ttl=3600)
-_cache_export: TTLCache = TTLCache(maxsize=64, ttl=3600)
-_cache_build: TTLCache = TTLCache(maxsize=64, ttl=3600)
+_cache_map = PersistentCache(ttl=3600)
+_cache_stats = PersistentCache(ttl=3600)
+_cache_classify = PersistentCache(ttl=3600)
+_cache_export = PersistentCache(ttl=3600)
+_cache_build = PersistentCache(ttl=3600)
 _lock = Lock()
 
 def _build_lsi_images(
@@ -121,10 +121,16 @@ def _build_lsi_images(
             road_mask = ee.Image(0).paint(roads, 1).eq(1)
             dist_roads = road_mask.fastDistanceTransform(256).multiply(5000).divide(1000).clip(aoi).rename("dist_roads")
 
+        try:
+            area_sqkm = aoi.bounds().area(maxError=1000).divide(1e6).getInfo() if not is_global else 999999999
+        except Exception:
+            area_sqkm = 999999999
+
         # NDVI (Dynamic Vegetation) with Cloud Masking
-        if is_global:
+        if is_global or area_sqkm > 100000:
             # Fallback to MODIS for large/global areas to avoid S2/L8 memory limits
-            modis = ee.ImageCollection("MODIS/061/MOD13Q1").filterDate(f"{start_year}-01-01", f"{end_year + 1}-01-01").filterBounds(aoi).select("NDVI").median()
+            modis_dataset = "MODIS/061/MOD13A2" if (is_global or area_sqkm > 300000) else "MODIS/061/MOD13Q1"
+            modis = ee.ImageCollection(modis_dataset).filterDate(f"{start_year}-01-01", f"{end_year + 1}-01-01").filterBounds(aoi).select("NDVI").median()
             ndvi = modis.divide(10000).rename("ndvi")
         else:
             if start_year >= 2016:

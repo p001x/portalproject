@@ -1,7 +1,7 @@
 import ee
 import json
 import logging
-from cachetools import TTLCache, cached
+from gee.persistent_cache import PersistentCache
 import threading
 import math
 import numpy as np
@@ -9,7 +9,7 @@ from gee.aoi_utils import get_dynamic_scale
 
 logger = logging.getLogger(__name__)
 
-_earthwork_cache = TTLCache(maxsize=5000, ttl=86400)
+_earthwork_cache = PersistentCache(ttl=86400)
 _lock = threading.Lock()
 
 def get_earthwork_base(polygon_coords: list, custom_dem_id: str = None):

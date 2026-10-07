@@ -1,12 +1,12 @@
 import json
 """Slope / Terrain analysis — no Streamlit dependency."""
 import ee
-from cachetools import TTLCache, cached
+from gee.persistent_cache import PersistentCache
 from threading import Lock
 import concurrent.futures
 from gee.classify_utils import quantile_classify
 
-_cache: TTLCache = TTLCache(maxsize=128, ttl=86400)
+_cache = PersistentCache(ttl=86400)
 _lock = Lock()
 
 
@@ -315,10 +315,13 @@ def profile_slope_line(coords: list, aoi_config: dict) -> list:
         
     return profile
 
-_watershed_cache = TTLCache(maxsize=10000, ttl=86400)
+_watershed_cache = PersistentCache(ttl=86400)
 
-@cached(cache=_watershed_cache)
 def delineate_watershed(lat: float, lon: float, level: int = 12) -> dict:
+    cache_key = (lat, lon, level)
+    if cache_key in _watershed_cache:
+        return _watershed_cache[cache_key]
+
     point = ee.Geometry.Point([float(lon), float(lat)])
     basins = ee.FeatureCollection(f"WWF/HydroSHEDS/v1/Basins/hybas_{level}")
     
@@ -356,13 +359,15 @@ def delineate_watershed(lat: float, lon: float, level: int = 12) -> dict:
     if area_km2 is None:
         area_km2 = basin.bounds().area(maxError=1000).divide(1e6).getInfo()
         
-    return {
+    res = {
         "geojson": geojson,
         "download_url": url,
         "area_km2": round(area_km2, 2),
         "river_geojson": rivers_geojson,
         "river_download_url": rivers_url
     }
+    _watershed_cache[cache_key] = res
+    return res
 
 
 

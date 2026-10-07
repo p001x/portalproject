@@ -102,7 +102,7 @@ export function MapExportControls({ tileUrl, thumbUrl, district, title, classAre
     let timeoutId: any = null;
 
     const debounceTimer = setTimeout(() => {
-      timeoutId = setTimeout(() => abortController.abort(), 90000);
+      timeoutId = setTimeout(() => abortController.abort(), 300000);
 
       fetch(`${BASE}/static-map`, {
         method: "POST",

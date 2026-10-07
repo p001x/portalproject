@@ -3,12 +3,12 @@ import json
 import math
 import ee
 import concurrent.futures
-from cachetools import TTLCache
+from gee.persistent_cache import PersistentCache
 from threading import Lock
 from gee.classify_utils import quantile_classify
 from gee.aoi_utils import get_aoi_geometry, get_historical_ndvi
 
-_cache: TTLCache = TTLCache(maxsize=128, ttl=86400)
+_cache = PersistentCache(ttl=86400)
 _lock = Lock()
 
 from gee.aoi_utils import get_dynamic_scale

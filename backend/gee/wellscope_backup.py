@@ -1,10 +1,10 @@
 import json
 import ee
-from cachetools import TTLCache
+from gee.persistent_cache import PersistentCache
 from threading import Lock
 import concurrent.futures
 
-_cache_map = TTLCache(maxsize=128, ttl=3600)
+_cache_map = PersistentCache(ttl=3600)
 _lock = Lock()
 
 FACTOR_ORDER = ["rainfall", "lithology", "slope", "twi", "drainage", "dist_water", "soil", "lulc"]

@@ -8,7 +8,7 @@ import requests
 
 from gee.aoi_utils import get_dynamic_scale
 
-from cachetools import TTLCache
+from gee.persistent_cache import PersistentCache
 from threading import Lock
 import time
 import concurrent.futures
@@ -20,12 +20,12 @@ logger = logging.getLogger(__name__)
 ACCESSIBILITY_VIS = {"min": 1, "max": 4, "palette": ["#5C3A21", "#B98D4F", "#E8C285", "#F3E58C"]}
 ACCESSIBILITY_CLASS_NAMES = ["Very High (0-15m)", "High (15-30m)", "Low (30-45m)", "Very Low (45-60m)"]
 
-_cache_map: TTLCache = TTLCache(maxsize=64, ttl=3600)
-_cache_stats: TTLCache = TTLCache(maxsize=64, ttl=3600)
-_cache_classify: TTLCache = TTLCache(maxsize=64, ttl=3600)
-_cache_export: TTLCache = TTLCache(maxsize=64, ttl=3600)
-_cache_overpass: TTLCache = TTLCache(maxsize=64, ttl=3600)
-_cache_population: TTLCache = TTLCache(maxsize=64, ttl=3600)
+_cache_map = PersistentCache(ttl=3600)
+_cache_stats = PersistentCache(ttl=3600)
+_cache_classify = PersistentCache(ttl=3600)
+_cache_export = PersistentCache(ttl=3600)
+_cache_overpass = PersistentCache(ttl=3600)
+_cache_population = PersistentCache(ttl=3600)
 _lock = Lock()
 
 import math

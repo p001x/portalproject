@@ -5,12 +5,12 @@ import ee
 
 from gee.aoi_utils import get_dynamic_scale
 
-from cachetools import TTLCache
+from gee.persistent_cache import PersistentCache
 from threading import Lock
 import concurrent.futures
 from gee.classify_utils import quantile_classify
 
-_cache: TTLCache = TTLCache(maxsize=128, ttl=86400)
+_cache = PersistentCache(ttl=86400)
 _lock = Lock()
 
 DEFAULT_WEIGHTS = {"river": 0.30, "residential": 0.25, "slope": 0.20, "road": 0.15, "lulc": 0.10}

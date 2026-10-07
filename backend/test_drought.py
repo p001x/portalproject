@@ -1,12 +1,16 @@
 import sys
+import os
+os.environ["HTTP_PROXY"] = ""
+os.environ["HTTPS_PROXY"] = ""
+os.environ["NO_PROXY"] = "*"
 import ee
 import time
-from gee.auth import authenticate
+from gee.auth import initialize_gee
 from gee.aoi_utils import get_aoi_geometry, get_dynamic_scale
 from gee.drought import compute_drought_stats, compute_drought_classify
 
 print('Authenticating...')
-authenticate()
+initialize_gee()
 
 aoi_config = {'type': 'gaul0', 'country': 'China'}
 print('Getting Geometry...')

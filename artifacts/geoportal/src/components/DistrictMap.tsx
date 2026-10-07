@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@/lib/api";
 import { MapContainer, TileLayer, useMap, CircleMarker, Popup, GeoJSON, useMapEvents, Polygon } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 import L from "leaflet";
@@ -120,11 +122,16 @@ function GEELayer({ tileUrl }: { tileUrl: string }) {
       activeLayer.setOpacity(0.85);
     }
 
-    // We purposely do NOT return map.removeLayer() here.
+    // We purposely do NOT remove layers when just switching tileUrl.
     // Keeping inactive layers on the map with opacity 0 ensures Leaflet
     // retains the DOM nodes and image data, making switching back 100% instant.
     return () => {
-      // Only clean up layers when the map completely unmounts
+      // Clean up layers ONLY when the component completely unmounts (e.g. switching modules)
+      Object.values(layersRef.current).forEach(layer => {
+        if (map.hasLayer(layer)) {
+          map.removeLayer(layer);
+        }
+      });
     };
   }, [tileUrl, map]);
   
@@ -199,13 +206,26 @@ export function DistrictMap({
   customGeojsonStyle,
   riverGeojson,
   earthworkPolygon,
+  aoi,
 }: Props) {
   const [activeBasemap, setActiveBasemap] = useState(initialBasemap);
+
+  // Automatically fetch bounds for the AOI if it is provided and we don't have an explicit center/bbox
+  const { data: boundsData } = useQuery({
+    queryKey: ["aoiBounds", aoi],
+    queryFn: () => api.getAOIBounds(aoi),
+    enabled: !!aoi && !bbox,
+    staleTime: Infinity,
+  });
+
+  const isDefaultCenter = center && Math.abs(center[0] - (-1.94)) < 0.001 && Math.abs(center[1] - 29.87) < 0.001;
+  const effectiveCenter = (!isDefaultCenter && center) ? center : ((boundsData?.center as [number, number]) || center);
+  const effectiveBbox = bbox || boundsData?.bbox;
 
   return (
     <div style={{ position: "relative", height: "100%", width: "100%" }}>
       <MapContainer
-        center={center}
+        center={effectiveCenter}
         zoom={zoom}
         style={{ height: "100%", width: "100%", borderRadius: "0.5rem" }}
         scrollWheelZoom
@@ -353,7 +373,7 @@ export function DistrictMap({
             style={{ color: "#38bdf8", weight: 2, opacity: 0.9 }}
           />
         )}
-        <FlyTo center={center} zoom={zoom} bbox={bbox} />
+        <FlyTo center={effectiveCenter} zoom={zoom} bbox={effectiveBbox as any} />
         <ScaleBar />
       </MapContainer>
 

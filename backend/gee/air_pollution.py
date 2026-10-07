@@ -2,14 +2,14 @@ import json
 """Air Pollution (Sentinel-5P NO2, CO, SO2, Aerosol) — decoupled architecture."""
 from datetime import date as _date
 import ee
-from cachetools import TTLCache
+from gee.persistent_cache import PersistentCache
 from threading import Lock
 import concurrent.futures
 from gee.classify_utils import quantile_classify
 
 WHO_NO2_ANNUAL_THRESHOLD = 10.0
 
-_cache: TTLCache = TTLCache(maxsize=128, ttl=3600)
+_cache = PersistentCache(ttl=3600)
 _lock = Lock()
 
 def _month_range(start_date: str, end_date: str):
@@ -66,10 +66,10 @@ def _get_collections(aoi, start_date, end_date):
         .map(lambda img: img.rename("AER_AI").copyProperties(img, ["system:time_start"]))
     )
 
-    comp_no2 = s5p_no2.median().reproject(crs="EPSG:4326", scale=3500).clip(aoi)
-    comp_co = s5p_co.median().reproject(crs="EPSG:4326", scale=3500).clip(aoi)
-    comp_so2 = s5p_so2.median().reproject(crs="EPSG:4326", scale=3500).clip(aoi)
-    comp_aer = s5p_aer.median().reproject(crs="EPSG:4326", scale=3500).clip(aoi)
+    comp_no2 = s5p_no2.median().clip(aoi)
+    comp_co = s5p_co.median().clip(aoi)
+    comp_so2 = s5p_so2.median().clip(aoi)
+    comp_aer = s5p_aer.median().clip(aoi)
 
     return s5p_no2, s5p_co, s5p_so2, s5p_aer, comp_no2, comp_co, comp_so2, comp_aer
 

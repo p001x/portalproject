@@ -24,11 +24,15 @@ def safe_get_info(ee_obj, retries=6):
                     continue
             raise
 
-def get_dynamic_scale(geom: ee.Geometry) -> int:
+def get_dynamic_scale(geom: ee.Geometry, aoi_config: dict = None) -> int:
     """
     Dynamically scales processing resolution to ensure Earth Engine limits are never exceeded.
     Handles anything from a small village to the entire globe.
     """
+    if aoi_config:
+        t = aoi_config.get("type")
+        if t == "world": return 100000
+        
     try:
         # Attempt to detect if it's the exact whole world polygon before making EE requests
         try:
@@ -41,16 +45,15 @@ def get_dynamic_scale(geom: ee.Geometry) -> int:
         # Use bounding box area for extremely fast and stable approximation on massive polygons
         # Use maxError=1000 to avoid projection failures on massive continental geometries
         area_sqkm = safe_get_info(geom.bounds().area(maxError=1000).divide(1e6))
-        if area_sqkm < 35000:  # Ensures Rwanda (26k sqkm) uses 30m resolution as requested
-            return 30
-        elif area_sqkm < 100000:
-            return 1000
-        else:
-            # Target ~50,000 pixels total for the bounding box for ULTRA-FAST processing
-            target_pixels = 50000
-            area_sqm = area_sqkm * 1_000_000
-            scale = math.sqrt(area_sqm / target_pixels)
-            return max(1000, int(round(scale / 1000.0) * 1000))
+        
+        # Smoothly and dynamically scale resolution to always target ~2,500,000 pixels
+        # This naturally outputs ~10m for villages, ~30m-50m for districts, ~100m for countries
+        target_pixels = 2500000 
+        area_sqm = area_sqkm * 1_000_000
+        scale = math.sqrt(area_sqm / target_pixels)
+        
+        # Snap scale to sensible integers (e.g., 30m, 40m, 50m) and clamp to 10m minimum
+        return max(10, int(round(scale / 10.0) * 10))
     except Exception:
         # If EE area calculation fails (usually because polygon is global/massive and crosses dateline)
         # default to a very large safe scale rather than 2000 to prevent 4GB request size crashes.
@@ -337,8 +340,9 @@ def get_historical_ndvi(aoi, year: int, start_date: str = None, end_date: str = 
         
     # Massive Area Handling (>200,000 km² or global):
     # Only use MODIS if year >= 2000 (MODIS Terra was launched in Dec 1999, data starts Feb 2000)
-    if (is_global or area_sqkm > 200000) and year >= 2000:
-        modis_col = ee.ImageCollection("MODIS/061/MOD13Q1").filterDate(start_date, end_date)
+    if (is_global or area_sqkm > 100000) and year >= 2000:
+        modis_dataset = "MODIS/061/MOD13A2" if (is_global or area_sqkm > 300000) else "MODIS/061/MOD13Q1"
+        modis_col = ee.ImageCollection(modis_dataset).filterDate(start_date, end_date)
         try:
             if modis_col.limit(1).size().getInfo() > 0:
                 return modis_col.select("NDVI").median().multiply(0.0001).rename("NDVI").clip(aoi)

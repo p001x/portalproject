@@ -995,6 +995,8 @@ class DroughtRequest(BaseModel):
     end_month: Optional[int] = Field(None, ge=1, le=12)
     start_date: Optional[str] = None
     end_date: Optional[str] = None
+    drought_type: str = Field("agricultural", description="Type of drought: agricultural, meteorological, hydrological, comprehensive")
+    weights: Optional[dict] = Field(None, description="Custom weights for comprehensive drought")
     n_classes: int = Field(5, ge=1, le=15)
     method: Optional[str] = Field("equal_interval", description="Classification method")
     custom_labels: Optional[list[str]] = Field(None, description="Custom class names/labels")
@@ -1114,7 +1116,7 @@ def _download_png(url: str) -> bytes:
             req_obj = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
             if ee_token:
                 req_obj.add_header('Authorization', f'Bearer {ee_token}')
-            with urllib.request.urlopen(req_obj, timeout=60) as response:
+            with urllib.request.urlopen(req_obj, timeout=300) as response:
                 return response.read()
         except urllib.error.HTTPError as err:
             if err.code in (429, 500, 502, 503, 504) and attempt < max_retries - 1:
@@ -2148,7 +2150,7 @@ def drought_map_endpoint(req: DroughtRequest):
         return compute_drought_map(
             req.aoi, req.start_year, req.end_year,
             season=req.season, start_month=req.start_month, end_month=req.end_month,
-            start_date=req.start_date, end_date=req.end_date
+            start_date=req.start_date, end_date=req.end_date, drought_type=req.drought_type, weights=req.weights
         )
     except Exception as exc:
         logger.exception("Drought map failed")
@@ -2162,7 +2164,7 @@ def drought_stats_endpoint(req: DroughtRequest):
         return compute_drought_stats(
             req.aoi, req.start_year, req.end_year,
             season=req.season, start_month=req.start_month, end_month=req.end_month,
-            start_date=req.start_date, end_date=req.end_date
+            start_date=req.start_date, end_date=req.end_date, drought_type=req.drought_type, weights=req.weights
         )
     except Exception as exc:
         logger.exception("Drought stats failed")
@@ -2177,13 +2179,26 @@ def drought_classify_endpoint(req: DroughtRequest):
             req.aoi, req.start_year, req.end_year,
             season=req.season, start_month=req.start_month, end_month=req.end_month,
             start_date=req.start_date, end_date=req.end_date,
-            n_classes=req.n_classes, method=req.method, custom_labels=req.custom_labels
+            n_classes=req.n_classes, method=req.method, custom_labels=req.custom_labels, drought_type=req.drought_type, weights=req.weights
         )
     except Exception as exc:
         logger.exception("Drought classify failed")
         raise HTTPException(500, str(exc)) from exc
 
-
+@app.post("/api/drought/export", tags=["analysis"])
+def drought_export_endpoint(req: DroughtRequest):
+    _require_gee()
+    try:
+        from gee.drought import compute_drought_export
+        return compute_drought_export(
+            req.aoi, req.start_year, req.end_year,
+            season=req.season, start_month=req.start_month, end_month=req.end_month,
+            start_date=req.start_date, end_date=req.end_date,
+            drought_type=req.drought_type, weights=req.weights
+        )
+    except Exception as exc:
+        logger.exception("Drought export failed")
+        raise HTTPException(500, str(exc)) from exc
 
 # ── RARE DATA — Dataset Repository ─────────────────────────────────────────
 
