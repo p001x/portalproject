@@ -83,7 +83,7 @@ def compute_ahp_data(weights: dict) -> dict:
 def _distance_km(mask, aoi, scale=None):
     if scale is None:
         scale = get_dynamic_scale(aoi)
-    safe_scale = max(scale, 100)
+    safe_scale = max(scale, 250)
     
     # Force mask to coarse resolution before distance transform to avoid memory limits
     coarse_mask = mask.reproject(crs="EPSG:4326", scale=safe_scale)
@@ -265,7 +265,7 @@ def _build_flood_image(aoi_config: dict, start_year: int, end_year: int, weights
     )
 
     # 7. Drainage Density
-    safe_scale = max(get_dynamic_scale(aoi), 100)
+    safe_scale = max(get_dynamic_scale(aoi), 250)
     coarse_water = water_mask.reproject(crs="EPSG:4326", scale=safe_scale)
     drainage_density = (coarse_water
         .reduceNeighborhood(
