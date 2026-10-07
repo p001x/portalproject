@@ -84,10 +84,13 @@ def _distance_km(mask, aoi, scale=None):
     if scale is None:
         scale = get_dynamic_scale(aoi)
     safe_scale = max(scale, 100)
-    return (mask.fastDistanceTransform(256)
+    
+    # Force mask to coarse resolution before distance transform to avoid memory limits
+    coarse_mask = mask.reproject(crs="EPSG:4326", scale=safe_scale)
+    
+    return (coarse_mask.fastDistanceTransform(256)
             .multiply(safe_scale)
             .divide(1000)
-            .reproject(crs="EPSG:4326", scale=safe_scale)
             .clip(aoi))
 
 
@@ -217,11 +220,7 @@ def _build_flood_image(aoi_config: dict, start_year: int, end_year: int, weights
     gsw = ee.Image("JRC/GSW1_4/GlobalSurfaceWater").select("occurrence")
     water_mask = gsw.gte(50).unmask(0).Or(lc.eq(80)).Or(lc.eq(90))
     
-    if not is_global:
-        river_dist_km = _distance_km(water_mask, aoi)
-    else:
-        # Fallback to extremely coarse simplified distance for global to avoid memory limit
-        river_dist_km = water_mask.fastDistanceTransform(256).multiply(5000).divide(1000).clip(aoi)
+    river_dist_km = _distance_km(water_mask, aoi)
         
     river_dist_score = (
         ee.Image(1)
@@ -241,12 +240,8 @@ def _build_flood_image(aoi_config: dict, start_year: int, end_year: int, weights
         roads = ee.FeatureCollection("projects/sat-io/open-datasets/GRIP4/GlobalRoads").filterBounds(aoi)
         soiltype = ee.Image("OpenLandMap/SOL/SOL_TEXTURE-CLASS_USDA-315_M/v02").select("b0").clip(aoi)
 
-    if not is_global:
-        road_mask = ee.Image(0).paint(roads, 1).eq(1)
-        road_dist_km = _distance_km(road_mask, aoi)
-    else:
-        road_mask = ee.Image(0).paint(roads, 1).eq(1)
-        road_dist_km = road_mask.fastDistanceTransform(256).multiply(5000).divide(1000).clip(aoi)
+    road_mask = ee.Image(0).paint(roads, 1).eq(1)
+    road_dist_km = _distance_km(road_mask, aoi)
 
     road_dist_score = (
         ee.Image(1)
@@ -271,12 +266,12 @@ def _build_flood_image(aoi_config: dict, start_year: int, end_year: int, weights
 
     # 7. Drainage Density
     safe_scale = max(get_dynamic_scale(aoi), 100)
-    drainage_density = (water_mask
+    coarse_water = water_mask.reproject(crs="EPSG:4326", scale=safe_scale)
+    drainage_density = (coarse_water
         .reduceNeighborhood(
             reducer=ee.Reducer.sum(),
             kernel=ee.Kernel.circle(radius=1000, units='meters')
         )
-        .reproject(crs="EPSG:4326", scale=safe_scale)
         .clip(aoi))
     drainage_density_score = (
         ee.Image(1)
