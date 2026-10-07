@@ -495,18 +495,15 @@ def compute_flood_classify(aoi_config: dict, start_year: int, end_year: int, wei
 
 
 def compute_flood_export(aoi_config: dict, start_year: int, end_year: int, weights: dict, reverse_flags: dict) -> dict:
-    aoi = get_aoi_geometry(aoi_config)
-    suitability, _, _ = _build_flood_image(aoi, start_year, end_year, weights, reverse_flags)
+    suitability, _, _, aoi, is_global = _build_flood_image(aoi_config, start_year, end_year, weights, reverse_flags)
     
     from threading import BoundedSemaphore
     gee_semaphore = BoundedSemaphore(5)
     with gee_semaphore:
-        is_global = False
-        try:
-            geom_str = str(aoi.serialize())
-            if "-180" in geom_str and "180" in geom_str and "90" in geom_str and "-90" in geom_str:
-                is_global = True
-        except: pass
         calc_geom = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False) if is_global else aoi.bounds(maxError=1000)
-        download_url = suitability.getDownloadURL({"scale": get_dynamic_scale(aoi), "region": calc_geom, "format": "GEO_TIFF"})
+        try:
+            download_url = suitability.getDownloadURL({"scale": get_dynamic_scale(aoi), "region": calc_geom, "format": "GEO_TIFF"})
+        except Exception:
+            download_url = None
     return {"download_url": download_url}
+
