@@ -69,6 +69,16 @@ function GEELayer({ tileUrl }: { tileUrl: string }) {
   const layersRef = useRef<Record<string, L.TileLayer>>({});
 
   useEffect(() => {
+    return () => {
+      Object.values(layersRef.current).forEach(layer => {
+        if (map.hasLayer(layer)) {
+          map.removeLayer(layer);
+        }
+      });
+    };
+  }, [map]);
+
+  useEffect(() => {
     if (!tileUrl) return;
 
     if (!layersRef.current[tileUrl]) {
@@ -107,6 +117,11 @@ function GEELayer({ tileUrl }: { tileUrl: string }) {
         layer.addTo(map);
         layersRef.current[tileUrl] = layer;
       }
+    } else {
+      const activeLayer = layersRef.current[tileUrl];
+      if (activeLayer && !map.hasLayer(activeLayer)) {
+        activeLayer.addTo(map);
+      }
     }
 
     // Hide all layers
@@ -121,18 +136,6 @@ function GEELayer({ tileUrl }: { tileUrl: string }) {
     if (activeLayer && typeof activeLayer.setOpacity === "function") {
       activeLayer.setOpacity(0.85);
     }
-
-    // We purposely do NOT remove layers when just switching tileUrl.
-    // Keeping inactive layers on the map with opacity 0 ensures Leaflet
-    // retains the DOM nodes and image data, making switching back 100% instant.
-    return () => {
-      // Clean up layers ONLY when the component completely unmounts (e.g. switching modules)
-      Object.values(layersRef.current).forEach(layer => {
-        if (map.hasLayer(layer)) {
-          map.removeLayer(layer);
-        }
-      });
-    };
   }, [tileUrl, map]);
   
   return null;

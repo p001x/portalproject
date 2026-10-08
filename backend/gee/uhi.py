@@ -1,4 +1,5 @@
 from __future__ import annotations
+from gee.persistent_cache import with_cache
 import json
 import base64
 import io
@@ -235,6 +236,7 @@ def _render_scatter(df: pd.DataFrame, intercept, slope_ndbi, slope_ndvi, r2, p, 
     plt.close(fig)
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
+@with_cache
 def compute_uhi(aoi_config: dict, start_date: str, end_date: str, grid_size: int = 6, n_classes: int = 5, method: str = "natural_breaks", custom_labels: list = None, lst_source: str = "hybrid") -> dict:
     cache_key = ("uhi_all", json.dumps(aoi_config, sort_keys=True), start_date, end_date, grid_size, n_classes, method, tuple(custom_labels) if custom_labels else None, lst_source)
     with _lock:
@@ -436,10 +438,13 @@ def compute_uhi(aoi_config: dict, start_date: str, end_date: str, grid_size: int
         _cache[cache_key] = result
     return result
 
+@with_cache
 def compute_uhi_map(aoi_config: dict, start_date: str, end_date: str, grid_size: int = 6, lst_source: str = "hybrid") -> dict:
     return compute_uhi(aoi_config, start_date, end_date, grid_size, lst_source=lst_source)
+@with_cache
 def compute_uhi_stats(aoi_config: dict, start_date: str, end_date: str, grid_size: int = 6, lst_source: str = "hybrid") -> dict:
     return compute_uhi(aoi_config, start_date, end_date, grid_size, lst_source=lst_source)
+@with_cache
 def compute_uhi_classify(aoi_config: dict, start_date: str, end_date: str, grid_size: int = 6, n_classes: int = 5, method: str = "natural_breaks", custom_labels: list = None, lst_source: str = "hybrid") -> dict:
     return compute_uhi(aoi_config, start_date, end_date, grid_size, n_classes, method, custom_labels, lst_source=lst_source)
 def compute_uhi_export(aoi_config: dict, start_date: str, end_date: str, grid_size: int = 6, lst_source: str = "hybrid") -> dict:

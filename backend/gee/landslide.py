@@ -1,3 +1,4 @@
+from gee.persistent_cache import with_cache
 import json
 """Landslide Susceptibility Index — refactored for decoupled API."""
 import math
@@ -294,6 +295,7 @@ def _build_lsi_images(
         raise e
 
 
+@with_cache
 def compute_landslide_map(
     aoi_config: dict, start_year: int = 2019, end_year: int = 2024,
     reverse_slope: bool = False, reverse_rainfall: bool = False, reverse_litho: bool = False,
@@ -355,6 +357,7 @@ def compute_landslide_map(
     return result
 
 
+@with_cache
 def compute_landslide_stats(
     aoi_config: dict, start_year: int = 2019, end_year: int = 2024,
     reverse_slope: bool = False, reverse_rainfall: bool = False, reverse_litho: bool = False,
@@ -415,6 +418,7 @@ def compute_landslide_stats(
     return result
 
 
+@with_cache
 def compute_landslide_classify(
     aoi_config: dict, start_year: int = 2019, end_year: int = 2024, n_classes: int = 5,
     reverse_slope: bool = False, reverse_rainfall: bool = False, reverse_litho: bool = False,
@@ -463,6 +467,7 @@ def compute_landslide_classify(
     return result
 
 
+@with_cache
 def compute_landslide_export(
     aoi_config: dict, start_year: int = 2019, end_year: int = 2024,
     reverse_slope: bool = False, reverse_rainfall: bool = False, reverse_litho: bool = False,
@@ -547,6 +552,7 @@ def compute_landslide_export(
     return result
 
 
+@with_cache
 def compute_landslide_susceptibility(
     district_or_aoi, start_year: int = 2019, end_year: int = 2024, n_classes: int = 5,
     reverse_slope: bool = False, reverse_rainfall: bool = False, reverse_litho: bool = False,

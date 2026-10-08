@@ -1,3 +1,4 @@
+from gee.persistent_cache import with_cache
 import json
 """Landfill site suitability (SMCE / Weighted Overlay) — FastAPI backend."""
 import math
@@ -38,6 +39,7 @@ _SCORE_VIS = {"min": 1, "max": 5, "palette": ["#d73027", "#f46d43", "#fee08b", "
 _RI = {1: 0.0, 2: 0.0, 3: 0.58, 4: 0.90, 5: 1.12, 6: 1.24, 7: 1.32, 8: 1.41, 9: 1.45, 10: 1.49}
 
 
+@with_cache
 def compute_ahp_data(weights: dict) -> dict:
     """
     Given a weight dict {factor: value}, compute the implied AHP pairwise comparison
@@ -220,6 +222,7 @@ def _build_landfill_base(
 
     return aoi, suitability, score_images, raw_layers, weights, reverse_flags
 
+@with_cache
 def compute_landfill_map(
     aoi_config: dict,
     reverse_river: bool = False, reverse_residential: bool = False,
@@ -278,6 +281,7 @@ def compute_landfill_map(
         _cache[cache_key] = result
     return result
 
+@with_cache
 def compute_landfill_stats(
     aoi_config: dict,
     reverse_river: bool = False, reverse_residential: bool = False,
@@ -330,6 +334,7 @@ def compute_landfill_stats(
         _cache[cache_key] = result
     return result
 
+@with_cache
 def compute_landfill_classify(
     aoi_config: dict,
     reverse_river: bool = False, reverse_residential: bool = False,
@@ -366,6 +371,7 @@ def compute_landfill_classify(
         _cache[cache_key] = result = classify
     return result
 
+@with_cache
 def compute_landfill_export(
     aoi_config: dict,
     reverse_river: bool = False, reverse_residential: bool = False,

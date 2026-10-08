@@ -66,3 +66,33 @@ class PersistentCache:
                     os.remove(os.path.join(CACHE_DIR, f))
         except Exception:
             pass
+
+import functools
+import json
+
+def with_cache(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        _cache = PersistentCache(ttl=3600)
+        
+        key_parts = [func.__name__]
+        for a in args:
+            if isinstance(a, dict):
+                key_parts.append(json.dumps(a, sort_keys=True))
+            else:
+                key_parts.append(str(a))
+        for k, v in sorted(kwargs.items()):
+            if isinstance(v, dict):
+                key_parts.append(json.dumps(v, sort_keys=True))
+            else:
+                key_parts.append(str(v))
+                
+        cache_key = json.dumps(key_parts, sort_keys=True)
+        
+        if cache_key in _cache:
+            return _cache[cache_key]
+            
+        result = func(*args, **kwargs)
+        _cache[cache_key] = result
+        return result
+    return wrapper

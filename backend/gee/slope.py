@@ -1,3 +1,4 @@
+from gee.persistent_cache import with_cache
 import json
 """Slope / Terrain analysis — no Streamlit dependency."""
 import ee
@@ -62,6 +63,7 @@ def _build_slope_base(aoi_config: dict):
 
     return aoi, dynamic_scale, dem, slope, aspect, hillshade, tpi, tri, upa, dir, contours, lsi, solar
 
+@with_cache
 def compute_slope_map(aoi_config: dict) -> dict:
     cache_key = ("slope_map", json.dumps(aoi_config, sort_keys=True))
     with _lock:
@@ -136,6 +138,7 @@ def compute_slope_map(aoi_config: dict) -> dict:
         _cache[cache_key] = result
     return result
 
+@with_cache
 def compute_slope_stats(aoi_config: dict) -> dict:
     cache_key = ("slope_stats", json.dumps(aoi_config, sort_keys=True))
     with _lock:
@@ -196,6 +199,7 @@ def compute_slope_stats(aoi_config: dict) -> dict:
         _cache[cache_key] = result
     return result
 
+@with_cache
 def compute_slope_classify(aoi_config: dict, n_classes: int = 5, method: str = "natural_breaks", custom_labels: list = None, custom_breaks: list = None) -> dict:
     cache_key = ("slope_classify", json.dumps(aoi_config, sort_keys=True), n_classes, method, tuple(custom_labels) if custom_labels else None, tuple(custom_breaks) if custom_breaks else None)
     with _lock:
@@ -225,6 +229,7 @@ def compute_slope_classify(aoi_config: dict, n_classes: int = 5, method: str = "
         _cache[cache_key] = result
     return result
 
+@with_cache
 def compute_slope_export(aoi_config: dict) -> dict:
     cache_key = ("slope_export", json.dumps(aoi_config, sort_keys=True))
     with _lock:
@@ -371,6 +376,7 @@ def delineate_watershed(lat: float, lon: float, level: int = 12) -> dict:
 
 
 
+@with_cache
 def compute_earthwork(polygon_coords: list, target_elevation: float) -> dict:
     """
     polygon_coords: list of [lon, lat] points forming a closed ring.

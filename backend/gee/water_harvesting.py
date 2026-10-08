@@ -1,3 +1,4 @@
+from gee.persistent_cache import with_cache
 from gee.aoi_utils import get_bounds_and_center
 """Water Harvesting Calculator — FastAPI backend."""
 import json
@@ -72,6 +73,7 @@ def get_continuous_labels(breaks, unit=""):
     return labels
 
 
+@with_cache
 def compute_water_harvesting_map(aoi_config: dict, start_year: int, end_year: int) -> dict:
     cache_key = json.dumps({"aoi": aoi_config, "start_year": start_year, "end_year": end_year}, sort_keys=True)
     with _lock:
@@ -120,6 +122,7 @@ def recommend_tank(volume_liters: float) -> int:
     return (int(volume_liters) // 5000 + 1) * 5000
 
 
+@with_cache
 def compute_water_harvesting_stats(aoi_config: dict, start_year: int, end_year: int, runoff_coefficient: float, manual_area_m2: float = None, use_building_footprint: bool = False, household_size: int = 5, daily_water_use_liters: int = 50) -> dict:
     cache_key = json.dumps({
         "aoi": aoi_config, "start_year": start_year, "end_year": end_year, 
@@ -242,6 +245,7 @@ def compute_water_harvesting_stats(aoi_config: dict, start_year: int, end_year: 
     return out
 
 
+@with_cache
 def compute_water_harvesting_export(aoi_config: dict, start_year: int, end_year: int) -> dict:
     cache_key = json.dumps({"aoi": aoi_config, "start_year": start_year, "end_year": end_year}, sort_keys=True)
     with _lock:

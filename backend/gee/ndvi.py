@@ -1,3 +1,4 @@
+from gee.persistent_cache import with_cache
 import json
 """NDVI computation — no Streamlit dependency. Uses in-memory TTL cache."""
 import ee
@@ -20,6 +21,7 @@ _cache = PersistentCache(ttl=3600)
 _lock = Lock()
 
 
+@with_cache
 def compute_ndvi(
     aoi_config: dict,
     start_date: str,

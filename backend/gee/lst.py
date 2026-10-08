@@ -1,3 +1,4 @@
+from gee.persistent_cache import with_cache
 import json
 """Land Surface Temperature (LST) — no Streamlit dependency."""
 import ee
@@ -103,6 +104,7 @@ def lst_image_and_aoi(aoi_config: dict, start_date: str, end_date: str):
     return lst_final.rename("LST").addBands(ndwi_final.rename("NDWI")), aoi
 
 
+@with_cache
 def compute_lst(aoi_config: dict, start_date: str, end_date: str, n_classes: int = 5, method: str = "natural_breaks", custom_labels: list = None) -> dict:
     cache_key = (json.dumps(aoi_config, sort_keys=True), start_date, end_date, n_classes, method, tuple(custom_labels) if custom_labels else None)
     with _lock:

@@ -1,3 +1,4 @@
+from gee.persistent_cache import with_cache
 from gee.aoi_utils import get_bounds_and_center
 """Irrigation Scheduling Advisor — FastAPI backend."""
 import json
@@ -134,6 +135,7 @@ def _build_irrigation_images(aoi_config: dict, start_date: str, end_date: str, p
     return aoi, deficit, etc, peff_total, taw, kc
 
 
+@with_cache
 def compute_irrigation_map(
     aoi_config: dict, 
     start_date: str, 
@@ -198,6 +200,7 @@ def compute_irrigation_map(
     return result
 
 
+@with_cache
 def compute_irrigation_stats(
     aoi_config: dict, start_date: str, end_date: str, planting_date: str, crop_type: str
 ) -> dict:
@@ -254,6 +257,7 @@ def compute_irrigation_stats(
     return result
 
 
+@with_cache
 def compute_irrigation_export(
     aoi_config: dict, start_date: str, end_date: str, planting_date: str, crop_type: str
 ) -> dict:

@@ -1,3 +1,4 @@
+from gee.persistent_cache import with_cache
 import json
 import ee
 from gee.persistent_cache import PersistentCache
@@ -178,6 +179,7 @@ def calculate_index(composite: ee.Image, index_type: str = "NDVI") -> ee.Image:
         return composite.normalizedDifference(["B8", "B4"]).rename("index")
 
 
+@with_cache
 def compute_change_detection(
     aoi_config: dict,
     before_start: str,

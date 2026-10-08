@@ -1,3 +1,4 @@
+from gee.persistent_cache import with_cache
 import json
 import logging
 import os
@@ -512,6 +513,7 @@ def fetch_osrm_route(start_lon, start_lat, end_lon, end_lat):
         "duration": dist / (40 / 3.6) # Approx duration at 40km/h
     }
 
+@with_cache
 def compute_accessibility_map(aoi_config: dict, amenities: list[str], dest_amenities: list[str] = None, n_classes: int = 4, service_threshold_mins: int = 30, method: str = "natural_breaks", proposed_facilities: list = None, transport_mode: str = "walking") -> dict:
     dest_am = dest_amenities or []
     cache_key = (json.dumps(aoi_config, sort_keys=True), "-".join(sorted(amenities)), "-".join(sorted(dest_am)), n_classes, service_threshold_mins, method, transport_mode, "v12")
@@ -627,6 +629,7 @@ def compute_accessibility_map(aoi_config: dict, amenities: list[str], dest_ameni
     return result
 
 
+@with_cache
 def compute_accessibility_stats(aoi_config: dict, amenities: list[str], dest_amenities: list[str] = None, n_classes: int = 4, service_threshold_mins: int = 30, proposed_facilities: list = None, transport_mode: str = "walking") -> dict:
     dest_am = dest_amenities or []
     cache_key = (json.dumps(aoi_config, sort_keys=True), "-".join(sorted(amenities)), "-".join(sorted(dest_am)), n_classes, service_threshold_mins, transport_mode, "v12")
@@ -721,6 +724,7 @@ def compute_accessibility_stats(aoi_config: dict, amenities: list[str], dest_ame
     return result
 
 
+@with_cache
 def compute_accessibility_classify(aoi_config: dict, amenities: list[str], dest_amenities: list[str] = None, n_classes: int = 4, service_threshold_mins: int = 30, method: str = "natural_breaks", custom_labels: list[str] = None, proposed_facilities: list = None, transport_mode: str = "walking") -> dict:
     dest_am = dest_amenities or []
     cache_key = (json.dumps(aoi_config, sort_keys=True), "-".join(sorted(amenities)), "-".join(sorted(dest_am)), n_classes, service_threshold_mins, method, tuple(custom_labels) if custom_labels else None, transport_mode, "v12")
@@ -746,6 +750,7 @@ def compute_accessibility_classify(aoi_config: dict, amenities: list[str], dest_
     return result
 
 
+@with_cache
 def compute_accessibility_export(aoi_config: dict, amenities: list[str], dest_amenities: list[str] = None, n_classes: int = 4, service_threshold_mins: int = 30, proposed_facilities: list = None, transport_mode: str = "walking") -> dict:
     dest_am = dest_amenities or []
     cache_key = (json.dumps(aoi_config, sort_keys=True), "-".join(sorted(amenities)), "-".join(sorted(dest_am)), n_classes, service_threshold_mins, transport_mode, "v12")
@@ -796,6 +801,7 @@ def compute_accessibility_export(aoi_config: dict, amenities: list[str], dest_am
     return result
 
 
+@with_cache
 def compute_accessibility_analysis(
     district_or_aoi, amenities: list[str], n_classes: int = 4
 ) -> dict:

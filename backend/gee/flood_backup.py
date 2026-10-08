@@ -11,8 +11,6 @@ from gee.aoi_utils import get_aoi_geometry, get_historical_ndvi
 
 _cache = PersistentCache(ttl=86400)
 _lock = Lock()
-from threading import BoundedSemaphore
-gee_semaphore = BoundedSemaphore(5)
 
 from gee.aoi_utils import get_dynamic_scale
 
@@ -85,27 +83,24 @@ def compute_ahp_data(weights: dict) -> dict:
 
 
 def _clamp_to_mercator(geometry):
-    """Clamp geometry to EPSG:3857-safe latitude bounds (Ãƒâ€šÃ‚Â±85Ãƒâ€šÃ‚Â°).
-    Web Mercator cannot represent latitudes at or above ~85.06Ãƒâ€šÃ‚Â°.
-    Countries like Russia extend to 90Ãƒâ€šÃ‚Â°N, causing projection failures."""
-    safe_bounds = ee.Geometry.Rectangle([-180, -85, 180, 85], "EPSG:4326", False)
+    """Clamp geometry to EPSG:3857-safe latitude bounds (±85°).
+    Web Mercator cannot represent latitudes at or above ~85.06°.
+    Countries like Russia extend to 90°N, causing projection failures."""
+    safe_bounds = ee.Geometry.BBox(-180, -85, 180, 85)
     return geometry.intersection(safe_bounds, maxError=1000)
 
 
 def _distance_km(mask, aoi, scale=None, use_4326=False):
     if scale is None:
         scale = get_dynamic_scale(aoi)
-    safe_scale = max(scale, 500)
+    safe_scale = max(scale, 250)
     
     # Rwanda uses EPSG:4326 (small area, no issues).
     # Global/Custom uses EPSG:3857 (needs mercator-clamped aoi).
     crs = "EPSG:4326" if use_4326 else "EPSG:3857"
     coarse_mask = mask.reproject(crs=crs, scale=safe_scale)
     
-    # Use a small search window (16 pixels) because we only score distances up to ~2km.
-    # At minimum scale (500m), 16 pixels = 8km. This prevents the window from expanding
-    # past the North Pole (90.0N) when processing massive northern countries like Russia.
-    return (coarse_mask.fastDistanceTransform(16)
+    return (coarse_mask.fastDistanceTransform(256)
             .multiply(safe_scale)
             .divide(1000)
             .clip(aoi))
@@ -137,7 +132,7 @@ def _build_flood_image(aoi_config: dict, start_year: int, end_year: int, weights
     corridor, is_global = _classify_aoi(aoi_config)
     is_rwanda = corridor == "rwanda"
     
-    # For global/custom: clamp geometry to Mercator-safe bounds (Ãƒâ€šÃ‚Â±85Ãƒâ€šÃ‚Â° lat)
+    # For global/custom: clamp geometry to Mercator-safe bounds (±85° lat)
     # to prevent "Can't transform" errors near the poles
     if not is_rwanda:
         aoi = _clamp_to_mercator(aoi)
@@ -255,14 +250,22 @@ def _build_flood_image(aoi_config: dict, start_year: int, end_year: int, weights
     if is_rwanda:
         roads = ee.FeatureCollection("projects/sat-io/open-datasets/GRIP4/Africa").filterBounds(aoi)
         soiltype = ee.Image("ISDASOIL/Africa/v1/texture_class").select("texture_0_20").clip(aoi)
-        road_mask = ee.Image(0).paint(roads, 1).eq(1)
     else:
-        # Global soil dataset
+        # Use Global equivalents
+        # GRIP4 is split by continent, so we merge them for global queries
+        grip_regions = [
+            ee.FeatureCollection("projects/sat-io/open-datasets/GRIP4/Africa"),
+            ee.FeatureCollection("projects/sat-io/open-datasets/GRIP4/Europe"),
+            ee.FeatureCollection("projects/sat-io/open-datasets/GRIP4/North-America"),
+            ee.FeatureCollection("projects/sat-io/open-datasets/GRIP4/Central-South-America"),
+            ee.FeatureCollection("projects/sat-io/open-datasets/GRIP4/Oceania"),
+            ee.FeatureCollection("projects/sat-io/open-datasets/GRIP4/South-East-Asia"),
+            ee.FeatureCollection("projects/sat-io/open-datasets/GRIP4/Middle-East-Central-Asia")
+        ]
+        roads = ee.FeatureCollection(grip_regions).flatten().filterBounds(aoi)
         soiltype = ee.Image("OpenLandMap/SOL/SOL_TEXTURE-CLASS_USDA-TT_M/v02").select("b0").clip(aoi)
-        
-        # Painting millions of road geometries causes Earth Engine to time out on large countries (e.g., Russia).
-        # We use ESA WorldCover Built-up (class 50) as a robust, incredibly fast raster proxy for infrastructure/roads.
-        road_mask = lc.eq(50)
+
+    road_mask = ee.Image(0).paint(roads, 1).eq(1)
     road_dist_km = _distance_km(road_mask, aoi, use_4326=is_rwanda)
 
     road_dist_score = (
@@ -287,21 +290,21 @@ def _build_flood_image(aoi_config: dict, start_year: int, end_year: int, weights
     )
 
     # 7. Drainage Density
-    safe_scale = max(get_dynamic_scale(aoi), 500)
+    safe_scale = max(get_dynamic_scale(aoi), 250)
     coarse_water = water_mask.reproject(crs="EPSG:4326" if is_rwanda else "EPSG:3857", scale=safe_scale)
     drainage_density = (coarse_water
         .reduceNeighborhood(
-            reducer=ee.Reducer.mean(),
-            kernel=ee.Kernel.circle(radius=max(1000, safe_scale * 2), units='meters')
+            reducer=ee.Reducer.sum(),
+            kernel=ee.Kernel.circle(radius=1000, units='meters')
         )
         .clip(aoi))
     drainage_density_score = (
         ee.Image(1)
-        .where(drainage_density.gte(0.2), 5)
-        .where(drainage_density.gte(0.1).And(drainage_density.lt(0.2)), 4)
-        .where(drainage_density.gte(0.05).And(drainage_density.lt(0.1)), 3)
-        .where(drainage_density.gte(0.01).And(drainage_density.lt(0.05)), 2)
-        .where(drainage_density.lt(0.01), 1)
+        .where(drainage_density.gte(2000), 5)
+        .where(drainage_density.gte(1000).And(drainage_density.lt(2000)), 4)
+        .where(drainage_density.gte(500).And(drainage_density.lt(1000)), 3)
+        .where(drainage_density.gte(100).And(drainage_density.lt(500)), 2)
+        .where(drainage_density.lt(100), 1)
         .clip(aoi)
     )
 
@@ -356,13 +359,6 @@ def _build_flood_image(aoi_config: dict, start_year: int, end_year: int, weights
         w = weights.get(key, DEFAULT_WEIGHTS[key])
         suitability = suitability.add(score_images[key].multiply(w))
     
-    # Mask out permanent water bodies (e.g. lakes, oceans) using JRC Global Surface Water
-    water_occurrence = ee.Image("JRC/GSW1_4/GlobalSurfaceWater").select("occurrence")
-    # 'occurrence' > 80% means water is present more than 80% of the time (permanent lakes)
-    # CRITICAL: We must unmask(0) because JRC has NoData over land. If we don't, land gets masked!
-    permanent_water = water_occurrence.unmask(0).gt(80)
-    suitability = suitability.updateMask(permanent_water.Not())
-    
     suitability = suitability.rename("suitability")
     
     return suitability, score_images, raw_images, aoi, is_global
@@ -377,6 +373,9 @@ def compute_flood_map(aoi_config: dict, start_year: int, end_year: int, weights:
 
     suitability, score_images, raw_images, aoi, is_global = _build_flood_image(aoi_config, start_year, end_year, weights, reverse_flags)
     
+    from threading import BoundedSemaphore
+    gee_semaphore = BoundedSemaphore(5)
+
     with gee_semaphore:
         try:
             map_id = suitability.getMapId(_SCORE_VIS)
@@ -393,7 +392,7 @@ def compute_flood_map(aoi_config: dict, start_year: int, end_year: int, weights:
     # We also return factor map urls here for fast access in the frontend
     factor_maps = {}
     # Use python list bounds for region to avoid AttributeError in earthengine-api
-    calc_geom_list = [[-180, -85], [180, -85], [180, 85], [-180, 85], [-180, -85]] if is_global else bounds
+    calc_geom_list = [[-180, -89], [180, -89], [180, 89], [-180, 89], [-180, -89]] if is_global else bounds
 
     for key in FACTOR_ORDER:
         with gee_semaphore:
@@ -452,7 +451,7 @@ def compute_flood_stats(aoi_config: dict, start_year: int, end_year: int, weight
         for i, lbl in enumerate(labels)
     ])
 
-    calc_geom = ee.Geometry.Rectangle([-180, -85, 180, 85], "EPSG:4326", False) if is_global else aoi
+    calc_geom = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False) if is_global else aoi.bounds(maxError=1000)
     area_dict = area_img.reduceRegion(
         reducer=ee.Reducer.sum(), geometry=calc_geom, scale=get_dynamic_scale(aoi), maxPixels=1e13, bestEffort=True, tileScale=16
     ).getInfo()

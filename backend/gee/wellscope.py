@@ -1,3 +1,4 @@
+from gee.persistent_cache import with_cache
 import json
 import ee
 import time
@@ -46,6 +47,7 @@ _SUITABILITY_VIS = {
 
 _RI = {1: 0.0, 2: 0.0, 3: 0.58, 4: 0.90, 5: 1.12, 6: 1.24, 7: 1.32, 8: 1.41, 9: 1.45, 10: 1.49}
 
+@with_cache
 def compute_ahp_data(weights: dict) -> dict:
     n = len(FACTOR_ORDER)
     w = [max(weights.get(f, DEFAULT_WEIGHTS[f]), 1e-9) for f in FACTOR_ORDER]
@@ -236,6 +238,7 @@ def _build_wellscope_base(aoi_config: dict, custom_weights: dict = None):
             pass
         raise e
 
+@with_cache
 def compute_wellscope_map(aoi_config: dict, custom_weights: dict = None) -> dict:
     cache_key = ("wellscope_map", json.dumps(aoi_config, sort_keys=True), json.dumps(custom_weights, sort_keys=True) if custom_weights else None)
     with _lock:
@@ -286,6 +289,7 @@ def compute_wellscope_map(aoi_config: dict, custom_weights: dict = None) -> dict
         _cache_map[cache_key] = result
     return result
 
+@with_cache
 def compute_wellscope_stats(aoi_config: dict, custom_weights: dict = None) -> dict:
     cache_key = ("wellscope_stats", json.dumps(aoi_config, sort_keys=True), json.dumps(custom_weights, sort_keys=True) if custom_weights else None)
     with _lock:
@@ -313,6 +317,7 @@ def compute_wellscope_stats(aoi_config: dict, custom_weights: dict = None) -> di
         _cache_stats[cache_key] = result
     return result
 
+@with_cache
 def compute_wellscope_classify(aoi_config: dict, custom_weights: dict = None, n_classes: int = 5, method: str = "natural_breaks", custom_labels: list = None) -> dict:
     labels_tuple = tuple(custom_labels) if custom_labels else None
     cache_key = ("wellscope_classify", json.dumps(aoi_config, sort_keys=True), json.dumps(custom_weights, sort_keys=True) if custom_weights else None, n_classes, method, labels_tuple)
@@ -347,6 +352,7 @@ def compute_wellscope_classify(aoi_config: dict, custom_weights: dict = None, n_
         _cache_classify[cache_key] = result
     return result
 
+@with_cache
 def compute_wellscope_export(aoi_config: dict, custom_weights: dict = None) -> dict:
     cache_key = ("wellscope_export", json.dumps(aoi_config, sort_keys=True), json.dumps(custom_weights, sort_keys=True) if custom_weights else None)
     with _lock:

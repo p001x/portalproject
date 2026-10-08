@@ -2,6 +2,7 @@ import ee
 from .aoi_utils import get_aoi_geometry
 import concurrent.futures
 from .classify_utils import quantile_classify
+from gee.persistent_cache import with_cache
 
 _PALETTE = ["#0000ff", "#00ffff", "#00ff00", "#ffff00", "#ff0000"]
 _VIS = {"min": 0, "max": 100, "palette": _PALETTE}
@@ -158,6 +159,7 @@ def _build_biomass_base(aoi_config: dict, buffer_km: float = 3.0, start_year: in
     
     return aoi, dynamic_scale, depletion_score, proximity_risk, recent_loss, degradation_risk, forest_mask, clear_cut, gradual_gathering, future_loss_pred, agb_tonnes_ha, pop, is_global
 
+@with_cache
 def compute_biomass_map(aoi_config: dict, buffer_km: float = 3.0, start_year: int = 2019, end_year: int = 2023) -> dict:
     aoi, dynamic_scale, depletion_score, proximity_risk, recent_loss, degradation_risk, forest_mask, clear_cut, gradual_gathering, future_loss_pred, agb_tonnes_ha, pop, is_global = _build_biomass_base(aoi_config, buffer_km, start_year, end_year)
 
@@ -284,6 +286,7 @@ def compute_biomass_map(aoi_config: dict, buffer_km: float = 3.0, start_year: in
         "district": aoi_config.get("district", aoi_config.get("name", "Custom AOI"))
     }
 
+@with_cache
 def compute_biomass_stats(aoi_config: dict, buffer_km: float = 3.0, start_year: int = 2019, end_year: int = 2023) -> dict:
     aoi, dynamic_scale, depletion_score, proximity_risk, recent_loss, degradation_risk, forest_mask, clear_cut, gradual_gathering, future_loss_pred, agb_tonnes_ha, pop, is_global = _build_biomass_base(aoi_config, buffer_km, start_year, end_year)
 
@@ -345,6 +348,7 @@ def compute_biomass_stats(aoi_config: dict, buffer_km: float = 3.0, start_year: 
         }
     }
 
+@with_cache
 def compute_biomass_classify(aoi_config: dict, buffer_km: float = 3.0, start_year: int = 2019, end_year: int = 2023, n_classes: int = 4, method: str = "natural_breaks", custom_labels: list = None) -> dict:
     aoi, dynamic_scale, depletion_score, proximity_risk, recent_loss, degradation_risk, forest_mask, clear_cut, gradual_gathering, future_loss_pred, agb_tonnes_ha, pop, is_global = _build_biomass_base(aoi_config, buffer_km, start_year, end_year)
 
@@ -365,6 +369,7 @@ def compute_biomass_classify(aoi_config: dict, buffer_km: float = 3.0, start_yea
         method=method
     )
 
+@with_cache
 def compute_biomass_export(aoi_config: dict, buffer_km: float = 3.0, start_year: int = 2019, end_year: int = 2023) -> dict:
     aoi, dynamic_scale, depletion_score, proximity_risk, recent_loss, degradation_risk, forest_mask, clear_cut, gradual_gathering, future_loss_pred, agb_tonnes_ha, pop = _build_biomass_base(aoi_config, buffer_km, start_year, end_year)
     

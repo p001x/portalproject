@@ -940,13 +940,6 @@ export const api = {
     stats: (req: { aoi: AOIConfig; year: number; runoff_coefficient?: number; manual_area_m2?: number; use_building_footprint?: boolean; household_size?: number; daily_water_use_liters?: number }) => post<any>("/water-harvesting/stats", req),
     export: (req: { aoi: AOIConfig; year: number; runoff_coefficient?: number; manual_area_m2?: number; use_building_footprint?: boolean; household_size?: number; daily_water_use_liters?: number }) => post<any>("/water-harvesting/export", req),
   },
-  wellscope: {
-    map: (req: any) => post<any>("/wellscope/map", req),
-    stats: (req: any) => post<any>("/wellscope/stats", req),
-    classify: (req: any) => post<any>("/wellscope/classify", req),
-    export: (req: any) => post<any>("/wellscope/export", req),
-    factorExport: (req: any) => post<{ thumb_url: string; download_url: string }>("/wellscope/factor-export", req),
-  },
 
   
   // ... (some lines are omitted for brevity if needed, wait no I shouldn't omit lines in replacement if I match exactly)

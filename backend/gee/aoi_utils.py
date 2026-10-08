@@ -46,9 +46,16 @@ def get_dynamic_scale(geom: ee.Geometry, aoi_config: dict = None) -> int:
         # Use maxError=1000 to avoid projection failures on massive continental geometries
         area_sqkm = safe_get_info(geom.bounds().area(maxError=1000).divide(1e6))
         
-        # Smoothly and dynamically scale resolution to always target ~2,500,000 pixels
-        # This naturally outputs ~10m for villages, ~30m-50m for districts, ~100m for countries
-        target_pixels = 2500000 
+        # Smoothly and dynamically scale resolution to target ~2.5M pixels for normal regions,
+        # but aggressively reduce pixel count for massive countries to prevent GEE timeouts.
+        if area_sqkm > 10000000:
+            target_pixels = 25000   # e.g., Russia (massive reduction)
+        elif area_sqkm > 5000000:
+            target_pixels = 100000  # e.g., Brazil, Australia, USA, Canada
+        elif area_sqkm > 1000000:
+            target_pixels = 500000  # e.g., India, Argentina
+        else:
+            target_pixels = 1000000 # normal target
         area_sqm = area_sqkm * 1_000_000
         scale = math.sqrt(area_sqm / target_pixels)
         
@@ -220,7 +227,7 @@ def _get_aoi_geometry_internal(aoi_config: dict) -> ee.Geometry:
             "Democratic People's Republic of Korea": "North Korea",
             "Viet Nam": "Vietnam",
             "Lao People's Democratic Republic": "Laos",
-            "Côte d'Ivoire": "Cote d'Ivoire",
+            "CÃƒÂ´te d'Ivoire": "Cote d'Ivoire",
             "Congo": "Republic of the Congo",
             "Democratic Republic of the Congo": "Democratic Republic of the Congo"
         }
@@ -241,25 +248,22 @@ def _get_aoi_geometry_internal(aoi_config: dict) -> ee.Geometry:
     elif aoi_type == "gaul1":
         country = aoi_config.get("country")
         level1 = aoi_config.get("level1")
-        fc = ee.FeatureCollection("FAO/GAUL/2015/level1").filter(
-            ee.Filter.And(
-                ee.Filter.eq("ADM0_NAME", country),
-                ee.Filter.eq("ADM1_NAME", level1)
-            )
-        )
+        filters = [ee.Filter.eq("ADM0_NAME", country)]
+        if level1:
+            filters.append(ee.Filter.eq("ADM1_NAME", level1))
+        fc = ee.FeatureCollection("FAO/GAUL/2015/level1").filter(ee.Filter.And(*filters))
         return fc.first().geometry().simplify(maxError=500)
         
     elif aoi_type == "gaul2":
         country = aoi_config.get("country")
         level1 = aoi_config.get("level1")
         level2 = aoi_config.get("level2")
-        fc = ee.FeatureCollection("FAO/GAUL/2015/level2").filter(
-            ee.Filter.And(
-                ee.Filter.eq("ADM0_NAME", country),
-                ee.Filter.eq("ADM1_NAME", level1),
-                ee.Filter.eq("ADM2_NAME", level2)
-            )
-        )
+        filters = [ee.Filter.eq("ADM0_NAME", country)]
+        if level1:
+            filters.append(ee.Filter.eq("ADM1_NAME", level1))
+        if level2:
+            filters.append(ee.Filter.eq("ADM2_NAME", level2))
+        fc = ee.FeatureCollection("FAO/GAUL/2015/level2").filter(ee.Filter.And(*filters))
         return fc.first().geometry().simplify(maxError=100)
         
     # Fallback to old behavior for backwards compatibility during refactor
@@ -338,7 +342,7 @@ def get_historical_ndvi(aoi, year: int, start_date: str = None, end_date: str = 
     except Exception:
         area_sqkm = 999999999
         
-    # Massive Area Handling (>200,000 km² or global):
+    # Massive Area Handling (>200,000 kmÃ‚Â² or global):
     # Only use MODIS if year >= 2000 (MODIS Terra was launched in Dec 1999, data starts Feb 2000)
     if (is_global or area_sqkm > 100000) and year >= 2000:
         modis_dataset = "MODIS/061/MOD13A2" if (is_global or area_sqkm > 300000) else "MODIS/061/MOD13Q1"
@@ -349,7 +353,7 @@ def get_historical_ndvi(aoi, year: int, start_date: str = None, end_date: str = 
         except Exception:
             pass
 
-    # For continental/global areas before 2000, use NOAA CDR AVHRR NDVI (available 1981-present at 0.05°)
+    # For continental/global areas before 2000, use NOAA CDR AVHRR NDVI (available 1981-present at 0.05Ã‚Â°)
     if (is_global or area_sqkm > 2000000) and year < 2000 and year >= 1981:
         try:
             avhrr_col = ee.ImageCollection("NOAA/CDR/AVHRR/NDVI/V5").filterDate(start_date, end_date).select("NDVI")
@@ -438,7 +442,7 @@ def get_historical_ndvi(aoi, year: int, start_date: str = None, end_date: str = 
             .map(prep_l457)
         )
     elif year >= 1984:
-        # Landsat 5 TM (1984-2012) — Full operational era covering 1990!
+        # Landsat 5 TM (1984-2012) Ã¢â‚¬â€ Full operational era covering 1990!
         col = (
             ee.ImageCollection("LANDSAT/LT05/C02/T1_L2")
             .merge(ee.ImageCollection("LANDSAT/LT05/C02/T2_L2"))
@@ -561,6 +565,11 @@ def get_bounds_and_center(aoi):
                 min_lon, max_lon = min(lons), max(lons)
                 
         min_lat, max_lat = min(lats), max(lats)
+        
+        # Clamp latitudes to Web Mercator safe bounds (-85 to 85) to prevent Can't transform errors
+        min_lat = max(-85.0, min_lat)
+        max_lat = min(85.0, max_lat)
+        
         bounds = [
             [min_lon, min_lat],
             [max_lon, min_lat],

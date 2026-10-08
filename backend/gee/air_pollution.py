@@ -1,5 +1,6 @@
+from gee.persistent_cache import with_cache
 import json
-"""Air Pollution (Sentinel-5P NO2, CO, SO2, Aerosol) — decoupled architecture."""
+"""Air Pollution (Sentinel-5P NO2, CO, SO2, Aerosol) ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â decoupled architecture."""
 from datetime import date as _date
 import ee
 from gee.persistent_cache import PersistentCache
@@ -29,7 +30,7 @@ def _month_range(start_date: str, end_date: str):
 def _get_collections(aoi, start_date, end_date):
     """Retrieve quality-masked Sentinel-5P collections."""
     
-    # NO2 (µmol/m2) - Mask qa_value > 0.75
+    # NO2 (ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Âµmol/m2) - Mask qa_value > 0.75
     s5p_no2 = (
         ee.ImageCollection("COPERNICUS/S5P/OFFL/L3_NO2")
         .filterDate(start_date, end_date)
@@ -47,7 +48,7 @@ def _get_collections(aoi, start_date, end_date):
         .map(lambda img: img.rename("CO_mol_m2").copyProperties(img, ["system:time_start"]))
     )
     
-    # SO2 (µmol/m2) - Mask qa_value > 0.5
+    # SO2 (ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Âµmol/m2) - Mask qa_value > 0.5
     s5p_so2 = (
         ee.ImageCollection("COPERNICUS/S5P/OFFL/L3_SO2")
         .filterDate(start_date, end_date)
@@ -74,6 +75,7 @@ def _get_collections(aoi, start_date, end_date):
     return s5p_no2, s5p_co, s5p_so2, s5p_aer, comp_no2, comp_co, comp_so2, comp_aer
 
 
+@with_cache
 def compute_air_pollution_map(aoi_config: dict, start_date: str, end_date: str) -> dict:
     cache_key = ("air_map", json.dumps(aoi_config, sort_keys=True), start_date, end_date)
     with _lock:
@@ -104,6 +106,7 @@ def compute_air_pollution_map(aoi_config: dict, start_date: str, end_date: str) 
     return result
 
 
+@with_cache
 def compute_air_pollution_stats(aoi_config: dict, start_date: str, end_date: str) -> dict:
     cache_key = ("air_stats", json.dumps(aoi_config, sort_keys=True), start_date, end_date)
     with _lock:
@@ -115,7 +118,7 @@ def compute_air_pollution_stats(aoi_config: dict, start_date: str, end_date: str
     _, _, _, _, comp_no2, comp_co, comp_so2, comp_aer = _get_collections(aoi, start_date, end_date)
 
     composite = ee.Image.cat([comp_no2, comp_co, comp_so2, comp_aer])
-    dynamic_scale = 3500
+    from gee.aoi_utils import get_dynamic_scale; dynamic_scale = max(1113, get_dynamic_scale(aoi, aoi_config))
 
     stats = composite.reduceRegion(
         reducer=ee.Reducer.mean()
@@ -131,13 +134,13 @@ def compute_air_pollution_stats(aoi_config: dict, start_date: str, end_date: str
 
     result = {
         "stats": {
-            "Mean NO2 (µmol/m²)": mean_no2,
-            "Max NO2 (µmol/m²)": round(stats.get("NO2_umol_m2_max") or 0, 2),
-            "P90 NO2 (µmol/m²)": round(stats.get("NO2_umol_m2_p90") or 0, 2),
-            "Mean CO (mol/m²)": mean_co,
-            "Mean SO2 (µmol/m²)": mean_so2,
+            "Mean NO2 (ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Âµmol/mÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â²)": mean_no2,
+            "Max NO2 (ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Âµmol/mÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â²)": round(stats.get("NO2_umol_m2_max") or 0, 2),
+            "P90 NO2 (ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Âµmol/mÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â²)": round(stats.get("NO2_umol_m2_p90") or 0, 2),
+            "Mean CO (mol/mÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â²)": mean_co,
+            "Mean SO2 (ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Âµmol/mÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â²)": mean_so2,
             "Mean Aerosol Index": mean_aer,
-            "WHO Threshold (µmol/m²)": WHO_NO2_ANNUAL_THRESHOLD,
+            "WHO Threshold (ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Âµmol/mÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â²)": WHO_NO2_ANNUAL_THRESHOLD,
         },
         "exceeds_who": mean_no2 > WHO_NO2_ANNUAL_THRESHOLD,
     }
@@ -146,6 +149,7 @@ def compute_air_pollution_stats(aoi_config: dict, start_date: str, end_date: str
     return result
 
 
+@with_cache
 def compute_air_pollution_classify(aoi_config: dict, start_date: str, end_date: str, n_classes: int = 5, method: str = "natural_breaks", custom_labels: list = None) -> dict:
     cache_key = ("air_classify", json.dumps(aoi_config, sort_keys=True), start_date, end_date, n_classes, method, tuple(custom_labels) if custom_labels else None)
     with _lock:
@@ -155,13 +159,13 @@ def compute_air_pollution_classify(aoi_config: dict, start_date: str, end_date: 
     from gee.aoi_utils import get_aoi_geometry
     aoi = get_aoi_geometry(aoi_config)
     _, _, _, _, comp_no2, comp_co, comp_so2, comp_aer = _get_collections(aoi, start_date, end_date)
-    dynamic_scale = 3500
+    from gee.aoi_utils import get_dynamic_scale; dynamic_scale = max(1113, get_dynamic_scale(aoi, aoi_config))
 
     classify = quantile_classify(
         layers=[
-            {"name": "NO2_umol_m2", "image": comp_no2, "title": "NO₂ Column (µmol/m²)"},
-            {"name": "CO_mol_m2", "image": comp_co, "title": "CO Column (mol/m²)"},
-            {"name": "SO2_umol_m2", "image": comp_so2, "title": "SO₂ Column (µmol/m²)"},
+            {"name": "NO2_umol_m2", "image": comp_no2, "title": "NOÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ Column (ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Âµmol/mÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â²)"},
+            {"name": "CO_mol_m2", "image": comp_co, "title": "CO Column (mol/mÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â²)"},
+            {"name": "SO2_umol_m2", "image": comp_so2, "title": "SOÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ Column (ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Âµmol/mÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â²)"},
             {"name": "AER_AI", "image": comp_aer, "title": "Aerosol Index (Unitless)"},
         ],
         aoi=aoi, scale=dynamic_scale, n_classes=n_classes,
@@ -173,6 +177,7 @@ def compute_air_pollution_classify(aoi_config: dict, start_date: str, end_date: 
     return result
 
 
+@with_cache
 def compute_air_pollution_export(aoi_config: dict, start_date: str, end_date: str) -> dict:
     cache_key = ("air_export", json.dumps(aoi_config, sort_keys=True), start_date, end_date)
     with _lock:
@@ -184,22 +189,32 @@ def compute_air_pollution_export(aoi_config: dict, start_date: str, end_date: st
     _, _, _, _, comp_no2, comp_co, comp_so2, comp_aer = _get_collections(aoi, start_date, end_date)
 
     composite = ee.Image.cat([comp_no2, comp_co, comp_so2, comp_aer])
-    dynamic_scale = 1000
+    from gee.aoi_utils import get_dynamic_scale; dynamic_scale = max(1113, get_dynamic_scale(aoi, aoi_config))
     district_name = aoi_config.get("district", aoi_config.get("name", "Custom AOI"))
 
-    download_url = composite.getDownloadURL({
-        "name": f"Air_Pollution_{district_name.replace(' ', '_')}",
-        "region": aoi.bounds(),
-        "scale": dynamic_scale,
-        "format": "GEO_TIFF",
-        "maxPixels": 1e9
-    })
+    download_url = None
+    for attempt in range(3):
+        try:
+            download_url = composite.getDownloadURL({
+                "name": f"Air_Pollution_{district_name.replace(' ', '_')}",
+                "region": aoi.bounds(),
+                "scale": dynamic_scale,
+                "format": "GEO_TIFF",
+                "maxPixels": 1e9
+            })
+            break
+        except Exception as e:
+            if "size" in str(e).lower() and "must be less than" in str(e).lower():
+                dynamic_scale = int(dynamic_scale * 1.5)
+            else:
+                raise
     result = {"download_url": download_url}
     with _lock:
         _cache[cache_key] = result
     return result
 
 
+@with_cache
 def compute_air_pollution_timeseries(aoi_config: dict, start_date: str, end_date: str) -> dict:
     cache_key = ("air_ts", json.dumps(aoi_config, sort_keys=True), start_date, end_date)
     with _lock:
@@ -210,7 +225,7 @@ def compute_air_pollution_timeseries(aoi_config: dict, start_date: str, end_date
     aoi = get_aoi_geometry(aoi_config)
     s5p_no2, s5p_co, s5p_so2, s5p_aer, _, _, _, _ = _get_collections(aoi, start_date, end_date)
     
-    dynamic_scale = 2000 # Use coarser scale for time-series to improve speed
+    from gee.aoi_utils import get_dynamic_scale; dynamic_scale = max(1113, get_dynamic_scale(aoi, aoi_config)) * 2 # Use coarser scale for time-series
     months = _month_range(start_date, end_date)
     
     # Process each month in parallel to avoid single huge EE image failure
@@ -227,25 +242,47 @@ def compute_air_pollution_timeseries(aoi_config: dict, start_date: str, end_date
         
         combined = ee.Image.cat([no2_mean, co_mean, so2_mean, aer_mean])
         
-        stats = combined.reduceRegion(
-            reducer=ee.Reducer.mean(),
-            geometry=aoi.bounds(maxError=1000),
-            scale=dynamic_scale,
-            maxPixels=1e9,
-            tileScale=2
-        ).getInfo()
+        def fetch_stats(img):
+            return img.reduceRegion(
+                reducer=ee.Reducer.mean(),
+                geometry=aoi.bounds(maxError=1000),
+                scale=dynamic_scale,
+                maxPixels=1e9,
+                tileScale=2
+            ).getInfo()
+            
+        # Try to import safe_gee_call or implement retry logic here
+        import time, random
+        from gee.auth import rotate_credentials
+        retries = 5
+        stats = {}
+        for i in range(retries):
+            try:
+                stats = fetch_stats(combined)
+                break
+            except Exception as e:
+                err_str = str(e)
+                if "429" in err_str or "Too Many Requests" in err_str or "concurrency" in err_str.lower() or "quota" in err_str.lower() or "restricted mode" in err_str.lower() or "permission" in err_str.lower():
+                    try:
+                        rotate_credentials()
+                    except:
+                        pass
+                    if i < retries - 1:
+                        time.sleep((2 ** i) + random.uniform(0, 1))
+                        continue
+                raise
         
         return {
             "month": m,
             "year": y,
-            "NO2 (µmol/m²)": round(stats.get("NO2_umol_m2") or 0, 2),
-            "CO (mol/m²)": round(stats.get("CO_mol_m2") or 0, 4),
-            "SO2 (µmol/m²)": round(stats.get("SO2_umol_m2") or 0, 2),
+            "NO2 (ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Âµmol/mÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â²)": round(stats.get("NO2_umol_m2") or 0, 2),
+            "CO (mol/mÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â²)": round(stats.get("CO_mol_m2") or 0, 4),
+            "SO2 (ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Âµmol/mÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â²)": round(stats.get("SO2_umol_m2") or 0, 2),
             "Aerosol Index": round(stats.get("AER_AI") or 0, 2),
         }
 
     time_series = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
         results = executor.map(process_month, months)
         for res in results:
             time_series.append(res)

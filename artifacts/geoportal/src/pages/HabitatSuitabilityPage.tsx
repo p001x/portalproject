@@ -161,6 +161,7 @@ export function HabitatSuitabilityPage() {
   });
 
   const [aoi, setAoi] = useState<AOIConfig>({ type: "rwanda", country: "Rwanda", province: "Kigali City", name: "Kigali City", start_year: 1980, end_year: 2024 });
+  const [year, setYear] = useState<number>(new Date().getFullYear());
   const effectiveDistrictName = aoi.name || "Custom Study Area";
   const [activeLayer, setActiveLayer] = useState<string>("suitability");
   
@@ -230,10 +231,10 @@ export function HabitatSuitabilityPage() {
       custom_weights,
       method: method,
       custom_labels: customClassNames,
-      start_year: aoi.start_year || 1980, end_year: aoi.end_year || 2024,
+      start_year: year, end_year: year,
       landcover_scores: landcoverScores
     };
-  }, [weights, aoi, reverseFlags, nClasses, method, customClassNames, aoi.start_year, aoi.end_year, landcoverScores, normalize]);
+  }, [weights, aoi, reverseFlags, nClasses, method, customClassNames, year, landcoverScores, normalize]);
 
   const analysisMutation = useMutation({
     mutationFn: async () => api.habitat(getReq()),

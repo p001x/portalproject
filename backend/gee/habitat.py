@@ -1,4 +1,5 @@
 """Grey Crowned Crane Habitat Suitability (AHP / Weighted Overlay) — FastAPI backend."""
+from gee.persistent_cache import with_cache
 import json
 import math
 import ee
@@ -79,6 +80,7 @@ _SCORE_VIS = {"min": 1, "max": 5, "palette": ["#d7191c", "#fdae61", "#ffffbf", "
 _RI = {1: 0.0, 2: 0.0, 3: 0.58, 4: 0.90, 5: 1.12, 6: 1.24, 7: 1.32, 8: 1.41, 9: 1.45, 10: 1.49}
 
 
+@with_cache
 def compute_ahp_data(weights: dict) -> dict:
     n = len(FACTOR_ORDER)
     w = [max(weights.get(f, DEFAULT_WEIGHTS[f]), 1e-9) for f in FACTOR_ORDER]
@@ -291,6 +293,7 @@ def _build_habitat_images(
         return result
 
 
+@with_cache
 def compute_habitat(
     aoi_config: dict,
     reverse_flags: dict,

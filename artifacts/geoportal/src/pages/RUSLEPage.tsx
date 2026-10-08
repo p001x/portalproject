@@ -39,12 +39,12 @@ const YEARS = Array.from({ length: 15 }, (_, i) => 2010 + i);
 const RUSLE_COLORS = ["#1a9641","#a6d96a","#ffffbf","#fdae61","#d7191c","#7b0000"];
 
 const FACTOR_LAYERS = [
-  { key: "A", label: "A — Annual Soil Loss" },
-  { key: "R", label: "R — Rainfall Erosivity" },
-  { key: "K", label: "K — Soil Erodibility" },
-  { key: "LS", label: "LS — Topographic Factor" },
-  { key: "C", label: "C — Cover Management" },
-  { key: "P", label: "P — Support Practice" },
+  { key: "A", label: "A â€” Annual Soil Loss" },
+  { key: "R", label: "R â€” Rainfall Erosivity" },
+  { key: "K", label: "K â€” Soil Erodibility" },
+  { key: "LS", label: "LS â€” Topographic Factor" },
+  { key: "C", label: "C â€” Cover Management" },
+  { key: "P", label: "P â€” Support Practice" },
 ];
 
 const DEFAULT_PRESETS: Record<number, string[]> = {
@@ -68,7 +68,7 @@ function getDefaultLabels(n: number): string[] {
 export function RUSLEPage() {
   const [aoi, setAoi] = useState<AOIConfig>({ type: "rwanda", country: "Rwanda", name: "Rwanda", start_year: 1980, end_year: 2024 });
   const [nClasses, setNClasses] = useState(5);
-  const [method, setMethod] = useState("natural_breaks");
+  const [method, setMethod] = useState("fixed");
   const [customClassNames, setCustomClassNames] = useState<string[]>(() => getDefaultLabels(5));
   
   useEffect(() => {
@@ -160,7 +160,7 @@ export function RUSLEPage() {
 
   return (
     <ResizablePanelGroup direction="horizontal" className="h-full items-stretch">
-      {/* ── Controls sidebar ─────────────────────────────────────── */}
+      {/* â”€â”€ Controls sidebar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
         <aside className="h-full w-full md:border-b md:border-b-0 md:border-r bg-card flex flex-col gap-5 p-5 md:overflow-y-auto">
         <div className="flex items-center gap-2 text-primary font-semibold text-lg">
@@ -168,7 +168,7 @@ export function RUSLEPage() {
           RUSLE Analysis
         </div>
         <p className="text-xs text-muted-foreground leading-relaxed">
-          Revised Universal Soil Loss Equation — estimates annual soil erosion from
+          Revised Universal Soil Loss Equation â€” estimates annual soil erosion from
           rainfall, soil erodibility, slope, cover and practice factors.
         </p>
 
@@ -221,7 +221,7 @@ export function RUSLEPage() {
             </Select>
           </div>
           
-          {method !== "continuous" && (
+          {method !== "continuous" && method !== "fixed" && (
             <div className="space-y-2">
               <Label>Classes: {nClasses}</Label>
               <Slider
@@ -268,7 +268,7 @@ export function RUSLEPage() {
           ) : (
             <Mountain className="w-4 h-4" />
           )}
-          {isPending ? "Computing…" : "Run RUSLE"}
+          {isPending ? "Computingâ€¦" : "Run RUSLE"}
         </Button>
 
         {error && (
@@ -278,7 +278,7 @@ export function RUSLEPage() {
         )}
       </aside>
 
-      {/* ── Results ──────────────────────────────────────────────── */}
+      {/* â”€â”€ Results â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
       </ResizablePanel>
       
       <ResizableHandle withHandle />
@@ -302,8 +302,8 @@ export function RUSLEPage() {
         {isPending && (
           <div className="h-full flex flex-col items-center justify-center gap-3 text-muted-foreground">
             <Loader2 className="w-8 h-8 animate-spin text-primary" />
-            <p>Computing RUSLE for {aoi.name || 'Custom'} ({aoi.start_year || 1980}-{aoi.end_year || 2024})…</p>
-            <p className="text-xs">GEE analysis typically takes 15–60 seconds.</p>
+            <p>Computing RUSLE for {aoi.name || 'Custom'} ({aoi.start_year || 1980}-{aoi.end_year || 2024})â€¦</p>
+            <p className="text-xs">GEE analysis typically takes 15â€“60 seconds.</p>
           </div>
         )}
 
@@ -368,6 +368,7 @@ export function RUSLEPage() {
                   district={aoi.name || "Custom"}
                   title={FACTOR_LAYERS.find(l => l.key === activeLayer)?.label || "RUSLE Map"}
                   classAreas={activeLayer === "risk" ? statsData.risk_index?.class_areas_km2 : activeLayer === "A" ? statsData.n_class_soil_loss_km2 : undefined}
+                  bbox={mapData?.bbox}
                 />
               )}
             </TabsContent>
@@ -378,7 +379,7 @@ export function RUSLEPage() {
                 <>
                   <div>
                     <h2 className="font-semibold text-lg mb-1">
-                      Statistics — {statsData.district}
+                      Statistics â€” {statsData.district}
                     </h2>
                     <p className="text-sm text-muted-foreground">Year: {statsData.start_year || 1980}-{statsData.end_year || 2024}</p>
                   </div>
@@ -413,7 +414,7 @@ export function RUSLEPage() {
                   </div>
 
                   <div>
-                    <h3 className="font-medium mb-3">Class Areas (km²)</h3>
+                    <h3 className="font-medium mb-3">Class Areas (kmÂ²)</h3>
                     <ResponsiveContainer width="100%" height={240}>
                       <BarChart
                         data={Object.entries(statsData.n_class_soil_loss_km2 || statsData.class_areas_km2 || {}).map(([k, v]: any, i) => ({
@@ -423,8 +424,8 @@ export function RUSLEPage() {
                         }))}
                       >
                         <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={50} />
-                        <YAxis unit=" km²" tick={{ fontSize: 11 }} />
-                        <Tooltip formatter={(v: number) => [`${v} km²`, "Area"]} />
+                        <YAxis unit=" kmÂ²" tick={{ fontSize: 11 }} />
+                        <Tooltip formatter={(v: number) => [`${v} kmÂ²`, "Area"]} />
                         <Bar dataKey="area" radius={[4, 4, 0, 0]}>
                           {Object.keys(statsData.n_class_soil_loss_km2 || statsData.class_areas_km2 || {}).map((_, i) => (
                             <Cell key={i} fill={RUSLE_COLORS[i % RUSLE_COLORS.length]} />
@@ -442,7 +443,7 @@ export function RUSLEPage() {
               {statsData && mapData && (
                 <>
                   <div>
-                    <h2 className="font-semibold text-lg mb-1">Factor Maps — {statsData.district}</h2>
+                    <h2 className="font-semibold text-lg mb-1">Factor Maps â€” {statsData.district}</h2>
                     <p className="text-sm text-muted-foreground">
                       Individual RUSLE factor layers classified and visualised per district.
                     </p>
@@ -479,7 +480,7 @@ export function RUSLEPage() {
               {statsData && classifyData && (
                 <>
                   <div>
-                    <h2 className="font-semibold text-lg mb-1">Risk Index — {statsData.district}</h2>
+                    <h2 className="font-semibold text-lg mb-1">Risk Index â€” {statsData.district}</h2>
                     <p className="text-sm text-muted-foreground">
                       Composite erosion risk index derived from all RUSLE factors.
                     </p>
@@ -517,8 +518,8 @@ export function RUSLEPage() {
                         }))}
                       >
                         <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={50} />
-                        <YAxis unit=" km²" tick={{ fontSize: 11 }} />
-                        <Tooltip formatter={(v: number) => [`${v} km²`, "Area"]} />
+                        <YAxis unit=" kmÂ²" tick={{ fontSize: 11 }} />
+                        <Tooltip formatter={(v: number) => [`${v} kmÂ²`, "Area"]} />
                         <Bar dataKey="area" radius={[4, 4, 0, 0]}>
                           {Object.keys(statsData.risk_index?.class_areas_km2 || {}).map((_, i) => (
                             <Cell key={i} fill={RUSLE_COLORS[i % RUSLE_COLORS.length]} />
@@ -531,20 +532,20 @@ export function RUSLEPage() {
               )}
             </TabsContent>
 
-            {/* ── Report ── */}
+            {/* â”€â”€ Report â”€â”€ */}
             <TabsContent value="report" className="space-y-6">
               {statsData && mapData && classifyData && (
                 <>
                   <div>
-                    <h2 className="font-semibold text-lg mb-1">PDF Report — {statsData.district}</h2>
+                    <h2 className="font-semibold text-lg mb-1">PDF Report â€” {statsData.district}</h2>
                     <p className="text-sm text-muted-foreground">
                       Download a full PDF report including soil loss statistics, factor summaries, and risk maps.
                     </p>
                   </div>
                   <div className="bg-card border rounded-lg p-5 space-y-4">
                     <p className="text-sm text-muted-foreground leading-relaxed">
-                      <strong>Contents:</strong> District metadata · Soil loss statistics ·
-                      Factor means (R, K, LS, C, P) · Risk class area table · Maps · Methodology notes.
+                      <strong>Contents:</strong> District metadata Â· Soil loss statistics Â·
+                      Factor means (R, K, LS, C, P) Â· Risk class area table Â· Maps Â· Methodology notes.
                     </p>
                     <ReportDownloadButton aoi={aoi}
                       moduleName="RUSLE Soil Erosion"
@@ -552,13 +553,14 @@ export function RUSLEPage() {
                       dateRange={`${statsData.start_year || 1980} - ${statsData.end_year || 2024}`}
                       stats={{
                         ...statsData.stats,
-                        "Mean R": statsData.factor_means?.R,
-                        "Mean K": statsData.factor_means?.K,
-                        "Mean LS": statsData.factor_means?.LS,
-                        "Mean C": statsData.factor_means?.C,
-                        "Mean P": statsData.factor_means?.P,
+                        ...(statsData.factor_means || {}),
+                        
+                        
+                        
+                        
                       }}
-                      classAreas={statsData.n_class_soil_loss_km2 || statsData.class_areas_km2}
+                      classAreas={classifyData?.panels?.find((p:any) => p.name === "A")?.class_areas}
+                      bbox={mapData?.bbox}
                       extraNotes={`Soil loss is estimated using the Revised Universal Soil Loss Equation (RUSLE). Analysis covers ${statsData.district} district for the year ${statsData.year}.`}
                       maps={[
                         ["Soil Loss Map", classifyData.panels?.find((p:any) => p.name === 'A')?.thumb_url || mapData.thumb_url],

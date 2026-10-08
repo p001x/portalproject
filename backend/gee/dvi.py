@@ -1,3 +1,4 @@
+from gee.persistent_cache import with_cache
 import json
 """DVI computation — AHP-Weighted Drought Vulnerability Map"""
 import ee
@@ -58,6 +59,7 @@ def normInvert(img, lo, hi, name):
 def normPositive(img, lo, hi, name):
     return ee.Image(1).subtract(img.subtract(lo).divide(ee.Number(hi).subtract(lo)).clamp(0, 1)).rename(name)
 
+@with_cache
 def compute_dvi(
     aoi_config: dict,
     start_date: str,
@@ -310,6 +312,7 @@ def build_dvi_image(aoi_config, start_date, end_date, weights=None, corridor=Non
     ]
     return DVI, layers, geometry
 
+@with_cache
 def compute_dvi(
     aoi_config: dict,
     start_date: str,

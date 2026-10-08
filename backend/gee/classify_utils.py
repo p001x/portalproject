@@ -24,7 +24,7 @@ def _safe_gee_call(func, *args, **kwargs):
             return func(*args, **kwargs)
         except Exception as e:
             err_str = str(e)
-            if "429" in err_str or "Too Many Requests" in err_str or "concurrency" in err_str.lower() or "quota" in err_str.lower():
+            if "429" in err_str or "Too Many Requests" in err_str or "concurrency" in err_str.lower() or "quota" in err_str.lower() or "permission" in err_str.lower():
                 rotate_credentials()
                 if i < retries - 1:
                     time.sleep((2 ** i) + random.uniform(0, 1))
@@ -75,7 +75,7 @@ def class_palette(n: int, custom_stops: list = None) -> list:
     return result
 
 def class_labels(n: int, reverse: bool = False) -> list:
-    """Descriptive labels (low → high) for n classes. If reverse=True, returns high → low."""
+    """Descriptive labels (low Ã¢â€ â€™ high) for n classes. If reverse=True, returns high Ã¢â€ â€™ low."""
     presets = {
         1: ["Uniform / Full Area"],
         2: ["Low", "High"],
@@ -248,26 +248,51 @@ def quantile_classify(layers: list, aoi, scale: int, n_classes: int, reverse_pal
 
     calc_geom = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False) if is_global else aoi.bounds(maxError=1000)
 
-    hist_raw = safe_get_info(all_bands.reduceRegion(
-        reducer=ee.Reducer.autoHistogram(maxBuckets=100),
-        geometry=calc_geom,
-        scale=scale,
-        maxPixels=1e8, bestEffort=True, tileScale=4
-    ))
+    if custom_breaks:
+        raw_data = {}
+    elif method == "equal_interval" and n > 1:
+        raw_data = safe_get_info(all_bands.reduceRegion(
+            reducer=ee.Reducer.minMax(),
+            geometry=calc_geom, scale=scale, maxPixels=1e8, bestEffort=True, tileScale=4
+        ))
+    elif method == "quantiles" and n > 1:
+        percentiles = [i * (100 / n) for i in range(1, n)]
+        raw_data = safe_get_info(all_bands.reduceRegion(
+            reducer=ee.Reducer.percentile(percentiles),
+            geometry=calc_geom, scale=scale, maxPixels=1e8, bestEffort=True, tileScale=4
+        ))
+    elif n > 1:
+        hist_raw = safe_get_info(all_bands.reduceRegion(
+            reducer=ee.Reducer.autoHistogram(maxBuckets=100),
+            geometry=calc_geom, scale=scale, maxPixels=1e8, bestEffort=True, tileScale=4
+        ))
+    else:
+        raw_data = {}
 
     classified = []
     area_bands = []
     for j, (nm, img) in enumerate(zip(names, images)):
-        band_hist = hist_raw.get(nm) or []
         if custom_breaks and nm in custom_breaks:
             bps = custom_breaks[nm]
         elif n == 1:
             bps = []
         elif method == "equal_interval":
-            bps = get_equal_interval_breaks(band_hist, n)
+            min_val = raw_data.get(f"{nm}_min")
+            max_val = raw_data.get(f"{nm}_max")
+            if min_val is None or max_val is None or max_val <= min_val:
+                bps = []
+            else:
+                step = (max_val - min_val) / n
+                bps = [round(min_val + i * step, 4) for i in range(1, n)]
         elif method == "quantiles":
-            bps = get_quantile_breaks(band_hist, n)
+            bps = []
+            for i in range(1, n):
+                val = raw_data.get(f"{nm}_p{int(i * (100 / n))}")
+                if val is not None:
+                    bps.append(round(val, 4))
+            bps = sorted(list(set(bps)))
         else:
+            band_hist = hist_raw.get(nm) or []
             bps = get_jenks_breaks(band_hist, n)
         
         # Pad or truncate bps to exactly n-1 elements
@@ -331,7 +356,7 @@ def quantile_classify(layers: list, aoi, scale: int, n_classes: int, reverse_pal
                 
             # Pass vis to getMapId so classified tiles are properly coloured (was missing, causing unstyled maps)
             # NOTE: final_panel is already an RGB-visualized mosaic (3 bands), so getMapId must NOT
-            # receive a palette-bearing vis dict — that only works on single-band images.
+            # receive a palette-bearing vis dict Ã¢â‚¬â€ that only works on single-band images.
             with gee_semaphore:
                 tile_url = _safe_gee_call(lambda: final_panel.getMapId()["tile_fetcher"].url_format)
                 thumb_url = _safe_gee_call(lambda: final_panel.getThumbURL({
@@ -369,9 +394,9 @@ def quantile_classify(layers: list, aoi, scale: int, n_classes: int, reverse_pal
             elif ci == 0:
                 suffix = f" (<{bps[0]:.3g})" if bps else ""
             elif ci == n - 1:
-                suffix = f" (≥{bps[-1]:.3g})" if bps else ""
+                suffix = f" (Ã¢â€°Â¥{bps[-1]:.3g})" if bps else ""
             else:
-                suffix = f" ({bps[ci-1]:.3g}–{bps[ci]:.3g})"
+                suffix = f" ({bps[ci-1]:.3g}Ã¢â‚¬â€œ{bps[ci]:.3g})"
             km2 = round((area_raw.get(f"b{j}c{ci}", 0) or 0) / 1e6, 2)
             areas[lbl + suffix] = km2
 

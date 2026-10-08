@@ -424,9 +424,11 @@ def compute_drought_map(aoi_config, start_year, end_year, season="season_b", sta
 
         # Corridor-aware smoothing
         if corridor == "global":
-            smoothed = drought_img.focal_mean(5000, 'circle', 'meters').updateMask(water_mask.Not())
+            # Skip expensive smoothing for global to prevent User Memory Limit
+            smoothed = drought_img.updateMask(water_mask.Not())
         elif corridor == "custom" and area_sqkm > 50000:
-            smoothed = drought_img.focal_mean(2000, 'circle', 'meters').updateMask(water_mask.Not())
+            # Skip or reduce smoothing for massive custom areas
+            smoothed = drought_img.updateMask(water_mask.Not())
         elif corridor == "rwanda" and area_sqkm > 20000:
             smoothed = drought_img.focal_mean(500, 'circle', 'meters').updateMask(water_mask.Not())
         else:
@@ -477,7 +479,7 @@ def compute_drought_stats(aoi_config, start_year, end_year, season="season_b", s
         with gee_semaphore:
             stats = _safe_gee_call(lambda: safe_get_info(drought_img.reduceRegion(
                 reducer=ee.Reducer.mean().combine(ee.Reducer.min(), sharedInputs=True).combine(ee.Reducer.max(), sharedInputs=True),
-                geometry=calc_geom, scale=scale, maxPixels=1e10
+                geometry=calc_geom, scale=scale, maxPixels=1e13, tileScale=16, bestEffort=True
             )))
 
         res = {
@@ -532,9 +534,9 @@ def compute_drought_export(aoi_config, start_year, end_year, season="season_b", 
 
         # Corridor-aware smoothing
         if corridor == "global":
-            smoothed = drought_img.focal_mean(5000, 'circle', 'meters').updateMask(water_mask.Not())
+            smoothed = drought_img.updateMask(water_mask.Not())
         elif corridor == "custom" and area_sqkm > 50000:
-            smoothed = drought_img.focal_mean(2000, 'circle', 'meters').updateMask(water_mask.Not())
+            smoothed = drought_img.updateMask(water_mask.Not())
         elif corridor == "rwanda" and area_sqkm > 20000:
             smoothed = drought_img.focal_mean(500, 'circle', 'meters').updateMask(water_mask.Not())
         else:

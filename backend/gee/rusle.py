@@ -1,3 +1,4 @@
+from gee.persistent_cache import with_cache
 import json
 """RUSLE soil erosion analysis — refactored for decoupled API."""
 import math
@@ -94,7 +95,10 @@ def _build_rusle_images(
         import hashlib
         from gee.auth import get_gee_status
         
+        from gee.aoi_utils import get_aoi_geometry, get_bounds_and_center
+        
         aoi = get_aoi_geometry(aoi_config)
+        bounds, _ = get_bounds_and_center(aoi)
         dynamic_scale = get_dynamic_scale(aoi)
         
         project_id = get_gee_status()["project_id"]
@@ -206,6 +210,18 @@ def _build_rusle_images(
         A = R.multiply(K).multiply(LS).multiply(C).multiply(P).rename("A")
         A = A.where(A.lt(0), 0).clip(aoi)
         
+        # Mask out permanent water bodies (e.g. lakes, oceans) using JRC Global Surface Water
+        water_occurrence = ee.Image("JRC/GSW1_4/GlobalSurfaceWater").select("occurrence")
+        permanent_water = water_occurrence.unmask(0).gt(80)
+        water_mask = permanent_water.Not()
+        
+        A = A.updateMask(water_mask)
+        R = R.updateMask(water_mask)
+        K = K.updateMask(water_mask)
+        LS = LS.updateMask(water_mask)
+        C = C.updateMask(water_mask)
+        P = P.updateMask(water_mask)
+        
         factor_images = {
             "R": _apply_reverse(R, "R", reverse_r).clip(aoi),
             "K": _apply_reverse(K, "K", reverse_k).clip(aoi),
@@ -258,6 +274,7 @@ def _build_rusle_images(
             if cache_key in _cache_build:
                 del _cache_build[cache_key]
 
+@with_cache
 def compute_rusle_map(
     aoi_config: dict, year: int,
     reverse_r: bool = False, reverse_k: bool = False, reverse_ls: bool = False,
@@ -295,11 +312,13 @@ def compute_rusle_map(
         "thumb_url": factor_maps["A"]["thumb_url"],
         "factor_maps": factor_maps,
         "center": aoi.centroid().coordinates().getInfo()[::-1],
+        "bbox": bounds
     }
     with _lock:
         _cache_map[cache_key] = result
     return result
 
+@with_cache
 def compute_rusle_stats(
     aoi_config: dict, year: int,
     reverse_r: bool = False, reverse_k: bool = False, reverse_ls: bool = False,
@@ -351,6 +370,7 @@ def compute_rusle_stats(
         _cache_stats[cache_key] = result
     return result
 
+@with_cache
 def compute_rusle_classify(
     aoi_config: dict, year: int, n_classes: int = 5,
     reverse_r: bool = False, reverse_k: bool = False, reverse_ls: bool = False,
@@ -384,7 +404,7 @@ def compute_rusle_classify(
         cls = ee.Image(1)
         for i, (_, mask) in enumerate(fixed_class_thresholds):
             cls = cls.where(mask, i + 1)
-        cls = cls.clip(aoi)
+        cls = cls.updateMask(A.mask()).clip(aoi)
         
         vis = {"min": 1, "max": len(labels), "palette": _class_palette(len(labels))}
         smoothed = cls.focal_mode(150, 'circle', 'meters')
@@ -397,6 +417,20 @@ def compute_rusle_classify(
                 "class_areas": {lbl: round((areas.get(f"c{i}") or 0)/1e6, 2) for i, lbl in enumerate(labels)}
             }]
         }
+        
+        # Classify the remaining layers using natural breaks
+        other_labels = [f"Class {i+1}" for i in range(5)]
+        other_layers = [
+            {"name": "R", "image": res["factor_images"]["R"], "title": "Rainfall Erosivity (R)", "palette": FACTOR_VIS["R"]["palette"]},
+            {"name": "K", "image": res["factor_images"]["K"], "title": "Soil Erodibility (K)", "palette": FACTOR_VIS["K"]["palette"]},
+            {"name": "LS", "image": res["factor_images"]["LS"], "title": "Topographic Factor (LS)", "palette": FACTOR_VIS["LS"]["palette"]},
+            {"name": "C", "image": res["factor_images"]["C"], "title": "Cover Management (C)", "palette": FACTOR_VIS["C"]["palette"]},
+            {"name": "P", "image": res["factor_images"]["P"], "title": "Support Practice (P)", "palette": FACTOR_VIS["P"]["palette"]},
+            {"name": "risk_index", "image": res["risk_index"], "title": "Risk Index"},
+        ]
+        other_result = quantile_classify(layers=other_layers, aoi=aoi, scale=scale, n_classes=5, custom_labels=other_labels, method="natural_breaks")
+        result["panels"].extend(other_result["panels"])
+
     else:
         labels = custom_labels or [f"Class {i+1}" for i in range(n_classes)]
         layers_to_classify = [
@@ -410,10 +444,12 @@ def compute_rusle_classify(
         ]
         result = quantile_classify(layers=layers_to_classify, aoi=aoi, scale=scale, n_classes=n_classes, custom_labels=labels, method=method)
 
+
     with _lock:
         _cache_classify[cache_key] = result
     return result
 
+@with_cache
 def compute_rusle_export(
     aoi_config: dict, year: int,
     reverse_r: bool = False, reverse_k: bool = False, reverse_ls: bool = False,

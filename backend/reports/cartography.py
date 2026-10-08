@@ -112,7 +112,7 @@ def get_lat_formatter(span: float):
     return format_lat
 
 
-def add_north_arrow(ax, position: str = 'top right'):
+def add_north_arrow(ax, position: str = 'top right', size_multiplier: float = 1.0):
     """Draw a classic publication-grade dual-facet (black/white) cartographic North Arrow."""
     pos_dict = {
         'top right': (0.93, 0.88),
@@ -134,7 +134,7 @@ def add_north_arrow(ax, position: str = 'top right'):
 
     # 'N' label
     ax.text(cx, cy + 0.052, 'N', transform=ax.transAxes,
-            fontsize=10.5, fontweight='bold', fontfamily='sans-serif',
+            fontsize=10.5 * size_multiplier, fontweight='bold', fontfamily='sans-serif',
             ha='center', va='center', color='#0f172a', zorder=13)
 
     # Dual-tone cartographic needle
@@ -158,7 +158,7 @@ def add_north_arrow(ax, position: str = 'top right'):
     ax.add_patch(right_poly)
 
 
-def add_scalebar(ax, y_center: float, position: str = 'lower left'):
+def add_scalebar(ax, y_center: float, position: str = 'lower left', size_multiplier: float = 1.0):
     """Add a scientifically accurate scale bar calibrated to horizontal meters at given latitude."""
     dx_meters = 111320.0 * np.cos(np.radians(y_center)) if abs(y_center) < 89 else 111320.0
     loc_str = position if position in ('lower left', 'lower right', 'upper left', 'upper right', 'lower center') else 'lower left'
@@ -166,7 +166,7 @@ def add_scalebar(ax, y_center: float, position: str = 'lower left'):
         dx_meters, 'm', length_fraction=0.22,
         location=loc_str,
         rotation='horizontal-only',
-        font_properties={'size': 8, 'weight': 'bold'},
+        font_properties={'size': 8 * size_multiplier, 'weight': 'bold'},
         box_alpha=0.9, box_color='white', border_pad=0.4, color='#0f172a'
     )
     ax.add_artist(scalebar)
@@ -306,7 +306,7 @@ def _cached_cartography(
                 left=True, labelleft=True,
                 top=True, labeltop=False,
                 right=True, labelright=False,
-                labelsize=8, colors='#1e293b', direction='out', length=4, width=0.8
+                labelsize=8 * size_multiplier, colors='#1e293b', direction='out', length=4 * size_multiplier, width=0.8 * size_multiplier
             )
         else:
             ax.set_xticks([])
@@ -324,15 +324,15 @@ def _cached_cartography(
     # 7. Marginalia & Titles
     if show_title and title:
         district_label = f"{aoi_name.strip()} District" if (aoi_name and not aoi_name.lower().endswith("district")) else (aoi_name or "Study Area")
-        ax.set_title(f"{title.upper()}\n", fontsize=11.5, fontweight='bold', color='#0f172a', pad=12)
+        ax.set_title(f"{title.upper()}\n", fontsize=11.5 * size_multiplier, fontweight='bold', color='#0f172a', pad=12 * size_multiplier)
         fig.text(0.5, 0.94, f"{district_label} • Geographic Information System & Earth Observation Analysis",
-                 fontsize=8.5, color='#475569', ha='center', fontfamily='sans-serif', fontweight='medium')
+                 fontsize=8.5 * size_multiplier, color='#475569', ha='center', fontfamily='sans-serif', fontweight='medium')
 
     if show_compass:
-        add_north_arrow(ax, position=north_arrow_pos)
+        add_north_arrow(ax, position=north_arrow_pos, size_multiplier=size_multiplier)
 
     if show_scale and extent:
-        add_scalebar(ax, y_center, position=scale_pos)
+        add_scalebar(ax, y_center, position=scale_pos, size_multiplier=size_multiplier)
 
     if show_grid:
         ax.grid(True, linestyle=':', alpha=0.45, color='#64748b', linewidth=0.75, zorder=5)
@@ -373,7 +373,7 @@ def _cached_cartography(
         if norm_pos in ('outside right', 'center left', 'right'):
             leg = ax.legend(
                 handles=patches, loc='center left', bbox_to_anchor=(1.02, 0.5),
-                title=legend_title, title_fontsize=9, fontsize=8,
+                title=legend_title, title_fontsize=9 * size_multiplier, fontsize=8 * size_multiplier,
                 frameon=True, facecolor='#f8fafc', edgecolor='#cbd5e1', framealpha=0.96,
                 fancybox=True, handleheight=1.2, handlelength=1.3, borderpad=0.7, labelspacing=0.5
             )
@@ -381,7 +381,7 @@ def _cached_cartography(
         elif norm_pos in ('lower center', 'bottom'):
             leg = ax.legend(
                 handles=patches, loc='upper center', bbox_to_anchor=(0.5, -0.09),
-                title=legend_title, title_fontsize=9, fontsize=8, ncol=min(3, len(class_areas)),
+                title=legend_title, title_fontsize=9 * size_multiplier, fontsize=8 * size_multiplier, ncol=min(3, len(class_areas)),
                 frameon=True, facecolor='#f8fafc', edgecolor='#cbd5e1', framealpha=0.96,
                 fancybox=True, handleheight=1.2, handlelength=1.3, borderpad=0.6
             )
@@ -389,7 +389,7 @@ def _cached_cartography(
         else:
             leg = ax.legend(
                 handles=patches, loc=legend_pos,
-                title=legend_title, title_fontsize=9, fontsize=8,
+                title=legend_title, title_fontsize=9 * size_multiplier, fontsize=8 * size_multiplier,
                 frameon=True, facecolor='white', edgecolor='#cbd5e1', framealpha=0.94,
                 fancybox=True, handleheight=1.2, handlelength=1.3, borderpad=0.6, labelspacing=0.5
             )
@@ -429,8 +429,8 @@ def _cached_cartography(
                 cax.set_title(legend_title, fontsize=8.5, fontweight='bold', pad=8, color='#0f172a')
 
     # Footer attribution
-    footer_text = f"Datum: WGS 84 • Coordinate System: Geographic • Engine: Antigravity Cartography • Source: Sentinel / Copernicus / GEE"
-    fig.text(0.02, 0.012, footer_text, fontsize=7, color='#64748b', fontfamily='sans-serif')
+    # footer_text = f"Datum: WGS 84 • Coordinate System: Geographic • Engine: Antigravity Cartography • Source: Sentinel / Copernicus / GEE"
+    # fig.text(0.02, 0.012, footer_text, fontsize=7, color='#64748b', fontfamily='sans-serif')
 
     # 9. Save output with tight bounding box to prevent clipping
     out_buf = io.BytesIO()

@@ -1,4 +1,4 @@
-"""GEE authentication — supports dynamic GEE Cloud Project IDs and Service Accounts."""
+"""GEE authentication â€” supports dynamic GEE Cloud Project IDs and Service Accounts."""
 import os
 import json
 import logging
@@ -141,7 +141,7 @@ def get_gee_status() -> dict:
     }
 
 
-# ── Individual GEE Account Authentication ──────────────────────────────────
+# â”€â”€ Individual GEE Account Authentication â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Users must authenticate with their own GEE-registered email before
 # accessing the Sample Digitization module.  The shared service account
 # continues to execute GEE operations; this layer provides *identity gating*.
@@ -207,7 +207,7 @@ def authenticate_individual(token_credential: str, project_name: str | None = No
             logger.exception("Google OAuth token verification failed")
             raise ValueError(f"Invalid Google ID token: {exc}")
 
-    # Check if this email already has an active session — reuse it
+    # Check if this email already has an active session â€” reuse it
     all_sessions = get_all_gee_sessions()
     for token, session in all_sessions.items():
         if session["email"] == email and session.get("project_name") == project_name:
@@ -260,3 +260,70 @@ def get_all_sessions() -> list[dict]:
         for s in sessions.values()
     ]
 
+
+import time, random, ee
+
+def apply_gee_patch():
+    if getattr(ee.ComputedObject, '_patched_for_retry', False): return
+    
+    original_get_info = ee.ComputedObject.getInfo
+    
+    def safe_get_info(self, *args, **kwargs):
+        retries = 8
+        for i in range(retries):
+            try:
+                return original_get_info(self, *args, **kwargs)
+            except Exception as e:
+                err_str = str(e).lower()
+                if "429" in err_str or "concurrency" in err_str or "too many requests" in err_str or "quota" in err_str or "user limit" in err_str:
+                    if i < retries - 1:
+                        sleep_time = (1.5 ** i) + random.uniform(0.5, 1.5)
+                        print(f"GEE Concurrency Limit Hit. Backing off for {sleep_time:.2f}s (Attempt {i+1}/{retries})...")
+                        time.sleep(sleep_time)
+                        continue
+                raise
+    
+    ee.ComputedObject.getInfo = safe_get_info
+    
+
+    original_get_download_url = ee.Image.getDownloadURL
+    
+    def safe_get_download_url(self, *args, **kwargs):
+        retries = 8
+        for i in range(retries):
+            try:
+                return original_get_download_url(self, *args, **kwargs)
+            except Exception as e:
+                err_str = str(e).lower()
+                if "429" in err_str or "concurrency" in err_str or "too many requests" in err_str or "quota" in err_str or "user limit" in err_str:
+                    if i < retries - 1:
+                        sleep_time = (1.5 ** i) + random.uniform(0.5, 1.5)
+                        print(f"GEE Concurrency Limit Hit (getDownloadURL). Backing off for {sleep_time:.2f}s...")
+                        time.sleep(sleep_time)
+                        continue
+                raise
+                
+    ee.Image.getDownloadURL = safe_get_download_url
+    
+    original_get_map_id = ee.Image.getMapId
+    
+    def safe_get_map_id(self, *args, **kwargs):
+        retries = 8
+        for i in range(retries):
+            try:
+                return original_get_map_id(self, *args, **kwargs)
+            except Exception as e:
+                err_str = str(e).lower()
+                if "429" in err_str or "concurrency" in err_str or "too many requests" in err_str or "quota" in err_str or "user limit" in err_str:
+                    if i < retries - 1:
+                        sleep_time = (1.5 ** i) + random.uniform(0.5, 1.5)
+                        print(f"GEE Concurrency Limit Hit (getMapId). Backing off for {sleep_time:.2f}s...")
+                        time.sleep(sleep_time)
+                        continue
+                raise
+                
+    ee.Image.getMapId = safe_get_map_id
+
+    ee.ComputedObject._patched_for_retry = True
+
+apply_gee_patch()
