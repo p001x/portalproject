@@ -537,6 +537,9 @@ export interface DatasetRecord {
   contributor?: string;
   source_url?: string;
   storage_key?: string;
+  upload_date?: string;
+  category?: string;
+  tags?: string[];
 }
 
 export interface TrainingSample {
@@ -1169,7 +1172,10 @@ export const api = {
     list: (source: string) => get<{ records: DatasetRecord[] }>("/datasets?source=" + source),
     preview: (id: string, source: string) => get<any>(`/datasets/${id}/preview?source=${source}`),
     upload: async (fd: FormData) => {
-      const r = await fetch(BASE + "/datasets/upload", { method: "POST", body: fd });
+      const headers: Record<string, string> = {};
+      const appToken = localStorage.getItem("spetro_token");
+      if (appToken) headers["Authorization"] = `Bearer ${appToken}`;
+      const r = await fetch(BASE + "/datasets/upload", { method: "POST", headers, body: fd });
       if (!r.ok) {
         const e = await r.json().catch(() => ({ detail: r.statusText }));
         throw new Error(e.detail ?? r.statusText);
@@ -1180,6 +1186,8 @@ export const api = {
       return new Promise<DatasetRecord>((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhr.open("POST", BASE + "/datasets/upload");
+        const appToken = localStorage.getItem("spetro_token");
+        if (appToken) xhr.setRequestHeader("Authorization", `Bearer ${appToken}`);
         xhr.upload.onprogress = (e) => {
           if (e.lengthComputable) {
             onProgress(Math.round((e.loaded * 100) / e.total));
@@ -1200,15 +1208,40 @@ export const api = {
       });
     },
     addLink: (body: any) => post<DatasetRecord>("/datasets/link", body),
-    delete: (id: string, source: string) =>
-      fetch(BASE + "/datasets/" + id + "?source=" + source, { method: "DELETE" }).then(async (r) => {
+    delete: (id: string, source: string) => {
+      const headers: Record<string, string> = {};
+      const appToken = localStorage.getItem("spetro_token");
+      if (appToken) headers["Authorization"] = `Bearer ${appToken}`;
+      return fetch(BASE + "/datasets/" + id + "?source=" + source, { method: "DELETE", headers }).then(async (r) => {
         if (!r.ok) {
            let msg = r.statusText;
            try { msg = (await r.json()).detail || msg; } catch {}
            throw new Error(msg);
         }
         return r.json();
-      }),
+      });
+    },
+    clip: async (id: string, opts: { mask?: any; district?: string; source?: string }): Promise<Blob> => {
+      const res = await fetch(`${BASE}/datasets/${id}/clip`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mask: opts.mask,
+          district: opts.district,
+          source: opts.source || "admin",
+        }),
+      });
+      if (!res.ok) {
+        let msg = res.statusText;
+        try { msg = (await res.json()).detail || msg; } catch {}
+        throw new Error(msg);
+      }
+      return res.blob();
+    },
+    update: (id: string, updates: Partial<DatasetRecord>, source: string = "admin") =>
+      put<DatasetRecord>(`/datasets/${id}`, { ...updates, source }),
+    getDownloadAllUrl: (source: string) => `${BASE}/datasets/download-all?source=${source}`,
+    getDownloadUrl: (id: string, source?: string) => `${BASE}/datasets/${id}/download${source ? `?source=${source}` : ""}`,
   },
 
   community: {
@@ -1248,6 +1281,25 @@ export const api = {
 
   auth: {
     updateProfile: (name: string) => put<{ ok: boolean, token: string, user: any }>("/auth/profile", { name }),
+    updatePreferences: (preferences: string) => put<{ ok: boolean, user: any }>("/auth/preferences", { preferences }),
+    uploadProfilePicture: async (file: File): Promise<{ url: string }> => {
+      const formData = new FormData();
+      formData.append("file", file);
+      const headers: Record<string, string> = {};
+      const appToken = localStorage.getItem("spetro_token");
+      if (appToken) headers["Authorization"] = `Bearer ${appToken}`;
+      
+      const res = await fetch(`${BASE}/auth/profile-picture`, {
+        method: "POST",
+        headers,
+        body: formData,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Upload failed");
+      }
+      return res.json();
+    },
     changePassword: (old_password: string, new_password: string) => post<{ ok: boolean, message: string }>("/auth/change-password", { old_password, new_password }),
     getGeeUsage: () => get<{ used: number, limit: number | string }>("/auth/gee-usage"),
   },

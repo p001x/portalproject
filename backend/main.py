@@ -305,6 +305,7 @@ class RegisterRequest(BaseModel):
     name: str = Field(..., min_length=2)
     email: str
     password: str = Field(..., min_length=8)
+    code: str = Field(..., min_length=4)
 
 @app.get("/api/auth/gee-usage", tags=["auth"])
 def get_gee_usage_endpoint(user: dict = Depends(get_current_user)):
@@ -335,8 +336,19 @@ class ChangePasswordRequest(BaseModel):
 def register(req: RegisterRequest):
     email = req.email.strip().lower()
     name = req.name.strip()
+    
+    from auth_db import verify_otp, mark_user_verified
+    if not verify_otp(email, req.code.strip()):
+        raise HTTPException(400, "Invalid or expired verification code.")
+
     try:
         user = create_new_user(name, email, req.password)
+        mark_user_verified(email)
+        user["is_verified"] = True
+        
+        from auth_db import create_notification
+        create_notification(email, "Welcome to SPETRO!", "Your account has been verified. Welcome to our advanced Geoportal platform.", "security")
+        
         token = create_access_token({"sub": user["email"], "name": user["name"], "role": user["role"]})
         if isinstance(token, bytes):
             token = token.decode("utf-8")
@@ -426,7 +438,23 @@ def reset_password(req: ResetPasswordRequest):
 def get_me(user: dict = Depends(get_current_user)):
     return {"ok": True, "user": user}
 
+@app.get("/api/notifications", tags=["notifications"])
+def get_user_notifications(user: dict = Depends(get_current_user)):
+    from auth_db import get_notifications
+    notifs = get_notifications(user["email"])
+    return {"notifications": notifs}
 
+@app.post("/api/notifications/{notif_id}/read", tags=["notifications"])
+def mark_notif_read(notif_id: str, user: dict = Depends(get_current_user)):
+    from auth_db import mark_notification_read
+    mark_notification_read(user["email"], notif_id)
+    return {"ok": True}
+
+@app.post("/api/notifications/read-all", tags=["notifications"])
+def mark_all_notifs_read(user: dict = Depends(get_current_user)):
+    from auth_db import mark_all_notifications_read
+    mark_all_notifications_read(user["email"])
+    return {"ok": True}
 
 @app.put("/api/auth/profile", tags=["auth"])
 def update_profile(req: UpdateProfileRequest, user: dict = Depends(get_current_user)):
@@ -434,6 +462,39 @@ def update_profile(req: UpdateProfileRequest, user: dict = Depends(get_current_u
     user["name"] = req.name
     token = create_access_token({"sub": user["email"], "name": user["name"], "role": user["role"]})
     return {"ok": True, "token": token, "user": user}
+
+@app.post("/api/auth/profile-picture", tags=["auth"])
+async def upload_profile_picture(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+    if not file:
+        raise HTTPException(status_code=400, detail="No file uploaded")
+    
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    filename = f"{user['email'].replace('@', '_').replace('.', '_')}_{uuid.uuid4().hex[:8]}.png"
+    avatars_dir = os.path.join(base_dir, "artifacts", "geoportal", "public", "avatars")
+    dest = os.path.join(avatars_dir, filename)
+    
+    try:
+        os.makedirs(avatars_dir, exist_ok=True)
+        file_bytes = await file.read()
+        with open(dest, "wb") as f:
+            f.write(file_bytes)
+            
+        url = f"/avatars/{filename}"
+        auth_db.update_user_picture(user["email"], url)
+        user["profile_picture"] = url
+        return {"ok": True, "url": url, "user": user}
+    except Exception as e:
+        logger.error(f"Failed to upload profile picture: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+class PreferencesRequest(BaseModel):
+    preferences: str
+
+@app.put("/api/auth/preferences", tags=["auth"])
+def update_preferences(req: PreferencesRequest, user: dict = Depends(get_current_user)):
+    auth_db.update_user_preferences(user["email"], req.preferences)
+    user["preferences"] = req.preferences
+    return {"ok": True, "user": user}
 
 @app.post("/api/auth/change-password", tags=["auth"])
 def change_password(req: ChangePasswordRequest, user: dict = Depends(get_current_user)):
@@ -2216,6 +2277,7 @@ async def upload_dataset(
     description: str = Form(""),
     source: str = Form("admin"),
     contributor: Optional[str] = Form(None),
+    category: Optional[str] = Form(None),
 ):
     if source not in ("admin", "community"):
         raise HTTPException(400, "source must be 'admin' or 'community'")
@@ -2227,6 +2289,7 @@ async def upload_dataset(
         description=description,
         source=source,
         contributor=contributor,
+        category=category,
     )
     return record.to_dict()
 
@@ -2237,6 +2300,7 @@ class DatasetLinkRequest(BaseModel):
     description: str = ""
     source: str = "admin"
     contributor: Optional[str] = None
+    category: Optional[str] = None
 
 
 @app.post("/api/datasets/link", tags=["rare-data"])
@@ -2246,6 +2310,7 @@ def add_dataset_link(req: DatasetLinkRequest):
     record = process_and_store_link(
         url=req.url, name=req.name, description=req.description,
         source=req.source, contributor=req.contributor,
+        category=req.category,
     )
     return record.to_dict()
 
@@ -2257,7 +2322,9 @@ def download_dataset(dataset_id: str, source: Optional[str] = Query(None)):
     if source in ("admin", "community"):
         records = load_metadata(source=source)
         record = next((r for r in records if r["id"] == dataset_id), None)
-    else:
+    
+    # Robust fallback across both sources
+    if record is None:
         for s in ("community", "admin"):
             records = load_metadata(source=s)
             record = next((r for r in records if r["id"] == dataset_id), None)
@@ -2284,8 +2351,84 @@ def download_dataset(dataset_id: str, source: Optional[str] = Query(None)):
     )
 
 
+class DatasetClipRequest(BaseModel):
+    mask: Optional[dict] = None
+    district: Optional[str] = None
+    source: str = "admin"
+
+
+@app.post("/api/datasets/{dataset_id}/clip", tags=["rare-data"])
+def clip_dataset(dataset_id: str, req: DatasetClipRequest):
+    record = None
+    for s in (req.source, "admin", "community"):
+        records = load_metadata(source=s)
+        record = next((r for r in records if r["id"] == dataset_id), None)
+        if record:
+            break
+            
+    if record is None:
+        raise HTTPException(404, "Dataset not found")
+        
+    mask_geojson = req.mask
+    if not mask_geojson and req.district:
+        import os, geopandas as gpd
+        from shapely.geometry import mapping
+        base_dir = os.path.dirname(os.path.dirname(__file__))
+        shp_path = os.path.join(base_dir, "sectrstu", "villages.shp")
+        if os.path.exists(shp_path):
+            try:
+                gdf = gpd.read_file(shp_path)
+                if gdf.crs != "EPSG:4326": gdf = gdf.to_crs("EPSG:4326")
+                filtered = gdf[gdf["NAME_2"].str.lower() == req.district.lower()]
+                if not filtered.empty:
+                    boundary = filtered.geometry.union_all() if hasattr(filtered.geometry, "union_all") else filtered.geometry.unary_union
+                    mask_geojson = mapping(boundary.simplify(0.001, preserve_topology=True))
+            except Exception as e:
+                logger.warning(f"Could not extract district boundary from shapefile: {e}")
+
+    if not mask_geojson:
+        raise HTTPException(400, "Must provide either mask GeoJSON or a valid Rwanda district name")
+
+    try:
+        from storage.dataset_storage import download_dataset_bytes, clip_dataset_by_mask
+        file_bytes = download_dataset_bytes(record["storage_key"])
+        clipped_bytes, new_filename = clip_dataset_by_mask(record, file_bytes, mask_geojson)
+        if req.district:
+            base_name = record.get("original_filename", "dataset")
+            new_filename = f"clipped_{req.district}_{base_name}"
+    except Exception as exc:
+        raise HTTPException(500, f"Could not clip file: {exc}") from exc
+        
+    return Response(
+        content=clipped_bytes,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{new_filename}"'},
+    )
+
+
+class DatasetUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    contributor: Optional[str] = None
+    category: Optional[str] = None
+    tags: Optional[list[str]] = None
+    source: str = "admin"
+
+
+@app.put("/api/datasets/{dataset_id}", tags=["rare-data"])
+def update_dataset(dataset_id: str, req: DatasetUpdateRequest, user: dict = Depends(get_current_user)):
+    from storage.dataset_storage import update_record
+    updates = req.dict(exclude_unset=True, exclude={"source"})
+    updated = update_record(dataset_id, updates, source=req.source)
+    if not updated:
+        raise HTTPException(404, "Dataset not found")
+    return updated
+
+
+
+
 @app.delete("/api/datasets/{dataset_id}", tags=["rare-data"])
-def delete_dataset(dataset_id: str, source: str = Query("admin", pattern="^(admin|community|all)$")):
+def delete_dataset(dataset_id: str, source: str = Query("admin", pattern="^(admin|community|all)$"), user: dict = Depends(get_current_user)):
     if source == "all":
         ok_admin = delete_record(dataset_id, source="admin")
         ok_community = delete_record(dataset_id, source="community")
@@ -2300,10 +2443,22 @@ def delete_dataset(dataset_id: str, source: str = Query("admin", pattern="^(admi
 
 @app.get("/api/datasets/download-all", tags=["rare-data"])
 def download_all_datasets(source: str = Query("admin", pattern="^(admin|community)$")):
+    from fastapi.responses import StreamingResponse
+    import tempfile, zipfile as zf_mod
     records = load_metadata(source=source)
-    zip_bytes = build_zip_of_datasets(records)
-    return Response(
-        content=zip_bytes, media_type="application/zip",
+    # Stream via temp file to avoid holding everything in RAM
+    tmp = tempfile.SpooledTemporaryFile(max_size=50 * 1024 * 1024)  # spill to disk after 50MB
+    with zf_mod.ZipFile(tmp, "w", zf_mod.ZIP_DEFLATED) as zf:
+        for r in records:
+            try:
+                data = download_dataset_bytes(r["storage_key"])
+                zf.writestr(r["original_filename"], data)
+            except Exception:
+                continue
+    tmp.seek(0)
+    return StreamingResponse(
+        tmp,
+        media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{source}_all_datasets.zip"'},
     )
 
@@ -2842,14 +2997,22 @@ def supervised_classify_endpoint(request: Request, req: SupervisedClassifyReques
 
 
 @app.get("/api/datasets/{dataset_id}/preview", tags=["rare-data"])
-def preview_dataset(dataset_id: str, source: str = Query("admin", pattern="^(admin|community)$")):
+def preview_dataset(dataset_id: str, source: str = Query("admin", pattern="^(admin|community|all)$")):
     from storage.dataset_storage import get_dataset_preview
-    records = load_metadata(source=source)
-    record = next((r for r in records if r["id"] == dataset_id), None)
-    if record is None:
-        alt_source = "community" if source == "admin" else "admin"
-        records = load_metadata(source=alt_source)
+    record = None
+    if source == "all":
+        for s in ("admin", "community"):
+            records = load_metadata(source=s)
+            record = next((r for r in records if r["id"] == dataset_id), None)
+            if record:
+                break
+    else:
+        records = load_metadata(source=source)
         record = next((r for r in records if r["id"] == dataset_id), None)
+        if record is None:
+            alt_source = "community" if source == "admin" else "admin"
+            records = load_metadata(source=alt_source)
+            record = next((r for r in records if r["id"] == dataset_id), None)
     if record is None:
         raise HTTPException(404, "Dataset not found")
 
@@ -4167,3 +4330,126 @@ def api_earthwork_surface3d(req: EarthworkAdvancedRequest):
     except Exception as exc:
         logger.exception("3D surface computation failed")
         raise HTTPException(500, str(exc)) from exc
+
+
+# --- NEW OTP AND GOOGLE LOGIN ROUTES ---
+
+class OTPRequest(BaseModel):
+    email: str = Field(..., min_length=3)
+
+class OTPVerifyRequest(BaseModel):
+    email: str = Field(..., min_length=3)
+    code: str = Field(..., min_length=6, max_length=6)
+    name: Optional[str] = None
+
+class GoogleAuthRequest(BaseModel):
+    token: str
+
+@app.post("/api/auth/otp/request", tags=["auth"])
+def request_otp(req: OTPRequest):
+    email = req.email.strip().lower()
+    from auth_db import save_otp
+    from email_sender import send_otp_email
+    try:
+        code = save_otp(email, expires_in_minutes=10)
+        send_otp_email(email, code)
+        return {"ok": True, "message": "Verification code sent."}
+    except Exception as e:
+        logger.error(f"Error requesting OTP: {e}")
+        raise HTTPException(500, "Could not process OTP request.")
+
+@app.post("/api/auth/otp/verify", tags=["auth"])
+def verify_otp_endpoint(req: OTPVerifyRequest):
+    email = req.email.strip().lower()
+    code = req.code.strip()
+    
+    from auth_db import verify_otp, get_user_by_email, create_user, mark_user_verified
+    from auth_users import create_access_token
+    
+    if not verify_otp(email, code):
+        raise HTTPException(400, "Invalid or expired verification code.")
+        
+    user = get_user_by_email(email)
+    
+    if not user:
+        # Auto-create user if they don't exist yet (passwordless signup)
+        name = req.name.strip() if req.name else email.split("@")[0].replace(".", " ").title()
+        create_user(name=name, email=email, password_hash="", is_verified=True)
+        user = get_user_by_email(email)
+    else:
+        # Mark as verified
+        mark_user_verified(email)
+        user["is_verified"] = True
+        
+    token = create_access_token({"sub": user["email"], "name": user["name"], "role": user["role"]})
+    
+    user_dict = {
+        "id": str(user.get("id") or user.get("email")),
+        "email": str(user["email"]),
+        "name": str(user["name"]),
+        "role": str(user.get("role", "user")),
+    }
+    
+    return {"ok": True, "token": str(token), "user": user_dict}
+
+@app.post("/api/auth/google", tags=["auth"])
+def google_auth(req: GoogleAuthRequest):
+    try:
+        from google.oauth2 import id_token
+        from google.auth.transport import requests as google_requests
+        
+        # In a real app, define GOOGLE_CLIENT_ID in .env
+        CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "952981082241-tif2ul1vnps4fu13odnbpgb9p8n3el4j.apps.googleusercontent.com")
+        
+        if CLIENT_ID == "YOUR_GOOGLE_CLIENT_ID_HERE":
+            logger.warning("Using mock Google auth validation. Client ID not set.")
+            # For mock testing, just trust the token if it's our test token or decode it manually without verification
+            import jwt
+            try:
+                idinfo = jwt.decode(req.token, options={"verify_signature": False})
+            except Exception:
+                raise ValueError("Invalid mock token")
+        else:
+            idinfo = id_token.verify_oauth2_token(req.token, google_requests.Request(), CLIENT_ID)
+            
+        email = idinfo.get("email").lower()
+        name = idinfo.get("name", email.split("@")[0])
+        google_id = idinfo.get("sub")
+        
+        from auth_db import get_user_by_email, create_user, mark_user_verified
+        from auth_users import create_access_token
+        
+        user = get_user_by_email(email)
+        if not user:
+            create_user(name=name, email=email, password_hash="", google_id=google_id, is_verified=True)
+            user = get_user_by_email(email)
+        elif not user.get("google_id"):
+            # Link existing account to Google
+            import auth_db
+            with auth_db.SessionLocal() as db:
+                db_user = db.query(auth_db.User).filter(auth_db.User.email == email).first()
+                db_user.google_id = google_id
+                db_user.is_verified = True
+                db.commit()
+            user = get_user_by_email(email)
+            
+        token = create_access_token({"sub": user["email"], "name": user["name"], "role": user["role"]})
+        
+        user_dict = {
+            "id": str(user.get("id") or user.get("email")),
+            "email": str(user["email"]),
+            "name": str(user["name"]),
+            "role": str(user.get("role", "user")),
+        }
+        
+        return {"ok": True, "token": str(token), "user": user_dict}
+
+    except ValueError as e:
+        logger.error(f"Google Token Verification failed: {e}")
+        raise HTTPException(401, "Invalid Google token.")
+    except Exception as e:
+        import traceback
+        err_msg = f"Google auth error: {e}\n{traceback.format_exc()}"
+        logger.error(err_msg)
+        raise HTTPException(500, err_msg)
+

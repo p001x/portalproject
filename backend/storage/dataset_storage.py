@@ -346,6 +346,8 @@ class DatasetRecord:
     source: str = "admin"
     contributor: Optional[str] = None
     source_url: Optional[str] = None
+    category: Optional[str] = None
+    tags: Optional[list[str]] = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -386,6 +388,24 @@ def add_record(record: DatasetRecord, source: str = "admin") -> None:
     records = load_metadata(source=source)
     records.append(record.to_dict())
     save_metadata(records, source=source)
+
+
+def update_record(dataset_id: str, updates: dict[str, Any], source: str = "admin") -> Optional[dict[str, Any]]:
+    records = load_metadata(source=source)
+    target = next((r for r in records if r["id"] == dataset_id), None)
+    target_source = source
+    if not target:
+        alt = "community" if source == "admin" else "admin"
+        records = load_metadata(source=alt)
+        target = next((r for r in records if r["id"] == dataset_id), None)
+        target_source = alt
+    if not target:
+        return None
+    for k, v in updates.items():
+        if v is not None:
+            target[k] = v
+    save_metadata(records, source=target_source)
+    return target
 
 
 def delete_record(dataset_id: str, source: str = "admin") -> bool:
@@ -511,7 +531,34 @@ def detect_file_type(filename: str) -> str:
     if ext in {"tif", "tiff"}: return "tiff"
     if ext == "csv": return "csv"
     if ext == "zip": return "shapefile"
+    if ext in {"geojson", "json"}: return "geojson"
+    if ext in {"gpkg", "kml", "parquet"}: return ext
     return "other"
+
+
+def extract_geojson_bbox(file_bytes: bytes) -> Optional[list[float]]:
+    try:
+        import json
+        from shapely.geometry import shape as shapely_shape
+        data = json.loads(file_bytes.decode('utf-8'))
+        if data.get("type") == "FeatureCollection":
+            features = data.get("features", [])
+            if not features:
+                return None
+            from shapely.ops import unary_union
+            geoms = [shapely_shape(f["geometry"]) for f in features if f.get("geometry")]
+            if not geoms:
+                return None
+            u = unary_union(geoms)
+            minx, miny, maxx, maxy = u.bounds
+            return [float(minx), float(miny), float(maxx), float(maxy)]
+        elif "geometry" in data:
+            minx, miny, maxx, maxy = shapely_shape(data["geometry"]).bounds
+            return [float(minx), float(miny), float(maxx), float(maxy)]
+    except Exception:
+        pass
+    return None
+
 
 
 def normalize_github_url(url: str) -> str:
@@ -539,7 +586,9 @@ def process_and_store_upload(filename: str, file_bytes: Optional[bytes], name: s
                               source_url: Optional[str] = None,
                               dataset_id: Optional[str] = None,
                               progress_callback=None,
-                              file_path: Optional[str] = None) -> DatasetRecord:
+                              file_path: Optional[str] = None,
+                              category: Optional[str] = None,
+                              tags: Optional[list[str]] = None) -> DatasetRecord:
     import os
     if file_bytes is None and file_path is None:
         raise ValueError("Must provide either file_bytes or file_path")
@@ -588,6 +637,11 @@ def process_and_store_upload(filename: str, file_bytes: Optional[bytes], name: s
                 bbox = extract_csv_bbox(file_bytes)
             except Exception:
                 pass
+        elif file_type == "geojson" and file_bytes is not None:
+            try:
+                bbox = extract_geojson_bbox(file_bytes)
+            except Exception:
+                pass
     except Exception as e:
         status = "error"; error_message = str(e)
     if status != "error":
@@ -598,7 +652,8 @@ def process_and_store_upload(filename: str, file_bytes: Optional[bytes], name: s
     record = DatasetRecord(id=dataset_id, name=name, description=description, file_type=file_type,
                            storage_key=storage_key, original_filename=filename, bbox=bbox,
                            file_size_mb=round(size_mb, 3), status=status, error_message=error_message,
-                           source=source, contributor=contributor, source_url=source_url)
+                           source=source, contributor=contributor, source_url=source_url,
+                           category=category, tags=tags)
     try:
         add_record(record, source=source)
     except Exception as e:
@@ -611,7 +666,8 @@ upload_dataset_file = process_and_store_upload
 
 
 def process_and_store_link(url: str, name: str, description: str,
-                            source: str = "admin", contributor: Optional[str] = None) -> DatasetRecord:
+                            source: str = "admin", contributor: Optional[str] = None,
+                            category: Optional[str] = None, tags: Optional[list[str]] = None) -> DatasetRecord:
     from storage.link_resolver import resolve_link_url, resolve_link
     raw_url = normalize_github_url(url)
     
@@ -720,7 +776,8 @@ def process_and_store_link(url: str, name: str, description: str,
     record = DatasetRecord(id=dataset_id, name=name, description=description, file_type=file_type,
                            storage_key=storage_key, original_filename=filename, bbox=bbox,
                            status=status, error_message=error_message, source=source,
-                           contributor=contributor, source_url=raw_url, file_size_mb=round(size_mb, 3))
+                           contributor=contributor, source_url=raw_url, file_size_mb=round(size_mb, 3),
+                           category=category, tags=tags)
     try:
         add_record(record, source=source)
     except Exception as e:
