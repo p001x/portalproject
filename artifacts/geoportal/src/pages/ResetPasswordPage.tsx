@@ -1,15 +1,17 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Loader2, Lock, ArrowRight } from "lucide-react";
-import { useLocation } from "wouter";
+import { Loader2, Lock, ArrowRight, ArrowLeft, Eye, EyeOff, CheckCircle2, AlertCircle, ShieldCheck } from "lucide-react";
+import { Link, useLocation } from "wouter";
+import { SiteBrand, SiteLogoOnly } from "@/components/SiteBrand";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 export function ResetPasswordPage() {
   const [token, setToken] = useState<string | null>(null);
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const { resetPassword, isLoading } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -21,7 +23,7 @@ export function ResetPasswordPage() {
     if (t) {
       setToken(t);
     } else {
-      setError("No reset token found in URL.");
+      setError("No reset token found in URL. Please check your reset link.");
     }
   }, []);
 
@@ -31,10 +33,15 @@ export function ResetPasswordPage() {
     setSuccess(null);
     
     if (!token) {
-      setError("Missing reset token.");
+      setError("Missing or invalid reset token.");
       return;
     }
     
+    if (newPassword.length < 8) {
+      setError("Password must be at least 8 characters long.");
+      return;
+    }
+
     if (newPassword !== confirmPassword) {
       setError("Passwords do not match.");
       return;
@@ -42,94 +49,205 @@ export function ResetPasswordPage() {
 
     try {
       await resetPassword(token, newPassword);
-      setSuccess("Password has been reset successfully. Redirecting to login...");
+      setSuccess("Your password has been reset successfully. Redirecting to sign in...");
       setTimeout(() => {
         setLocation("/auth");
-      }, 3000);
+      }, 2500);
     } catch (err: any) {
-      setError(err.message || "Failed to reset password.");
+      setError(err.message || "Failed to reset password. The link may have expired.");
     }
   };
 
   return (
-    <div className="min-h-screen flex w-full bg-background items-center justify-center">
-      <div className="w-full max-w-sm px-8">
-        <div className="text-center mb-8">
-          <h2 className="text-3xl font-bold tracking-tight text-foreground">
-            Set New Password
-          </h2>
-          <p className="text-muted-foreground mt-2 text-sm">
-            Enter your new password below.
-          </p>
+    <div className="min-h-screen bg-background text-foreground flex flex-col relative overflow-hidden selection:bg-emerald-500/20 selection:text-emerald-500">
+      
+      {/* Dynamic Background Aesthetic matching SPETRO Geoportal */}
+      <div className="absolute inset-0 z-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-emerald-500/10 via-background to-background pointer-events-none" />
+      <div className="absolute -top-40 -right-40 w-96 h-96 bg-emerald-500/10 dark:bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-teal-500/10 dark:bg-teal-500/15 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute inset-0 bg-[linear-gradient(to_right,#8080800a_1px,transparent_1px),linear-gradient(to_bottom,#8080800a_1px,transparent_1px)] bg-[size:32px_32px] pointer-events-none" />
+
+      {/* Global Header */}
+      <header className="relative z-20 px-6 py-4 flex justify-between items-center border-b border-border/40 bg-background/60 backdrop-blur-xl">
+        <div className="flex items-center gap-6">
+          <SiteBrand size="normal" hideSubtitleOnMobile />
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-5">
-          <div className="space-y-2">
-            <Label htmlFor="password">New Password</Label>
-            <div className="relative">
-              <Lock className="w-4 h-4 absolute left-3 top-3 text-muted-foreground" />
-              <Input
-                id="password"
-                type="password"
-                placeholder="••••••••"
-                className="pl-9"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                required
-              />
+        <nav className="hidden md:flex items-center gap-6">
+          <Link href="/">
+            <span className="text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer">Home</span>
+          </Link>
+          <Link href="/platform">
+            <span className="text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer">Platform</span>
+          </Link>
+          <Link href="/about">
+            <span className="text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer">About</span>
+          </Link>
+          <Link href="/services">
+            <span className="text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer">Services</span>
+          </Link>
+          <Link href="/contact">
+            <span className="text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer">Contact</span>
+          </Link>
+        </nav>
+
+        <div className="flex items-center gap-3">
+          <ThemeToggle />
+          <Link href="/auth">
+            <Button variant="ghost" size="sm" className="gap-2 text-xs font-semibold text-muted-foreground hover:text-foreground">
+              <ArrowLeft className="w-3.5 h-3.5" /> Back to Sign In
+            </Button>
+          </Link>
+        </div>
+      </header>
+
+      {/* Main Centered Content */}
+      <main className="relative z-10 flex-1 flex flex-col items-center justify-center p-4 sm:p-6 py-10">
+        
+        {/* Glassmorphic Card */}
+        <div className="relative w-full max-w-[440px] mx-auto bg-card/85 dark:bg-card/65 backdrop-blur-2xl border border-border/80 dark:border-white/10 rounded-2xl shadow-2xl p-7 sm:p-9 transition-all">
+          
+          {/* Top Emerald Accent Line */}
+          <div className="absolute top-0 left-10 right-10 h-[2px] bg-gradient-to-r from-transparent via-emerald-500 to-transparent" />
+
+          {/* Header */}
+          <div className="text-center mb-6">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold tracking-wider uppercase bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 mb-3">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              Credentials Update
             </div>
-            <p className="text-xs text-muted-foreground">
-              Must be 8-15 characters long and contain uppercase, lowercase, and numbers.
+            
+            <h2 className="text-2xl sm:text-3xl font-extrabold text-foreground tracking-tight">
+              Set New Password
+            </h2>
+            
+            <p className="text-xs sm:text-sm text-muted-foreground mt-1.5 leading-relaxed">
+              Choose a strong, secure password for your SPETRO account
             </p>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="confirm_password">Confirm Password</Label>
-            <div className="relative">
-              <Lock className="w-4 h-4 absolute left-3 top-3 text-muted-foreground" />
-              <Input
-                id="confirm_password"
-                type="password"
-                placeholder="••••••••"
-                className="pl-9"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                required
-              />
+          {/* Alerts */}
+          {error && (
+            <div className="text-xs font-medium text-destructive bg-destructive/10 border border-destructive/20 p-3 rounded-xl mb-5 flex items-start gap-2.5">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span className="leading-snug">{error}</span>
             </div>
+          )}
+
+          {success && (
+            <div className="text-xs font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 p-3 rounded-xl mb-5 flex items-start gap-2.5">
+              <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+              <span className="leading-snug">{success}</span>
+            </div>
+          )}
+
+          {/* Form */}
+          <form onSubmit={handleSubmit} className="flex flex-col space-y-4">
+            
+            <div className="space-y-1.5">
+              <label htmlFor="new_password" className="block text-xs font-semibold text-foreground">
+                New Password
+              </label>
+              <div className="relative flex items-center bg-muted/40 dark:bg-slate-950/40 border border-border/80 dark:border-white/10 rounded-xl px-3.5 py-2.5 transition-all focus-within:border-emerald-500 focus-within:ring-2 focus-within:ring-emerald-500/20">
+                <Lock className="w-4 h-4 text-muted-foreground shrink-0" />
+                <input
+                  id="new_password"
+                  type={showPassword ? "text" : "password"}
+                  required
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="At least 8 characters"
+                  className="w-full bg-transparent border-0 text-foreground text-sm font-medium pl-3 pr-8 outline-none placeholder:text-muted-foreground/60"
+                />
+                <button 
+                  type="button" 
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3 text-muted-foreground hover:text-foreground transition-colors"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label htmlFor="confirm_password" className="block text-xs font-semibold text-foreground">
+                Confirm New Password
+              </label>
+              <div className="relative flex items-center bg-muted/40 dark:bg-slate-950/40 border border-border/80 dark:border-white/10 rounded-xl px-3.5 py-2.5 transition-all focus-within:border-emerald-500 focus-within:ring-2 focus-within:ring-emerald-500/20">
+                <Lock className="w-4 h-4 text-muted-foreground shrink-0" />
+                <input
+                  id="confirm_password"
+                  type={showConfirmPassword ? "text" : "password"}
+                  required
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  placeholder="Repeat new password"
+                  className="w-full bg-transparent border-0 text-foreground text-sm font-medium pl-3 pr-8 outline-none placeholder:text-muted-foreground/60"
+                />
+                <button 
+                  type="button" 
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  className="absolute right-3 text-muted-foreground hover:text-foreground transition-colors"
+                  aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                >
+                  {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={isLoading || !token}
+              className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-semibold py-3 px-4 rounded-xl shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/30 transition-all flex items-center justify-center gap-2 text-sm disabled:opacity-60 cursor-pointer mt-2"
+            >
+              {isLoading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <>
+                  <span>Update Password</span>
+                  <ArrowRight className="w-4 h-4" />
+                </>
+              )}
+            </button>
+          </form>
+
+          {/* Back Link */}
+          <div className="mt-6 text-center text-xs text-muted-foreground">
+            <Link href="/auth">
+              <button type="button" className="font-semibold text-emerald-600 dark:text-emerald-400 hover:underline transition-colors cursor-pointer">
+                &larr; Back to Sign In
+              </button>
+            </Link>
           </div>
 
-          {error && (
-            <div className="text-sm font-medium text-destructive bg-destructive/10 p-3 rounded-md">
-              {error}
-            </div>
-          )}
-          
-          {success && (
-            <div className="text-sm font-medium text-green-600 bg-green-50 p-3 rounded-md">
-              {success}
-            </div>
-          )}
+          {/* Shield Badge */}
+          <div className="mt-7 pt-4 border-t border-border/40 flex items-center justify-center gap-2 text-[11px] text-muted-foreground/80 font-medium">
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+            <span>Protected by SPETRO Account Guard</span>
+          </div>
 
-          <Button type="submit" className="w-full" size="lg" disabled={isLoading || !token}>
-            {isLoading ? (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : (
-              <>Reset Password <ArrowRight className="w-4 h-4 ml-2" /></>
-            )}
-          </Button>
-        </form>
-        
-        <div className="mt-6 text-center text-sm">
-          <button
-            type="button"
-            onClick={() => setLocation("/auth")}
-            className="font-semibold text-primary hover:underline"
-          >
-            Back to Sign in
-          </button>
         </div>
-      </div>
+      </main>
+
+      {/* Footer */}
+      <footer className="relative z-10 bg-background/50 backdrop-blur-md border-t border-border/40 mt-auto w-full">
+        <div className="max-w-7xl mx-auto px-6 py-6 flex flex-col md:flex-row justify-between items-center gap-4">
+          <div className="flex items-center gap-2">
+            <SiteLogoOnly size="small" />
+            <span className="text-xs font-medium text-muted-foreground ml-2">
+              &copy; {new Date().getFullYear()} SPETRO Geoportal. All rights reserved.
+            </span>
+          </div>
+          <div className="flex gap-6 text-xs text-muted-foreground font-medium">
+            <Link href="/about" className="hover:text-primary transition-colors cursor-pointer">About Us</Link>
+            <Link href="/services" className="hover:text-primary transition-colors cursor-pointer">Services</Link>
+            <Link href="/contact" className="hover:text-primary transition-colors cursor-pointer">Contact</Link>
+            <a href="#" className="hover:text-primary transition-colors">Privacy Policy</a>
+            <a href="#" className="hover:text-primary transition-colors">Terms of Service</a>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }

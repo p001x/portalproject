@@ -1,206 +1,563 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "@/hooks/use-auth";
-import { Loader2, Lock, Mail, User, X } from "lucide-react";
+import { 
+  Loader2, 
+  Mail, 
+  User, 
+  ArrowRight, 
+  Lock, 
+  Eye, 
+  EyeOff, 
+  ArrowLeft, 
+  X, 
+  CheckCircle2, 
+  AlertCircle,
+  KeyRound,
+  ShieldCheck
+} from "lucide-react";
 import { Link, useLocation } from "wouter";
+import { SiteBrand, SiteLogoOnly } from "@/components/SiteBrand";
+import { ThemeToggle } from "@/components/ThemeToggle";
+import { useTheme } from "next-themes";
+import { Button } from "@/components/ui/button";
+
+// Declare window.google
+declare global {
+  interface Window {
+    google: any;
+  }
+}
 
 export function AuthPage() {
-  const [isLogin, setIsLogin] = useState(true);
-  const [isForgotPassword, setIsForgotPassword] = useState(false);
-  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [name, setName] = useState("");
   const [password, setPassword] = useState("");
-  const { login, register, forgotPassword, isLoading } = useAuth();
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [code, setCode] = useState("");
+  const [mode, setMode] = useState<"login" | "register" | "forgot">("login");
+  const [step, setStep] = useState<"details" | "otp">("details");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(true);
+  
+  const { login, register, loginWithGoogle, requestOtp, forgotPassword, isLoading } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [, setLocation] = useLocation();
+  const { resolvedTheme } = useTheme();
+
+  // Load and manage Google Identity Services
+  useEffect(() => {
+    let script = document.getElementById("google-gsi-client") as HTMLScriptElement | null;
+    if (!script) {
+      script = document.createElement("script");
+      script.id = "google-gsi-client";
+      script.src = "https://accounts.google.com/gsi/client";
+      script.async = true;
+      script.defer = true;
+      document.head.appendChild(script);
+    }
+
+    const initGoogleBtn = () => {
+      if (window.google?.accounts?.id) {
+        window.google.accounts.id.initialize({
+          client_id: "952981082241-tif2ul1vnps4fu13odnbpgb9p8n3el4j.apps.googleusercontent.com",
+          callback: async (response: any) => {
+            try {
+              await loginWithGoogle(response.credential);
+            } catch (err: any) {
+              setError(err.message || "Google authentication failed.");
+            }
+          },
+        });
+
+        const targetDiv = document.getElementById("google-signIn-btn");
+        if (targetDiv) {
+          targetDiv.innerHTML = "";
+          window.google.accounts.id.renderButton(targetDiv, {
+            theme: resolvedTheme === "dark" ? "filled_black" : "outline",
+            size: "large",
+            width: 320,
+            shape: "pill",
+            text: "continue_with",
+          });
+        }
+      }
+    };
+
+    if (window.google) {
+      initGoogleBtn();
+    } else {
+      script.onload = initGoogleBtn;
+    }
+  }, [loginWithGoogle, resolvedTheme, mode, step]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setSuccess(null);
     
-    if (isForgotPassword) {
-      if (!email) {
-        setError("Please enter your email address.");
+    if (step === "otp") {
+      if (code.length < 4) {
+        setError("Please enter the 4-digit verification code.");
         return;
       }
       try {
-        await forgotPassword(email);
-        setSuccess("If the email is registered, a reset link has been sent (check backend logs).");
+        await register(name, email, password, code);
       } catch (err: any) {
-        setError(err.message || "Failed to send reset link.");
+        setError(err.message || "Invalid or expired verification code.");
       }
       return;
     }
 
-    if (!email || !password || (!isLogin && !name)) {
-      setError("Please fill in all fields.");
+    if (!email || !email.includes("@")) {
+      setError("Please enter a valid email address.");
+      return;
+    }
+
+    if (!password && mode !== "forgot") {
+      setError("Please enter your password.");
       return;
     }
 
     try {
-      if (isLogin) {
-        await login(email, password);
+      if (mode === "register") {
+        if (!name.trim()) {
+          setError("Please enter your full name.");
+          return;
+        }
+        if (password.length < 8) {
+          setError("Password must be at least 8 characters long.");
+          return;
+        }
+        if (password !== confirmPassword) {
+          setError("Passwords do not match.");
+          return;
+        }
+        await requestOtp(email);
+        setStep("otp");
+      } else if (mode === "forgot") {
+        await forgotPassword(email);
+        setSuccess("If your email is registered, you will receive password reset instructions shortly.");
       } else {
-        await register(name, email, password);
+        await login(email, password);
       }
     } catch (err: any) {
-      setError(err.message || "Authentication failed. Please try again.");
+      setError(err.message || "Authentication failed. Please check your credentials.");
     }
   };
 
   return (
-    <div 
-      className="min-h-screen flex flex-col w-full text-white overflow-x-hidden font-sans relative"
-      style={{
-        backgroundImage: "url('https://images.unsplash.com/photo-1507204122176-35cb8a6aeb20?auto=format&fit=crop&w=2000&q=80')",
-        backgroundSize: "cover",
-        backgroundPosition: "center",
-        backgroundRepeat: "no-repeat"
-      }}
-    >
-      {/* Dark overlay to ensure text readability */}
-      <div className="absolute inset-0 bg-black/30 z-0 pointer-events-none" />
+    <div className="min-h-screen bg-background text-foreground flex flex-col relative overflow-hidden selection:bg-emerald-500/20 selection:text-emerald-500">
+      
+      {/* Dynamic Background Aesthetic matching SPETRO Geoportal */}
+      <div className="absolute inset-0 z-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-emerald-500/10 via-background to-background pointer-events-none" />
+      <div className="absolute -top-40 -right-40 w-96 h-96 bg-emerald-500/10 dark:bg-emerald-500/15 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-teal-500/10 dark:bg-teal-500/15 rounded-full blur-3xl pointer-events-none" />
+      
+      {/* Subtle Coordinate / Grid Lines */}
+      <div className="absolute inset-0 bg-[linear-gradient(to_right,#8080800a_1px,transparent_1px),linear-gradient(to_bottom,#8080800a_1px,transparent_1px)] bg-[size:32px_32px] pointer-events-none" />
 
-      {/* Navigation Bar */}
-      <nav className="relative z-10 flex justify-between items-center py-8 px-8 sm:px-16 w-full">
-        <Link href="/">
-          <div className="text-[28px] font-bold cursor-pointer tracking-wide drop-shadow-md">Logo</div>
-        </Link>
-        <div className="hidden md:flex gap-10 items-center">
-          <Link href="/" className="text-white text-[15px] font-medium opacity-90 hover:opacity-100 hover:drop-shadow-[0_0_10px_rgba(255,255,255,0.8)] transition-all drop-shadow-md">Home</Link>
-          <Link href="/about" className="text-white text-[15px] font-medium opacity-90 hover:opacity-100 hover:drop-shadow-[0_0_10px_rgba(255,255,255,0.8)] transition-all drop-shadow-md">About</Link>
-          <Link href="/services" className="text-white text-[15px] font-medium opacity-90 hover:opacity-100 hover:drop-shadow-[0_0_10px_rgba(255,255,255,0.8)] transition-all drop-shadow-md">Services</Link>
-          <Link href="/contact" className="text-white text-[15px] font-medium opacity-90 hover:opacity-100 hover:drop-shadow-[0_0_10px_rgba(255,255,255,0.8)] transition-all drop-shadow-md">Contact</Link>
-          <button onClick={() => { setIsLogin(true); setIsForgotPassword(false); }} className="bg-transparent border border-white/50 text-white py-2 px-8 rounded-md cursor-pointer text-[15px] font-medium transition-all hover:bg-white/20 hover:border-white/90 hover:shadow-[0_0_15px_rgba(255,255,255,0.2)] backdrop-blur-sm">Login</button>
+      {/* Unified Global Header */}
+      <header className="relative z-20 px-6 py-4 flex justify-between items-center border-b border-border/40 bg-background/60 backdrop-blur-xl">
+        <div className="flex items-center gap-6">
+          <SiteBrand size="normal" hideSubtitleOnMobile />
         </div>
-      </nav>
 
-      {/* Main Container */}
-      <div className="relative z-10 flex-1 flex justify-center items-center p-5 pb-20">
-        <div className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-2xl w-full max-w-[420px] px-10 py-10 relative shadow-[0_8px_32px_0_rgba(0,0,0,0.4)]">
-          
-          <button onClick={() => setLocation("/")} className="absolute -top-3 -right-3 bg-[#111] border border-white/20 text-white w-8 h-8 rounded-full flex items-center justify-center cursor-pointer font-bold text-lg transition-all hover:bg-[#333] hover:scale-105 shadow-lg" aria-label="Close">
-            <X className="w-4 h-4" />
-          </button>
-          
-          <h2 className="text-center text-[32px] font-semibold mb-8 tracking-wide">
-            {isForgotPassword ? "Reset Password" : isLogin ? "Login" : "Register"}
-          </h2>
-          
-          <form onSubmit={handleSubmit}>
-            {!isLogin && !isForgotPassword && (
-              <div className="relative mb-6">
-                <label htmlFor="name" className="block text-[13px] mb-2 text-white/70 font-medium">Full Name</label>
-                <input
-                  id="name"
-                  type="text"
-                  required
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="w-full bg-transparent border-0 border-b border-white/20 text-white text-base py-2.5 pl-1 pr-8 outline-none transition-colors focus:border-white/80"
-                />
-                <User className="absolute right-1 bottom-3 w-[18px] h-[18px] opacity-60 pointer-events-none" />
-              </div>
-            )}
+        {/* Navigation Links */}
+        <nav className="hidden md:flex items-center gap-6">
+          <Link href="/">
+            <span className="text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer">Home</span>
+          </Link>
+          <Link href="/platform">
+            <span className="text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer">Platform</span>
+          </Link>
+          <Link href="/about">
+            <span className="text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer">About</span>
+          </Link>
+          <Link href="/services">
+            <span className="text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer">Services</span>
+          </Link>
+          <Link href="/contact">
+            <span className="text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer">Contact</span>
+          </Link>
+        </nav>
 
-            <div className="relative mb-6">
-              <label htmlFor="email" className="block text-[13px] mb-2 text-white/70 font-medium">Email</label>
-              <input
-                id="email"
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full bg-transparent border-0 border-b border-white/20 text-white text-base py-2.5 pl-1 pr-8 outline-none transition-colors focus:border-white/80"
-              />
-              <Mail className="absolute right-1 bottom-3 w-[18px] h-[18px] opacity-60 pointer-events-none" />
+        {/* Header Right Actions */}
+        <div className="flex items-center gap-3">
+          <ThemeToggle />
+          <Link href="/">
+            <Button variant="ghost" size="sm" className="gap-2 text-xs font-semibold text-muted-foreground hover:text-foreground">
+              <ArrowLeft className="w-3.5 h-3.5" /> Back to Home
+            </Button>
+          </Link>
+        </div>
+      </header>
+
+      {/* Main Centered Content */}
+      <main className="relative z-10 flex-1 flex flex-col items-center justify-center p-4 sm:p-6 py-10">
+        
+        {/* Glassmorphic Auth Card */}
+        <div className="relative w-full max-w-[450px] mx-auto bg-card/85 dark:bg-card/65 backdrop-blur-2xl border border-border/80 dark:border-white/10 rounded-2xl shadow-2xl p-7 sm:p-9 transition-all">
+          
+          {/* Top Emerald Glow Accent Line */}
+          <div className="absolute top-0 left-10 right-10 h-[2px] bg-gradient-to-r from-transparent via-emerald-500 to-transparent" />
+
+          {/* Close button in top corner */}
+          <Link href="/">
+            <button 
+              type="button" 
+              className="absolute top-4 right-4 text-muted-foreground hover:text-foreground hover:bg-muted/60 w-8 h-8 rounded-full flex items-center justify-center transition-colors cursor-pointer"
+              aria-label="Back to home"
+              title="Close and return to Home"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </Link>
+
+          {/* Card Header & Brand Badge */}
+          <div className="text-center mb-6">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold tracking-wider uppercase bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 mb-3">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              SPETRO Security Gateway
             </div>
+            
+            <h2 className="text-2xl sm:text-3xl font-extrabold text-foreground tracking-tight">
+              {step === "otp"
+                ? "Verify Your Email"
+                : mode === "login"
+                ? "Welcome Back"
+                : mode === "forgot"
+                ? "Reset Password"
+                : "Create Account"}
+            </h2>
+            
+            <p className="text-xs sm:text-sm text-muted-foreground mt-1.5 leading-relaxed">
+              {step === "otp"
+                ? `Enter the 4-digit code sent to ${email}`
+                : mode === "login"
+                ? "Sign in to access satellite analysis and spatial modules"
+                : mode === "forgot"
+                ? "Enter your registered email to receive password recovery instructions"
+                : "Join SPETRO to explore planetary datasets and remote sensing models"}
+            </p>
+          </div>
 
-            {!isForgotPassword && (
-              <div className="relative mb-6">
-                <label htmlFor="password" className="block text-[13px] mb-2 text-white/70 font-medium">Password</label>
-                <input
-                  id="password"
-                  type="password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="w-full bg-transparent border-0 border-b border-white/20 text-white text-base py-2.5 pl-1 pr-8 outline-none transition-colors focus:border-white/80"
-                />
-                <Lock className="absolute right-1 bottom-3 w-[18px] h-[18px] opacity-60 pointer-events-none" />
+          {/* Mode Switcher Tabs (Only when in Login/Register modes) */}
+          {step !== "otp" && mode !== "forgot" && (
+            <div className="grid grid-cols-2 p-1 bg-muted/60 dark:bg-muted/40 rounded-xl mb-6 border border-border/50">
+              <button
+                type="button"
+                onClick={() => { setMode("login"); setError(null); setSuccess(null); }}
+                className={`py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                  mode === "login"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Sign In
+              </button>
+              <button
+                type="button"
+                onClick={() => { setMode("register"); setError(null); setSuccess(null); }}
+                className={`py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                  mode === "register"
+                    ? "bg-background text-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Register
+              </button>
+            </div>
+          )}
+
+          {/* Feedback Alerts */}
+          {error && (
+            <div className="text-xs font-medium text-destructive bg-destructive/10 border border-destructive/20 p-3 rounded-xl mb-5 flex items-start gap-2.5">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span className="leading-snug">{error}</span>
+            </div>
+          )}
+
+          {success && (
+            <div className="text-xs font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 p-3 rounded-xl mb-5 flex items-start gap-2.5">
+              <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+              <span className="leading-snug">{success}</span>
+            </div>
+          )}
+
+          {/* Authentication Form */}
+          <form onSubmit={handleSubmit} className="flex flex-col space-y-4">
+            
+            {step === "otp" ? (
+              <div className="flex flex-col items-center justify-center space-y-5 my-2">
+                <div className="w-12 h-12 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-500">
+                  <KeyRound className="w-6 h-6" />
+                </div>
+                
+                <div className="w-full max-w-[240px]">
+                  <label htmlFor="code" className="block text-xs font-semibold text-center text-muted-foreground mb-2">
+                    4-Digit Verification Code
+                  </label>
+                  <input
+                    id="code"
+                    type="text"
+                    required
+                    maxLength={4}
+                    value={code}
+                    onChange={(e) => setCode(e.target.value.replace(/[^0-9]/g, ""))}
+                    placeholder="••••"
+                    autoFocus
+                    className="w-full bg-muted/40 dark:bg-slate-950/40 border border-border focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 text-foreground text-2xl tracking-[0.5em] font-mono font-bold text-center py-3 rounded-xl outline-none transition-all"
+                  />
+                </div>
               </div>
+            ) : (
+              <>
+                {/* Full Name (Register Only) */}
+                {mode === "register" && (
+                  <div className="space-y-1.5">
+                    <label htmlFor="name" className="block text-xs font-semibold text-foreground">
+                      Full Name
+                    </label>
+                    <div className="relative flex items-center bg-muted/40 dark:bg-slate-950/40 border border-border/80 dark:border-white/10 rounded-xl px-3.5 py-2.5 transition-all focus-within:border-emerald-500 focus-within:ring-2 focus-within:ring-emerald-500/20">
+                      <User className="w-4 h-4 text-muted-foreground shrink-0" />
+                      <input
+                        id="name"
+                        type="text"
+                        required
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        placeholder="e.g. John Doe"
+                        className="w-full bg-transparent border-0 text-foreground text-sm font-medium pl-3 pr-1 outline-none placeholder:text-muted-foreground/60"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Email Address */}
+                <div className="space-y-1.5">
+                  <label htmlFor="email" className="block text-xs font-semibold text-foreground">
+                    Email Address
+                  </label>
+                  <div className="relative flex items-center bg-muted/40 dark:bg-slate-950/40 border border-border/80 dark:border-white/10 rounded-xl px-3.5 py-2.5 transition-all focus-within:border-emerald-500 focus-within:ring-2 focus-within:ring-emerald-500/20">
+                    <Mail className="w-4 h-4 text-muted-foreground shrink-0" />
+                    <input
+                      id="email"
+                      type="email"
+                      required
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="name@example.com"
+                      className="w-full bg-transparent border-0 text-foreground text-sm font-medium pl-3 pr-1 outline-none placeholder:text-muted-foreground/60"
+                    />
+                  </div>
+                </div>
+
+                {/* Password Field */}
+                {mode !== "forgot" && (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label htmlFor="password" className="block text-xs font-semibold text-foreground">
+                        Password
+                      </label>
+                      {mode === "login" && (
+                        <button
+                          type="button"
+                          onClick={() => { setMode("forgot"); setError(null); setSuccess(null); }}
+                          className="text-xs font-medium text-emerald-600 dark:text-emerald-400 hover:text-emerald-500 transition-colors"
+                        >
+                          Forgot Password?
+                        </button>
+                      )}
+                    </div>
+                    <div className="relative flex items-center bg-muted/40 dark:bg-slate-950/40 border border-border/80 dark:border-white/10 rounded-xl px-3.5 py-2.5 transition-all focus-within:border-emerald-500 focus-within:ring-2 focus-within:ring-emerald-500/20">
+                      <Lock className="w-4 h-4 text-muted-foreground shrink-0" />
+                      <input
+                        id="password"
+                        type={showPassword ? "text" : "password"}
+                        required
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        placeholder="••••••••"
+                        className="w-full bg-transparent border-0 text-foreground text-sm font-medium pl-3 pr-8 outline-none placeholder:text-muted-foreground/60"
+                      />
+                      <button 
+                        type="button" 
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 text-muted-foreground hover:text-foreground transition-colors"
+                        aria-label={showPassword ? "Hide password" : "Show password"}
+                      >
+                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Confirm Password (Register Only) */}
+                {mode === "register" && (
+                  <div className="space-y-1.5">
+                    <label htmlFor="confirmPassword" className="block text-xs font-semibold text-foreground">
+                      Confirm Password
+                    </label>
+                    <div className="relative flex items-center bg-muted/40 dark:bg-slate-950/40 border border-border/80 dark:border-white/10 rounded-xl px-3.5 py-2.5 transition-all focus-within:border-emerald-500 focus-within:ring-2 focus-within:ring-emerald-500/20">
+                      <Lock className="w-4 h-4 text-muted-foreground shrink-0" />
+                      <input
+                        id="confirmPassword"
+                        type={showConfirmPassword ? "text" : "password"}
+                        required
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        placeholder="••••••••"
+                        className="w-full bg-transparent border-0 text-foreground text-sm font-medium pl-3 pr-8 outline-none placeholder:text-muted-foreground/60"
+                      />
+                      <button 
+                        type="button" 
+                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        className="absolute right-3 text-muted-foreground hover:text-foreground transition-colors"
+                        aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                      >
+                        {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
 
-            {!isForgotPassword && (
-              <div className="flex justify-between items-center text-[13px] mb-8">
-                <label className="flex items-center gap-2 text-white/70 cursor-pointer">
-                  <input type="checkbox" className="cursor-pointer accent-white/80 w-3.5 h-3.5" />
-                  Remember me
+            {/* Remember Me Option (Login mode only) */}
+            {mode === "login" && step !== "otp" && (
+              <div className="flex items-center justify-between pt-1 pb-1">
+                <label className="flex items-center gap-2 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                    className="w-4 h-4 rounded border-border text-emerald-600 focus:ring-emerald-500/20 accent-emerald-500 cursor-pointer"
+                  />
+                  <span className="text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
+                    Remember this device
+                  </span>
                 </label>
-                <button type="button" onClick={() => { setIsForgotPassword(true); setError(null); setSuccess(null); }} className="text-white/70 no-underline transition-colors hover:text-white">
-                  Forget Password?
-                </button>
-              </div>
-            )}
-
-            {error && (
-              <div className="text-sm font-medium text-red-400 bg-red-400/10 p-3 rounded-md mb-6 border border-red-400/20">
-                {error}
               </div>
             )}
             
-            {success && (
-              <div className="text-sm font-medium text-emerald-400 bg-emerald-400/10 p-3 rounded-md mb-6 border border-emerald-400/20">
-                {success}
-              </div>
-            )}
-
-            <button type="submit" disabled={isLoading} className="w-full bg-[#28282d]/80 border border-white/5 text-white p-3.5 rounded-lg text-base font-medium cursor-pointer transition-all tracking-wide mb-6 hover:bg-[#3c3c41]/90 hover:border-white/20 hover:shadow-[0_4px_15px_rgba(0,0,0,0.3)] disabled:opacity-70 flex justify-center items-center">
+            {/* Primary Action Button */}
+            <button 
+              type="submit" 
+              disabled={isLoading} 
+              className="w-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-semibold py-3 px-4 rounded-xl shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/30 transition-all flex items-center justify-center gap-2 text-sm disabled:opacity-60 cursor-pointer mt-2"
+            >
               {isLoading ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              ) : isForgotPassword ? (
-                "Send Reset Link"
-              ) : isLogin ? (
-                "Login"
+                <Loader2 className="w-4 h-4 animate-spin" />
               ) : (
-                "Create Account"
+                <>
+                  <span>
+                    {step === "otp"
+                      ? "Verify Code & Sign In"
+                      : mode === "login"
+                      ? "Sign In"
+                      : mode === "forgot"
+                      ? "Send Recovery Link"
+                      : "Create Account"}
+                  </span>
+                  <ArrowRight className="w-4 h-4" />
+                </>
               )}
             </button>
-
-            <div className="text-center text-[14px] text-white/60">
-              {isForgotPassword ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsForgotPassword(false);
-                    setIsLogin(true);
-                    setError(null);
-                    setSuccess(null);
-                  }}
-                  className="text-white/90 font-medium no-underline transition-colors hover:text-white hover:underline cursor-pointer"
-                >
-                  Back to Sign in
-                </button>
-              ) : isLogin ? (
-                <>
-                  Don't have an account?{" "}
-                  <button type="button" onClick={() => { setIsLogin(false); setError(null); }} className="text-white/90 font-medium no-underline transition-colors hover:text-white hover:underline cursor-pointer">
-                    Register
-                  </button>
-                </>
-              ) : (
-                <>
-                  Already have an account?{" "}
-                  <button type="button" onClick={() => { setIsLogin(true); setError(null); }} className="text-white/90 font-medium no-underline transition-colors hover:text-white hover:underline cursor-pointer">
-                    Login
-                  </button>
-                </>
-              )}
-            </div>
           </form>
+
+          {/* Mode Switch Helper Links */}
+          <div className="mt-5 text-center text-xs text-muted-foreground font-medium">
+            {step === "otp" ? (
+              <button 
+                type="button" 
+                onClick={() => { setStep("details"); setCode(""); setError(null); }} 
+                className="text-emerald-600 dark:text-emerald-400 hover:underline transition-colors font-semibold cursor-pointer"
+              >
+                &larr; Back to edit details
+              </button>
+            ) : mode === "login" ? (
+              <>
+                Don't have an account yet?{" "}
+                <button 
+                  type="button" 
+                  onClick={() => { setMode("register"); setError(null); setSuccess(null); }} 
+                  className="text-emerald-600 dark:text-emerald-400 hover:underline transition-colors font-semibold cursor-pointer"
+                >
+                  Register here
+                </button>
+              </>
+            ) : mode === "forgot" ? (
+              <>
+                Remember your password?{" "}
+                <button 
+                  type="button" 
+                  onClick={() => { setMode("login"); setError(null); setSuccess(null); }} 
+                  className="text-emerald-600 dark:text-emerald-400 hover:underline transition-colors font-semibold cursor-pointer"
+                >
+                  Back to Sign In
+                </button>
+              </>
+            ) : (
+              <>
+                Already have an account?{" "}
+                <button 
+                  type="button" 
+                  onClick={() => { setMode("login"); setError(null); setSuccess(null); }} 
+                  className="text-emerald-600 dark:text-emerald-400 hover:underline transition-colors font-semibold cursor-pointer"
+                >
+                  Sign in
+                </button>
+              </>
+            )}
+          </div>
+
+          {/* Divider & Google OAuth Section */}
+          {step !== "otp" && mode !== "forgot" && (
+            <div className="mt-6 pt-5 border-t border-border/60">
+              <div className="relative flex py-1 items-center mb-4">
+                <div className="flex-grow border-t border-border/60"></div>
+                <span className="shrink-0 px-3 text-[11px] font-bold uppercase tracking-wider text-muted-foreground/70">
+                  Or continue with
+                </span>
+                <div className="flex-grow border-t border-border/60"></div>
+              </div>
+
+              {/* Google Button Container */}
+              <div className="flex items-center justify-center">
+                <div id="google-signIn-btn" className="min-h-[44px] flex items-center justify-center"></div>
+              </div>
+            </div>
+          )}
+
+          {/* Platform Security Badge */}
+          <div className="mt-7 pt-4 border-t border-border/40 flex items-center justify-center gap-2 text-[11px] text-muted-foreground/80 font-medium">
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
+            <span>Protected by Google Earth Engine & SPETRO Shield</span>
+          </div>
+
         </div>
-      </div>
+      </main>
+
+      {/* Global Unified Footer */}
+      <footer className="relative z-10 bg-background/50 backdrop-blur-md border-t border-border/40 mt-auto w-full">
+        <div className="max-w-7xl mx-auto px-6 py-6 flex flex-col md:flex-row justify-between items-center gap-4">
+          <div className="flex items-center gap-2">
+            <SiteLogoOnly size="small" />
+            <span className="text-xs font-medium text-muted-foreground ml-2">
+              &copy; {new Date().getFullYear()} SPETRO Geoportal. All rights reserved.
+            </span>
+          </div>
+          <div className="flex gap-6 text-xs text-muted-foreground font-medium">
+            <Link href="/about" className="hover:text-primary transition-colors cursor-pointer">About Us</Link>
+            <Link href="/services" className="hover:text-primary transition-colors cursor-pointer">Services</Link>
+            <Link href="/contact" className="hover:text-primary transition-colors cursor-pointer">Contact</Link>
+            <a href="#" className="hover:text-primary transition-colors">Privacy Policy</a>
+            <a href="#" className="hover:text-primary transition-colors">Terms of Service</a>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }

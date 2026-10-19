@@ -2,117 +2,120 @@ import { Link } from "wouter";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useAuth } from "@/hooks/use-auth";
 import { 
-  BarChart3, 
-  Database, 
-  PenTool, 
-  LayoutDashboard, 
-  MessageSquare,
-  ArrowRight,
-  Satellite,
-  Briefcase,
-  Mail,
-  Send,
-  BookOpen,
-  Globe2
+  ArrowUpRight, 
+  Mail, 
+  Send 
 } from "lucide-react";
+import { EarthAnalyticsEmblem } from "@/components/EarthAnalyticsEmblem";
+import { DataVaultEmblem } from "@/components/DataVaultEmblem";
+import { DataHarvesterEmblem } from "@/components/DataHarvesterEmblem";
+import { SampleDigitizerEmblem } from "@/components/SampleDigitizerEmblem";
+import { ExpertConsultationEmblem } from "@/components/ExpertConsultationEmblem";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { SiteBrand, SiteLogoOnly } from "@/components/SiteBrand";
+import { SiteBrand } from "@/components/SiteBrand";
 
-const HUB_MODULES = [
+const MODULES = [
   {
-    title: "Analysis Modules",
-    description: "Explore geospatial datasets, run analytics, and view detailed maps for NDVI, LST, Slope, and more.",
-    icon: BarChart3,
-    color: "text-emerald-600",
-    bgColor: "bg-emerald-500/10",
-    borderColor: "border-emerald-500/20",
+    title: "Earth Analytics",
     path: "/analysis-hub",
+    emblem: EarthAnalyticsEmblem,
+    glowColor: "rgba(59, 130, 246, 0.25)",
+    hoverBorder: "hover:border-blue-500/50",
   },
   {
-    title: "RARE DATA Hub",
-    description: "Access and upload specialized environmental datasets and repositories.",
-    icon: Database,
-    color: "text-blue-600",
-    bgColor: "bg-blue-500/10",
-    borderColor: "border-blue-500/20",
+    title: "Data Vault",
     path: "/rare-data",
+    emblem: DataVaultEmblem,
+    glowColor: "rgba(59, 130, 246, 0.25)",
+    hoverBorder: "hover:border-blue-500/50",
   },
   {
-    title: "Data Harvester",
-    description: "Universal spatial ingestion and data harvesting module.",
-    icon: Globe2,
-    color: "text-cyan-600",
-    bgColor: "bg-cyan-500/10",
-    borderColor: "border-cyan-500/20",
+    title: "Spatial Harvester",
     path: "/harvester",
+    emblem: DataHarvesterEmblem,
+    glowColor: "rgba(6, 182, 212, 0.25)",
+    hoverBorder: "hover:border-cyan-500/50",
   },
   {
-    title: "Sample Digitizer",
-    description: "Draw, digitize, and extract GeoJSON training samples directly from the map.",
-    icon: PenTool,
-    color: "text-amber-600",
-    bgColor: "bg-amber-500/10",
-    borderColor: "border-amber-500/20",
+    title: "Ground Truth Digitizer",
     path: "/samples",
+    emblem: SampleDigitizerEmblem,
+    glowColor: "rgba(245, 158, 11, 0.25)",
+    hoverBorder: "hover:border-amber-500/50",
   },
   {
-    title: "Premium Services",
-    description: "Book 1-on-1 consultations, corporate training, and custom GIS analysis projects.",
-    icon: Briefcase,
-    color: "text-amber-500",
-    bgColor: "bg-amber-500/10",
-    borderColor: "border-amber-500/20",
+    title: "Expert Consultation",
     path: "/services",
+    emblem: ExpertConsultationEmblem,
+    glowColor: "rgba(168, 85, 247, 0.25)",
+    hoverBorder: "hover:border-purple-500/50",
   }
 ];
 
 export function PlatformPage() {
   const { user } = useAuth();
-  
+
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="min-h-screen bg-background flex flex-col selection:bg-primary/20">
       {/* Header */}
-      <header className="bg-card border-b border-border px-6 py-4 flex items-center justify-between shadow-sm">
+      <header className="bg-card/80 backdrop-blur-md border-b border-border/80 px-8 py-4 flex items-center justify-between sticky top-0 z-50">
         <SiteBrand size="normal" hideSubtitleOnMobile />
         <ThemeToggle />
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 max-w-6xl w-full mx-auto p-8 flex flex-col justify-center">
-        <div className="text-center mb-12">
-          <h2 className="text-3xl font-extrabold text-foreground mb-4 tracking-tight">Select a Category to Begin</h2>
-          <p className="text-muted-foreground max-w-2xl mx-auto text-lg">
-            Welcome to the SPETRO Geoportal Analysis platform. Choose a category below to dive into analysis, data management, or community collaboration.
+      <main className="flex-1 max-w-6xl w-full mx-auto px-6 py-16 md:py-20 flex flex-col justify-center">
+        
+        {/* Confident, Minimal Header */}
+        <div className="text-center max-w-2xl mx-auto mb-14">
+          <h1 className="text-3xl md:text-5xl font-extrabold text-foreground tracking-tight mb-3">
+            Geospatial Intelligence
+          </h1>
+          <p className="text-muted-foreground text-base md:text-lg">
+            Select an operational module to begin.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {HUB_MODULES.filter(m => m.path !== '/dashboard' || user?.role === 'admin').map((module) => (
-            <Link key={module.path} href={module.path}>
-              <div className="group relative bg-card rounded-2xl p-6 border border-border shadow-sm hover:shadow-xl transition-all duration-300 cursor-pointer overflow-hidden flex flex-col h-full">
-                
-                {/* Accent Background Glow on Hover */}
-                <div className={`absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 bg-gradient-to-br from-transparent to-${module.color.replace('text-', '')}/5`} />
-                
-                <div className="flex items-start justify-between mb-4 relative z-10">
-                  <div className={`w-14 h-14 rounded-xl flex items-center justify-center ${module.bgColor} ${module.color} border ${module.borderColor}`}>
-                    <module.icon className="w-7 h-7" />
+        {/* Clean Launchpad Grid */}
+        <div className="flex flex-wrap justify-center gap-6 max-w-5xl mx-auto w-full">
+          {MODULES.map((module) => {
+            return (
+              <Link 
+                key={module.path} 
+                href={module.path}
+                className="w-full sm:w-[calc(50%-12px)] lg:w-[calc(33.333%-16px)]"
+              >
+                <div 
+                  className={`group relative bg-card hover:bg-card/95 rounded-2xl p-7 md:p-8 border border-border/80 ${module.hoverBorder} transition-all duration-300 cursor-pointer flex flex-col justify-between h-[185px] shadow-sm hover:shadow-xl hover:-translate-y-1.5 overflow-hidden`}
+                >
+                  {/* Subtle Ambient Radial Glow on Hover */}
+                  <div 
+                    className="absolute -right-12 -top-12 w-36 h-36 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none blur-3xl"
+                    style={{ background: module.glowColor }}
+                  />
+
+                  {/* Top Row: Emblem + Micro-Arrow */}
+                  <div className="flex items-start justify-between relative z-10">
+                    <div className="relative -ml-1 -mt-1 w-[72px] h-[72px] shrink-0 transition-transform duration-300 group-hover:scale-105">
+                      <module.emblem className="w-[72px] h-[72px] drop-shadow-sm" />
+                    </div>
+
+                    <div className="w-8 h-8 rounded-full flex items-center justify-center text-muted-foreground/40 group-hover:text-foreground group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all duration-300">
+                      <ArrowUpRight className="w-5 h-5" />
+                    </div>
                   </div>
-                  <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center group-hover:bg-primary group-hover:text-primary-foreground transition-colors duration-300">
-                    <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-primary-foreground" />
+
+                  {/* Bottom: Bold, Clean Title Only */}
+                  <div className="relative z-10">
+                    <h3 className="text-xl font-bold text-foreground tracking-tight group-hover:text-primary transition-colors">
+                      {module.title}
+                    </h3>
                   </div>
                 </div>
-                
-                <div className="relative z-10 mt-auto">
-                  <h3 className="text-xl font-bold text-foreground mb-2">{module.title}</h3>
-                  <p className="text-sm text-muted-foreground leading-relaxed">
-                    {module.description}
-                  </p>
-                </div>
-              </div>
-            </Link>
-          ))}
+              </Link>
+            );
+          })}
         </div>
       </main>
 
@@ -158,20 +161,21 @@ export function PlatformPage() {
           </div>
 
           {/* Column 2: Platform */}
-          <div className="flex flex-col gap-4">
-            <h4 className="text-sm font-extrabold uppercase tracking-widest text-foreground mb-2">Platform</h4>
-            <a href="/analysis-hub" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-primary font-medium transition-colors">Analysis Hub</a>
-            <a href="/rare-data" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-primary font-medium transition-colors">Rare Data Hub</a>
-            <a href="/harvester" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-primary font-medium transition-colors">Data Harvester</a>
-            <a href="/samples" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-primary font-medium transition-colors">Sample Digitizer</a>
+          <div className="flex flex-col gap-3">
+            <h4 className="text-sm font-extrabold uppercase tracking-widest text-foreground mb-1">Platform</h4>
+            <Link href="/analysis-hub" className="text-sm text-muted-foreground hover:text-primary font-medium transition-colors">Earth Analytics</Link>
+            <Link href="/rare-data" className="text-sm text-muted-foreground hover:text-primary font-medium transition-colors">Data Vault</Link>
+            <Link href="/harvester" className="text-sm text-muted-foreground hover:text-primary font-medium transition-colors">Spatial Harvester</Link>
+            <Link href="/samples" className="text-sm text-muted-foreground hover:text-primary font-medium transition-colors">Ground Truth Digitizer</Link>
           </div>
 
-          {/* Column 3: Community & Resources */}
-          <div className="flex flex-col gap-4">
-            <h4 className="text-sm font-extrabold uppercase tracking-widest text-foreground mb-2">Community</h4>
-            <a href="/community" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-primary font-medium transition-colors">Community Forum</a>
-            <a href="/blog" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-primary font-medium transition-colors">Blog & Case Studies</a>
-            <a href="/services" target="_blank" rel="noopener noreferrer" className="text-sm text-muted-foreground hover:text-primary font-medium transition-colors">Premium Services</a>
+          {/* Column 3: Academy & Community */}
+          <div className="flex flex-col gap-3">
+            <h4 className="text-sm font-extrabold uppercase tracking-widest text-foreground mb-1">Community & Learning</h4>
+            <Link href="/academy" className="text-sm text-muted-foreground hover:text-primary font-medium transition-colors">Academy & Tutorials</Link>
+            <Link href="/community" className="text-sm text-muted-foreground hover:text-primary font-medium transition-colors">Community Forum</Link>
+            <Link href="/blog" className="text-sm text-muted-foreground hover:text-primary font-medium transition-colors">Blog & Case Studies</Link>
+            <Link href="/services" className="text-sm text-muted-foreground hover:text-primary font-medium transition-colors">Consulting Services</Link>
           </div>
 
           {/* Column 4: Company */}

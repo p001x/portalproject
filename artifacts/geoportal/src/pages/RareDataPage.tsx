@@ -21,7 +21,11 @@ import {
   Scissors, 
   Edit3,
   ExternalLink,
-  Tag
+  Tag,
+  Settings2,
+  FolderOpen,
+  ChevronDown,
+  X
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,7 +46,9 @@ import { DatasetColabDialog } from "@/components/DatasetColabDialog";
 import { DatasetPreviewDialog } from "@/components/DatasetPreviewDialog";
 import { DatasetClipDialog } from "@/components/DatasetClipDialog";
 import { DatasetEditDialog } from "@/components/DatasetEditDialog";
-import { DatasetSpatialMap } from "@/components/DatasetSpatialMap";
+import { DatasetTypeIcon } from "@/components/DatasetTypeIcon";
+import { useDatasetContextMenu, type ContextMenuItem } from "@/components/DatasetContextMenu";
+import { DatasetPropertiesDialog } from "@/components/DatasetPropertiesDialog";
 
 const FILE_TYPE_COLORS: Record<string, string> = {
   tiff: "#ef4444",
@@ -111,13 +117,9 @@ function StatusBadge({ status, errorMessage }: { status: string; errorMessage?: 
 function SummaryRow({ 
   records, 
   source,
-  showMap,
-  onToggleMap,
 }: { 
   records: DatasetRecord[]; 
   source: string;
-  showMap: boolean;
-  onToggleMap: () => void;
 }) {
   const totalMb = records.reduce((s, r) => s + (r.file_size_mb ?? 0), 0);
   const spatial = records.filter((r) => r.bbox && r.bbox.length === 4).length;
@@ -140,16 +142,6 @@ function SummaryRow({
       </div>
 
       <div className="flex items-center gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onToggleMap}
-          className={`h-8 text-xs gap-1.5 transition-all ${showMap ? "bg-primary/10 border-primary text-primary" : ""}`}
-        >
-          <Layers className="w-3.5 h-3.5" />
-          {showMap ? "Hide Extents Map" : "Show Extents Map"}
-        </Button>
-
         {records.length > 0 && (
           <a href={downloadAllUrl} download>
             <Button variant="secondary" size="sm" className="h-8 text-xs gap-1.5 shadow-2xs">
@@ -188,6 +180,10 @@ function DatasetList({
   const [clipDataset, setClipDataset] = useState<DatasetRecord | null>(null);
   const [editDataset, setEditDataset] = useState<DatasetRecord | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<DatasetRecord | null>(null);
+  const [propertiesDataset, setPropertiesDataset] = useState<DatasetRecord | null>(null);
+
+  // Hook-based right-click context menu (renders via Portal, no DOM nesting issues)
+  const contextMenu = useDatasetContextMenu();
 
   const [search, setSearch] = useState("");
   const [filterType, setFilterType] = useState<string>("all");
@@ -321,11 +317,15 @@ function DatasetList({
           <table className="w-full text-sm">
             <thead className="bg-muted/70 border-b border-border/80 text-muted-foreground">
               <tr>
-                <th className="text-left px-4 py-3 font-semibold text-xs">Dataset Name & Metadata</th>
+                <th className="text-left px-4 py-3 font-semibold text-xs">
+                  Dataset Name & Metadata
+                  <span className="hidden sm:inline font-normal text-muted-foreground/70 text-[10px] ml-2">
+                    (Right-click or double-click for ArcGIS menu)
+                  </span>
+                </th>
                 <th className="text-left px-4 py-3 font-semibold text-xs">Format</th>
                 <th className="text-right px-4 py-3 font-semibold text-xs">Size (MB)</th>
-                <th className="text-left px-4 py-3 font-semibold text-xs">Status</th>
-                <th className="text-right px-4 py-3 font-semibold text-xs pr-6">Operational Actions</th>
+                <th className="text-right px-4 py-3 font-semibold text-xs pr-6">Properties</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/60">
@@ -333,23 +333,31 @@ function DatasetList({
                 const isSelected = r.id === selectedId;
                 return (
                   <tr 
-                    key={r.id} 
-                    className={`transition-colors group hover:bg-muted/40 ${isSelected ? "bg-primary/5" : i % 2 === 0 ? "bg-background" : "bg-muted/15"}`}
+                    key={r.id}
+                    className={`transition-colors group hover:bg-muted/40 cursor-context-menu ${isSelected ? "bg-primary/5" : i % 2 === 0 ? "bg-background" : "bg-muted/15"}`}
                     onClick={() => onSelect && onSelect(r)}
+                    onDoubleClick={() => setPropertiesDataset(r)}
+                    title="Right-click for ArcGIS menu, double-click for Properties"
+                    onContextMenu={contextMenu.open([
+                      { label: "Open (Preview)", icon: <FolderOpen className="w-4 h-4" />, onClick: () => setPreviewDataset(r), dividerAfter: false },
+                      { label: "Properties", icon: <Settings2 className="w-4 h-4" />, onClick: () => setPropertiesDataset(r), dividerAfter: true },
+                      ...(r.bbox && r.bbox.length === 4 ? [{ label: "Clip by District / AOI", icon: <Scissors className="w-4 h-4" />, onClick: () => setClipDataset(r) }] : []),
+                      { label: "Colab / GEE Snippet", icon: <Code2 className="w-4 h-4" />, onClick: () => setColabDataset(r) },
+                      { label: "Edit Metadata", icon: <Edit3 className="w-4 h-4" />, onClick: () => setEditDataset(r), disabled: !canEdit, dividerAfter: true },
+                      { label: "Copy Download Link", icon: <Copy className="w-4 h-4" />, onClick: () => copyDownloadLink(r) },
+                      { label: "Download File", icon: <Download className="w-4 h-4" />, onClick: () => { window.open(`${BASE}/datasets/${r.id}/download?source=${r.source ?? source}`, '_blank'); } },
+                      ...(onDelete ? [{ label: "Delete Dataset", icon: <Trash2 className="w-4 h-4" />, onClick: () => setDeleteTarget(r), variant: "danger" as const }] : []),
+                    ], r)}
                   >
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2.5">
+                        <DatasetTypeIcon fileType={r.file_type} status={r.status} size={30} />
                         <span className="font-semibold text-foreground group-hover:text-primary transition-colors">
                           {r.name}
                         </span>
                         {r.category && (
                           <span className="text-[10px] bg-secondary text-secondary-foreground px-1.5 py-0.2 rounded font-medium">
                             {r.category}
-                          </span>
-                        )}
-                        {r.bbox && r.bbox.length === 4 && (
-                          <span title="Has spatial coordinates" className="inline-flex text-[10px] items-center text-primary bg-primary/10 px-1.5 py-0.2 rounded font-medium">
-                            <MapPin className="w-2.5 h-2.5 mr-0.5" /> Spatial
                           </span>
                         )}
                       </div>
@@ -396,106 +404,18 @@ function DatasetList({
                       {r.file_size_mb != null ? r.file_size_mb.toFixed(2) : "—"}
                     </td>
 
-                    <td className="px-4 py-3">
-                      <StatusBadge status={r.status} errorMessage={r.error_message} />
-                    </td>
-
-                    <td className="px-4 py-3 text-right pr-4" onClick={(e) => e.stopPropagation()}>
-                      <div className="flex items-center justify-end gap-1.5">
-                        {/* 1. Preview Modal */}
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-7 px-2 text-[11px] gap-1 hover:border-primary hover:text-primary"
-                          onClick={() => setPreviewDataset(r)}
-                          title="Preview dataset on interactive map & inspect attribute table"
-                        >
-                          <Eye className="w-3 h-3" />
-                          Preview
-                        </Button>
-
-                        {/* 2. District & AOI Slicer / Clip */}
-                        {r.bbox && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-7 px-2 text-[11px] gap-1 border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10"
-                            onClick={() => setClipDataset(r)}
-                            title="Clip and extract dataset by Rwanda district or custom AOI"
-                          >
-                            <Scissors className="w-3 h-3" />
-                            Clip
-                          </Button>
-                        )}
-
-                        {/* 3. Colab / GEE Integration Snippet */}
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-7 px-2 text-[11px] gap-1 border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/10"
-                          onClick={() => setColabDataset(r)}
-                          title="Generate Python, GEE & Google Colab code snippet"
-                        >
-                          <Code2 className="w-3 h-3" />
-                          Colab
-                        </Button>
-
-                        {/* 4. Edit Metadata (Admin or Logged-in Contributor) */}
-                        {canEdit && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                            onClick={() => setEditDataset(r)}
-                            title="Edit dataset name, description, tags"
-                            aria-label="Edit dataset details"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </Button>
-                        )}
-
-                        {/* 5. Copy Link */}
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                          onClick={() => copyDownloadLink(r)}
-                          title="Copy direct download URL"
-                          aria-label="Copy direct download URL"
-                        >
-                          <Copy className="w-3.5 h-3.5" />
-                        </Button>
-
-                        {/* 6. Direct Download */}
-                        <a
-                          href={`${BASE}/datasets/${r.id}/download?source=${r.source ?? source}`}
-                          download
-                        >
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 text-muted-foreground hover:text-primary"
-                            title="Download dataset file"
-                            aria-label="Download dataset file"
-                          >
-                            <Download className="w-3.5 h-3.5" />
-                          </Button>
-                        </a>
-
-                        {/* 7. Delete (with confirmation dialog) */}
-                        {onDelete && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 text-destructive/70 hover:text-destructive hover:bg-destructive/10"
-                            onClick={() => setDeleteTarget(r)}
-                            title="Delete dataset"
-                            aria-label="Delete dataset"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </Button>
-                        )}
-                      </div>
+                    {/* Clean single Properties button */}
+                    <td className="px-4 py-3 text-right pr-6" onClick={(e) => e.stopPropagation()}>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 px-3 text-xs gap-1.5 font-medium border-border/80 hover:border-primary hover:text-primary hover:bg-primary/5 transition-all shadow-2xs cursor-pointer"
+                        onClick={() => setPropertiesDataset(r)}
+                        title="Open dataset properties, operations & tools"
+                      >
+                        <Settings2 className="w-3.5 h-3.5 text-primary" />
+                        Properties
+                      </Button>
                     </td>
                   </tr>
                 );
@@ -503,7 +423,7 @@ function DatasetList({
 
               {filteredRecords.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-4 py-12 text-center text-muted-foreground">
+                  <td colSpan={4} className="px-4 py-12 text-center text-muted-foreground">
                     <Database className="w-8 h-8 mx-auto mb-2 opacity-30" />
                     <p className="text-sm font-medium">No datasets found matching your criteria.</p>
                     <p className="text-xs text-muted-foreground/70 mt-1">
@@ -581,6 +501,38 @@ function DatasetList({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {propertiesDataset && (
+        <DatasetPropertiesDialog
+          dataset={propertiesDataset}
+          source={propertiesDataset.source ?? source}
+          onClose={() => setPropertiesDataset(null)}
+          onOpenPreview={(ds) => {
+            setPropertiesDataset(null);
+            setPreviewDataset(ds);
+          }}
+          onOpenClip={(ds) => {
+            setPropertiesDataset(null);
+            setClipDataset(ds);
+          }}
+          onOpenColab={(ds) => {
+            setPropertiesDataset(null);
+            setColabDataset(ds);
+          }}
+          onOpenEdit={(ds) => {
+            setPropertiesDataset(null);
+            setEditDataset(ds);
+          }}
+          onDelete={onDelete ? () => {
+            setPropertiesDataset(null);
+            setDeleteTarget(propertiesDataset);
+          } : undefined}
+          canEdit={canEdit}
+        />
+      )}
+
+      {/* Right-click context menu portal */}
+      {contextMenu.render()}
     </div>
   );
 }
@@ -629,17 +581,7 @@ function OfficialTab() {
       <SummaryRow
         records={records}
         source="admin"
-        showMap={showMap}
-        onToggleMap={() => setShowMap(!showMap)}
       />
-
-      {showMap && (
-        <DatasetSpatialMap
-          records={records}
-          selectedId={selectedDataset?.id}
-          onSelect={(r) => setSelectedDataset(r)}
-        />
-      )}
 
       <DatasetList
         records={records}
@@ -653,32 +595,31 @@ function OfficialTab() {
   );
 }
 
-function CommunityTab() {
+/* ── Standalone Unfoldable Contribute Panel ───────────────────────── */
+function ContributePanel({
+  onClose,
+  defaultSource = "community",
+}: {
+  onClose?: () => void;
+  defaultSource?: string;
+}) {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
   const { toast } = useToast();
   const qc = useQueryClient();
 
-  const [showMap, setShowMap] = useState(true);
-  const [selectedDataset, setSelectedDataset] = useState<DatasetRecord | null>(null);
-
-  const { data, isLoading } = useQuery({
-    queryKey: ["datasets", "community"],
-    queryFn: () => api.datasets.list("community"),
-  });
-  const records = data?.records ?? [];
-
+  const [targetSource, setTargetSource] = useState(defaultSource);
   const [file, setFile] = useState<File | null>(null);
   const [uploadName, setUploadName] = useState("");
   const [uploadDesc, setUploadDesc] = useState("");
-  const [uploadContrib, setUploadContrib] = useState("");
+  const [uploadContrib, setUploadContrib] = useState(user?.username || "");
   const [uploadCategory, setUploadCategory] = useState("Other / General");
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
 
   const [linkUrl, setLinkUrl] = useState("");
   const [linkName, setLinkName] = useState("");
   const [linkDesc, setLinkDesc] = useState("");
-  const [linkContrib, setLinkContrib] = useState("");
+  const [linkContrib, setLinkContrib] = useState(user?.username || "");
 
   const uploadMut = useMutation({
     mutationFn: () => {
@@ -688,7 +629,7 @@ function CommunityTab() {
       fd.append("description", uploadDesc);
       fd.append("contributor", uploadContrib);
       fd.append("category", uploadCategory);
-      fd.append("source", "community");
+      fd.append("source", targetSource);
       setUploadProgress(0);
       return api.datasets.uploadWithProgress(fd, (pct) => {
         setUploadProgress(pct);
@@ -705,8 +646,9 @@ function CommunityTab() {
       setUploadProgress(null);
       toast({
         title: "Upload Completed",
-        description: "Your dataset has been added to the community repository.",
+        description: `Your dataset has been published to the ${targetSource === "admin" ? "Official" : "Community"} repository.`,
       });
+      if (onClose) onClose();
     },
     onError: (err: any) => {
       setUploadProgress(null);
@@ -726,9 +668,10 @@ function CommunityTab() {
         description: linkDesc,
         contributor: linkContrib,
         category: uploadCategory,
-        source: "community",
+        source: targetSource,
       }),
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["datasets", "admin"] });
       qc.invalidateQueries({ queryKey: ["datasets", "community"] });
       qc.invalidateQueries({ queryKey: ["datasets", "all"] });
       setLinkUrl("");
@@ -739,6 +682,7 @@ function CommunityTab() {
         title: "Dataset Linked",
         description: "Dataset metadata extracted and registered successfully.",
       });
+      if (onClose) onClose();
     },
     onError: (err: any) => {
       toast({
@@ -748,6 +692,233 @@ function CommunityTab() {
       });
     },
   });
+
+  return (
+    <div className="border border-border/80 rounded-2xl p-5 bg-card/95 backdrop-blur-md shadow-xl space-y-4 relative">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/60 pb-3">
+        <div>
+          <div className="flex items-center gap-2 font-bold text-sm text-foreground">
+            <Upload className="w-4 h-4 text-primary" />
+            Contribute a Dataset to the Repository
+          </div>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Upload a GeoTIFF, Shapefile (.zip), GeoJSON or CSV file, or link an existing dataset hosted on GitHub / Cloud.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          {isAdmin && (
+            <div className="flex items-center gap-1.5 text-xs bg-muted/60 px-2.5 py-1 rounded-lg border border-border/60">
+              <span className="text-muted-foreground text-[11px] font-medium">Destination:</span>
+              <select
+                value={targetSource}
+                onChange={(e) => setTargetSource(e.target.value)}
+                className="h-6 text-xs bg-background border border-input rounded px-1.5 font-medium cursor-pointer"
+              >
+                <option value="community">Community Vault</option>
+                <option value="admin">Official Repository</option>
+              </select>
+            </div>
+          )}
+          {onClose && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground hover:text-foreground rounded-lg cursor-pointer"
+              onClick={onClose}
+              title="Close contribute panel"
+            >
+              <X className="w-4 h-4" />
+            </Button>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-1">
+        {/* Option 1: Direct File Upload */}
+        <div className="border border-border/70 rounded-xl p-4 bg-background space-y-3">
+          <div className="flex items-center gap-1.5 font-semibold text-xs text-foreground">
+            <Upload className="w-3.5 h-3.5 text-primary" /> Option 1: Direct File Upload
+          </div>
+
+          <div className="space-y-2.5">
+            <div className="space-y-1">
+              <Label className="text-xs">Geospatial File (.tif, .zip, .csv, .geojson)</Label>
+              <input
+                type="file"
+                onChange={(e) => {
+                  const f = e.target.files?.[0] ?? null;
+                  setFile(f);
+                  if (f && !uploadName) {
+                    setUploadName(f.name.replace(/\.[^/.]+$/, ""));
+                  }
+                }}
+                className="w-full text-xs file:mr-2 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <Label className="text-xs">Dataset Name *</Label>
+                <Input
+                  value={uploadName}
+                  onChange={(e) => setUploadName(e.target.value)}
+                  placeholder="e.g. Rwanda Land Cover 2024"
+                  className="h-8 text-xs"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Contributor Name / Org</Label>
+                <Input
+                  value={uploadContrib}
+                  onChange={(e) => setUploadContrib(e.target.value)}
+                  placeholder="e.g. REMA, GIS Lab"
+                  className="h-8 text-xs"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-xs">Category</Label>
+              <select
+                value={uploadCategory}
+                onChange={(e) => setUploadCategory(e.target.value)}
+                className="w-full h-8 rounded-md border border-input bg-background px-3 py-1 text-xs"
+              >
+                {CATEGORIES.filter((c) => c !== "All").map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-xs">Description</Label>
+              <Input
+                value={uploadDesc}
+                onChange={(e) => setUploadDesc(e.target.value)}
+                placeholder="Key details, methodology, resolution..."
+                className="h-8 text-xs"
+              />
+            </div>
+
+            <Button
+              onClick={() => uploadMut.mutate()}
+              disabled={uploadMut.isPending || !file || !uploadName}
+              className="w-full gap-2 text-xs h-8.5 mt-2 cursor-pointer"
+            >
+              {uploadMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+              Upload to {targetSource === "admin" ? "Official Repository" : "Community Vault"}
+            </Button>
+
+            {uploadProgress !== null && (
+              <div className="w-full mt-2 space-y-1.5">
+                <div className="flex justify-between text-xs">
+                  <span className="text-muted-foreground flex items-center gap-1.5">
+                    {uploadProgress < 100 ? (
+                      <>Uploading dataset bytes…</>
+                    ) : (
+                      <>
+                        <Loader2 className="w-3 h-3 animate-spin text-amber-500" />
+                        Processing & extracting metadata on server…
+                      </>
+                    )}
+                  </span>
+                  <span className="font-semibold text-primary">
+                    {uploadProgress < 100 ? `${uploadProgress}%` : "Processing"}
+                  </span>
+                </div>
+                <div className="w-full bg-secondary h-2 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full transition-all duration-300 ease-out ${
+                      uploadProgress >= 100 ? "bg-amber-500 animate-pulse w-full" : "bg-primary"
+                    }`}
+                    style={{ width: uploadProgress >= 100 ? "100%" : `${uploadProgress}%` }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Option 2: Remote URL / GitHub Link Box */}
+        <div className="border border-border/70 rounded-xl p-4 bg-background space-y-3">
+          <div className="flex items-center gap-1.5 font-semibold text-xs text-foreground">
+            <LinkIcon className="w-3.5 h-3.5 text-primary" /> Option 2: Link from GitHub / Remote URL
+          </div>
+
+          <div className="space-y-2.5">
+            <div className="space-y-1">
+              <Label className="text-xs">Remote URL *</Label>
+              <Input
+                value={linkUrl}
+                onChange={(e) => setLinkUrl(e.target.value)}
+                placeholder="https://github.com/.../raw/main/data.geojson or raw direct link"
+                className="h-8 text-xs"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <Label className="text-xs">Dataset Name *</Label>
+                <Input
+                  value={linkName}
+                  onChange={(e) => setLinkName(e.target.value)}
+                  placeholder="e.g. Rwanda Hydrography Network"
+                  className="h-8 text-xs"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Contributor Name / Org</Label>
+                <Input
+                  value={linkContrib}
+                  onChange={(e) => setLinkContrib(e.target.value)}
+                  placeholder="e.g. OpenStreetMap, RCMRD"
+                  className="h-8 text-xs"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-xs">Description</Label>
+              <Input
+                value={linkDesc}
+                onChange={(e) => setLinkDesc(e.target.value)}
+                placeholder="Short description or source citation"
+                className="h-8 text-xs"
+              />
+            </div>
+
+            <Button
+              onClick={() => linkMut.mutate()}
+              disabled={linkMut.isPending || !linkUrl || !linkName}
+              variant="outline"
+              className="w-full gap-2 text-xs h-8.5 mt-2 hover:bg-primary/5 hover:border-primary cursor-pointer"
+            >
+              {linkMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LinkIcon className="w-3.5 h-3.5" />}
+              Register Remote Dataset
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CommunityTab() {
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const qc = useQueryClient();
+
+  const [showMap, setShowMap] = useState(true);
+  const [selectedDataset, setSelectedDataset] = useState<DatasetRecord | null>(null);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["datasets", "community"],
+    queryFn: () => api.datasets.list("community"),
+  });
+  const records = data?.records ?? [];
 
   const deleteMut = useMutation({
     mutationFn: ({ id, source }: { id: string; source: string }) => api.datasets.delete(id, source),
@@ -778,17 +949,7 @@ function CommunityTab() {
       <SummaryRow
         records={records}
         source="community"
-        showMap={showMap}
-        onToggleMap={() => setShowMap(!showMap)}
       />
-
-      {showMap && (
-        <DatasetSpatialMap
-          records={records}
-          selectedId={selectedDataset?.id}
-          onSelect={(r) => setSelectedDataset(r)}
-        />
-      )}
 
       <DatasetList
         records={records}
@@ -798,186 +959,6 @@ function CommunityTab() {
         onRefresh={() => qc.invalidateQueries({ queryKey: ["datasets", "community"] })}
         onDelete={user ? (id, src) => deleteMut.mutate({ id, source: src }) : undefined}
       />
-
-      {/* Contribution Forms Tabs */}
-      <div className="border border-border/80 rounded-2xl p-5 bg-card/60 shadow-xs space-y-4">
-        <div className="flex items-center gap-2 font-bold text-sm text-foreground">
-          <Upload className="w-4 h-4 text-primary" />
-          Contribute a Dataset to the Community
-        </div>
-        <p className="text-xs text-muted-foreground">
-          Upload a GeoTIFF, Shapefile (.zip), GeoJSON or CSV file, or link an existing dataset hosted on GitHub / Cloud.
-        </p>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-2">
-          {/* File Upload Box */}
-          <div className="border border-border/70 rounded-xl p-4 bg-background space-y-3">
-            <div className="flex items-center gap-1.5 font-semibold text-xs text-foreground">
-              <Upload className="w-3.5 h-3.5" /> Option 1: Direct File Upload
-            </div>
-
-            <div className="space-y-2.5">
-              <div className="space-y-1">
-                <Label className="text-xs">Geospatial File (.tif, .zip, .csv, .geojson)</Label>
-                <input
-                  type="file"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0] ?? null;
-                    setFile(f);
-                    if (f && !uploadName) {
-                      setUploadName(f.name.replace(/\.[^/.]+$/, ""));
-                    }
-                  }}
-                  className="w-full text-xs file:mr-2 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <Label className="text-xs">Dataset Name *</Label>
-                  <Input
-                    value={uploadName}
-                    onChange={(e) => setUploadName(e.target.value)}
-                    placeholder="e.g. Rwanda Land Cover 2024"
-                    className="h-8 text-xs"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Contributor Name / Org</Label>
-                  <Input
-                    value={uploadContrib}
-                    onChange={(e) => setUploadContrib(e.target.value)}
-                    placeholder="e.g. REMA, GIS Lab"
-                    className="h-8 text-xs"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <Label className="text-xs">Category</Label>
-                <select
-                  value={uploadCategory}
-                  onChange={(e) => setUploadCategory(e.target.value)}
-                  className="w-full h-8 rounded-md border border-input bg-background px-3 py-1 text-xs"
-                >
-                  {CATEGORIES.filter((c) => c !== "All").map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="space-y-1">
-                <Label className="text-xs">Description</Label>
-                <Input
-                  value={uploadDesc}
-                  onChange={(e) => setUploadDesc(e.target.value)}
-                  placeholder="Key details, methodology, resolution..."
-                  className="h-8 text-xs"
-                />
-              </div>
-
-              <Button
-                onClick={() => uploadMut.mutate()}
-                disabled={uploadMut.isPending || !file || !uploadName}
-                className="w-full gap-2 text-xs h-8.5 mt-2"
-              >
-                {uploadMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-                Upload to Community Vault
-              </Button>
-
-              {uploadProgress !== null && (
-                <div className="w-full mt-2 space-y-1.5">
-                  <div className="flex justify-between text-xs">
-                    <span className="text-muted-foreground flex items-center gap-1.5">
-                      {uploadProgress < 100 ? (
-                        <>Uploading dataset bytes…</>
-                      ) : (
-                        <>
-                          <Loader2 className="w-3 h-3 animate-spin text-amber-500" />
-                          Processing & extracting metadata on server…
-                        </>
-                      )}
-                    </span>
-                    <span className="font-semibold text-primary">
-                      {uploadProgress < 100 ? `${uploadProgress}%` : "Processing"}
-                    </span>
-                  </div>
-                  <div className="w-full bg-secondary h-2 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full transition-all duration-300 ease-out ${
-                        uploadProgress >= 100 ? "bg-amber-500 animate-pulse w-full" : "bg-primary"
-                      }`}
-                      style={{ width: uploadProgress >= 100 ? "100%" : `${uploadProgress}%` }}
-                    />
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Remote URL / GitHub Link Box */}
-          <div className="border border-border/70 rounded-xl p-4 bg-background space-y-3">
-            <div className="flex items-center gap-1.5 font-semibold text-xs text-foreground">
-              <LinkIcon className="w-3.5 h-3.5" /> Option 2: Link from GitHub / Remote URL
-            </div>
-
-            <div className="space-y-2.5">
-              <div className="space-y-1">
-                <Label className="text-xs">Remote URL *</Label>
-                <Input
-                  value={linkUrl}
-                  onChange={(e) => setLinkUrl(e.target.value)}
-                  placeholder="https://github.com/.../raw/main/data.geojson or raw direct link"
-                  className="h-8 text-xs"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                <div className="space-y-1">
-                  <Label className="text-xs">Dataset Name *</Label>
-                  <Input
-                    value={linkName}
-                    onChange={(e) => setLinkName(e.target.value)}
-                    placeholder="e.g. Rwanda Hydrography Network"
-                    className="h-8 text-xs"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Contributor Name / Org</Label>
-                  <Input
-                    value={linkContrib}
-                    onChange={(e) => setLinkContrib(e.target.value)}
-                    placeholder="e.g. OpenStreetMap, RCMRD"
-                    className="h-8 text-xs"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <Label className="text-xs">Description</Label>
-                <Input
-                  value={linkDesc}
-                  onChange={(e) => setLinkDesc(e.target.value)}
-                  placeholder="Short description or source citation"
-                  className="h-8 text-xs"
-                />
-              </div>
-
-              <Button
-                onClick={() => linkMut.mutate()}
-                disabled={linkMut.isPending || !linkUrl || !linkName}
-                variant="outline"
-                className="w-full gap-2 text-xs h-8.5 mt-2 hover:bg-primary/5 hover:border-primary"
-              >
-                {linkMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LinkIcon className="w-3.5 h-3.5" />}
-                Register Remote Dataset
-              </Button>
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
@@ -1148,17 +1129,7 @@ function AdminTab() {
       <SummaryRow
         records={records}
         source="admin"
-        showMap={showMap}
-        onToggleMap={() => setShowMap(!showMap)}
       />
-
-      {showMap && (
-        <DatasetSpatialMap
-          records={records}
-          selectedId={selectedDataset?.id}
-          onSelect={(r) => setSelectedDataset(r)}
-        />
-      )}
 
       {isLoading ? (
         <div className="flex items-center justify-center py-20 text-muted-foreground gap-2">
@@ -1181,6 +1152,7 @@ function AdminTab() {
 export function RareDataPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
+  const [isContributeOpen, setIsContributeOpen] = useState(false);
 
   return (
     <div className="flex h-full overflow-y-auto bg-background/50">
@@ -1199,11 +1171,36 @@ export function RareDataPage() {
             </p>
           </div>
 
-          <div className="flex items-center gap-2 text-xs text-muted-foreground bg-card px-3 py-1.5 rounded-lg border border-border">
-            <span className="w-2 h-2 rounded-full bg-emerald-500" />
-            <span>Dataset Repository</span>
+          {/* Unfoldable Contribute Icon Button */}
+          <div className="flex items-center gap-2 shrink-0">
+            <Button
+              variant={isContributeOpen ? "default" : "outline"}
+              size="sm"
+              onClick={() => setIsContributeOpen((v) => !v)}
+              className={`gap-2 h-9 px-3.5 text-xs font-semibold rounded-xl transition-all shadow-xs cursor-pointer ${
+                isContributeOpen
+                  ? "bg-primary text-primary-foreground shadow-md ring-2 ring-primary/20"
+                  : "hover:border-primary hover:text-primary hover:bg-primary/5 bg-card"
+              }`}
+              title={isContributeOpen ? "Collapse contribution options" : "Upload or link a new dataset to repository"}
+            >
+              <Upload className="w-4 h-4" />
+              <span>Contribute Dataset</span>
+              <ChevronDown
+                className={`w-3.5 h-3.5 transition-transform duration-200 ${
+                  isContributeOpen ? "rotate-180" : ""
+                }`}
+              />
+            </Button>
           </div>
         </div>
+
+        {/* Unfolded Contribution & Upload Panel */}
+        {isContributeOpen && (
+          <div className="animate-in fade-in-0 slide-in-from-top-3 duration-200">
+            <ContributePanel onClose={() => setIsContributeOpen(false)} />
+          </div>
+        )}
 
         {/* Tabbed Repository Interface */}
         <Tabs defaultValue="official" className="space-y-6">

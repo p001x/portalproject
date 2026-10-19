@@ -43,6 +43,8 @@ import { ContactPage } from "@/pages/ContactPage";
 import { AcademyPage } from "@/pages/AcademyPage";
 import { BlogPage } from "@/pages/BlogPage";
 import { CanvaStandalonePage } from "@/pages/CanvaStandalonePage";
+import { UserManagementPage } from "@/pages/UserManagementPage";
+import { AccountBlockedDialog } from "@/components/AccountBlockedDialog";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { NotificationProvider, useNotifications } from "@/hooks/use-notifications";
 import { GEEAuthGate } from "@/components/GEEAuthGate";
@@ -162,14 +164,13 @@ function UserProfile() {
       </div>
     </div>
 
-    {/* Menu Items with clear written text */}
-    <div className="flex flex-col gap-1">
+    {/* Icon Menu Row */}
+    <div className="flex items-center justify-around px-2">
       {/* Notifications */}
       <Popover>
         <PopoverTrigger asChild>
-          <Button variant="ghost" className="w-full justify-start text-muted-foreground hover:text-foreground font-medium">
-            <Bell className="w-4 h-4 mr-3" />
-            Notifications
+          <Button variant="ghost" size="icon" className="relative text-muted-foreground hover:text-foreground" title="Notifications">
+            <Bell className="w-5 h-5" />
             <NotificationBadge />
           </Button>
         </PopoverTrigger>
@@ -179,17 +180,15 @@ function UserProfile() {
       </Popover>
 
       {/* Settings */}
-      <Link href="/settings" className="w-full">
-        <Button variant="ghost" className="w-full justify-start text-muted-foreground hover:text-foreground font-medium">
-          <Settings className="w-4 h-4 mr-3" />
-          Settings
+      <Link href="/settings">
+        <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground" title="Settings">
+          <Settings className="w-5 h-5" />
         </Button>
       </Link>
 
       {/* Logout */}
-      <Button variant="ghost" className="w-full justify-start text-muted-foreground hover:text-destructive font-medium" onClick={logout}>
-        <LogOut className="w-4 h-4 mr-3" />
-        Log out
+      <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" onClick={logout} title="Log out">
+        <LogOut className="w-5 h-5" />
       </Button>
     </div>
     
@@ -210,36 +209,61 @@ export function NotificationBadge() {
   );
 }
 
+import { Shield, Users, Info, CheckCircle2 } from "lucide-react";
+
 export function NotificationList() {
   const { notifications, markAsRead, markAllAsRead, unreadCount } = useNotifications();
   
+  const getIcon = (type: string) => {
+    switch(type) {
+      case 'security': return <Shield className="w-4 h-4 text-emerald-500" />;
+      case 'analysis': return <Activity className="w-4 h-4 text-blue-500" />;
+      case 'community': return <Users className="w-4 h-4 text-purple-500" />;
+      default: return <Info className="w-4 h-4 text-slate-400" />;
+    }
+  };
+
   return (
-    <div className="flex flex-col">
-      <div className="flex items-center justify-between p-3 border-b">
-        <h4 className="font-semibold text-sm">Notifications</h4>
+    <div className="flex flex-col bg-card text-card-foreground rounded-xl shadow-xl border border-border overflow-hidden">
+      <div className="flex items-center justify-between p-3.5 border-b border-border bg-muted/30">
+        <h4 className="font-bold text-sm text-foreground flex items-center gap-2">
+          Notifications
+          {unreadCount > 0 && (
+            <span className="bg-destructive text-destructive-foreground text-[10px] px-2 py-0.5 rounded-full font-bold">
+              {unreadCount} new
+            </span>
+          )}
+        </h4>
         {unreadCount > 0 && (
           <Button 
             variant="ghost" 
             size="sm" 
-            className="h-auto p-1 text-xs" 
+            className="h-auto p-1 text-xs text-primary hover:bg-primary/10 font-semibold transition-colors" 
             onClick={(e) => {
               e.preventDefault();
               e.stopPropagation();
               markAllAsRead();
             }}
           >
+            <CheckCircle2 className="w-3.5 h-3.5 mr-1 inline" />
             Mark all read
           </Button>
         )}
       </div>
-      <div className="max-h-[300px] overflow-y-auto">
+      <div className="max-h-[350px] overflow-y-auto overflow-x-hidden custom-scrollbar">
         {notifications.length === 0 ? (
-          <div className="p-4 text-center text-sm text-muted-foreground">No notifications</div>
+          <div className="p-8 flex flex-col items-center justify-center text-center">
+            <div className="w-12 h-12 rounded-full bg-muted flex items-center justify-center mb-3 text-muted-foreground">
+              <Bell className="w-5 h-5" />
+            </div>
+            <p className="text-sm font-medium text-foreground">You're all caught up!</p>
+            <p className="text-xs text-muted-foreground mt-1">No new notifications right now.</p>
+          </div>
         ) : (
           notifications.map(n => (
             <div 
               key={n.id} 
-              className={`p-3 border-b last:border-0 hover:bg-muted/50 transition-colors ${!n.read ? 'bg-primary/5 cursor-pointer' : ''}`}
+              className={`p-3.5 border-b border-border/50 last:border-0 hover:bg-muted/50 transition-colors ${!n.read ? 'bg-primary/5 cursor-pointer' : ''}`}
               onClick={(e) => {
                 if (!n.read) {
                   e.preventDefault();
@@ -248,12 +272,25 @@ export function NotificationList() {
                 }
               }}
             >
-              <div className="flex items-start justify-between gap-2">
-                <p className="text-sm font-medium leading-tight">{n.title}</p>
-                {!n.read && <div className="w-1.5 h-1.5 rounded-full bg-primary shrink-0 mt-1" />}
+              <div className="flex items-start gap-3">
+                <div className="mt-0.5 w-8 h-8 rounded-full bg-background border border-border flex items-center justify-center shrink-0">
+                  {getIcon(n.type)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className={`text-sm font-semibold truncate ${!n.read ? 'text-foreground' : 'text-muted-foreground'}`}>
+                      {n.title}
+                    </p>
+                    {!n.read && <div className="w-2 h-2 rounded-full bg-primary shrink-0 mt-1 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />}
+                  </div>
+                  <p className={`text-xs mt-1 leading-relaxed ${!n.read ? 'text-foreground/90 font-medium' : 'text-muted-foreground'}`}>
+                    {n.message}
+                  </p>
+                  <p className="text-[10px] font-medium text-muted-foreground/70 mt-2 tracking-wide uppercase">
+                    {new Date(n.timestamp).toLocaleDateString([], { month: 'short', day: 'numeric' })} • {new Date(n.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                  </p>
+                </div>
               </div>
-              <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{n.message}</p>
-              <p className="text-[10px] text-muted-foreground/70 mt-1">{new Date(n.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</p>
             </div>
           ))
         )}
@@ -343,7 +380,8 @@ function Sidebar({ loc, className = "" }: { loc: string; className?: string }) {
             <AccordionContent className="pb-2 pt-0 space-y-0.5">
               {educationModules.map((m) => <NavLink key={m.path} {...m} />)}
               <NavLink path="/community" label="Community Forum" icon={MessageSquare} description="Discuss & Share" />
-              {isUserAdmin && <NavLink path="/dashboard" label="Analytics" icon={LayoutDashboard} description="Traffic & Usage" />}
+              {isUserAdmin && <NavLink path="/admin/users" label="User Management" icon={Users} description="Moderation & Activities" />}
+              {isUserAdmin && <NavLink path="/dashboard" label="Admin Command Center" icon={LayoutDashboard} description="Traffic, Accounts & Habits" />}
             </AccordionContent>
           </AccordionItem>
         </Accordion>
@@ -408,10 +446,10 @@ function UserProfileDropdown() {
 
 function Layout({ children }: { children: React.ReactNode }) {
   const [loc, setLocation] = useLocation();
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, user } = useAuth();
 
   useEffect(() => {
-    if (!isLoading && !isAuthenticated && loc !== "/" && loc !== "/platform" && loc !== "/analysis-hub" && loc !== "/about" && loc !== "/contact" && loc !== "/auth" && loc !== "/blog" && !loc.startsWith("/reset-password") && loc !== "/export-editor") {
+    if (!isLoading && !isAuthenticated && loc !== "/" && loc !== "/platform" && loc !== "/analysis-hub" && loc !== "/about" && loc !== "/contact" && loc !== "/auth" && loc !== "/blog" && !loc.startsWith("/reset-password") && loc !== "/export-editor" && loc !== "/rare-data") {
       setLocation("/auth");
     }
   }, [isAuthenticated, isLoading, loc, setLocation]);
@@ -420,7 +458,7 @@ function Layout({ children }: { children: React.ReactNode }) {
     return <>{children}</>;
   }
 
-  if (isLoading || !isAuthenticated) {
+  if (isLoading || (!isAuthenticated && loc !== "/rare-data")) {
     return (
       <div className="flex h-screen items-center justify-center bg-background text-muted-foreground">
         Loading...
@@ -428,7 +466,7 @@ function Layout({ children }: { children: React.ReactNode }) {
     );
   }
 
-  const isFocusedMode = [...analysisModules, ...rareDataModules, ...digitizationModules, ...infrastructureModules, ...educationModules].some(m => m.path === loc) || loc === "/community" || loc === "/dashboard";
+  const isFocusedMode = [...analysisModules, ...rareDataModules, ...digitizationModules, ...infrastructureModules, ...educationModules].some(m => m.path === loc) || loc === "/community" || loc === "/dashboard" || loc === "/settings" || loc === "/admin/users";
   const isAnalysisFocused = analysisModules.some(m => m.path === loc);
 
   return (
@@ -458,7 +496,15 @@ function Layout({ children }: { children: React.ReactNode }) {
             {isFocusedMode && (
               <div className="hidden md:flex items-center gap-2">
                 <ThemeToggle />
-                <UserProfileDropdown />
+                {user ? (
+                  <UserProfileDropdown />
+                ) : (
+                  <Link href="/auth">
+                    <Button variant="outline" size="sm" className="h-8 text-xs font-semibold">
+                      Sign In
+                    </Button>
+                  </Link>
+                )}
               </div>
             )}
             <Sheet>
@@ -534,6 +580,7 @@ function Router() {
           </GEEAuthGate>
         </Route>
         <Route path="/community" component={CommunityPage} />
+        <Route path="/admin/users" component={UserManagementPage} />
         <Route path="/dashboard" component={DashboardPage} />
         <Route path="/cloud-ingest" component={CloudIngestPage} />
         <Route path="/services" component={PricingPage} />
@@ -552,15 +599,16 @@ export default function App() {
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
-          <NotificationProvider>
-            <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-              <AuthProvider>
+          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+            <AuthProvider>
+              <NotificationProvider>
                 <AnalyticsTracker />
+                <AccountBlockedDialog />
                 <Router />
-              </AuthProvider>
-            </WouterRouter>
-            <Toaster />
-          </NotificationProvider>
+              </NotificationProvider>
+            </AuthProvider>
+          </WouterRouter>
+          <Toaster />
         </TooltipProvider>
       </QueryClientProvider>
     </ThemeProvider>

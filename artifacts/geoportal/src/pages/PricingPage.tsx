@@ -82,10 +82,10 @@ export function PricingPage() {
             <div className="mt-auto pt-2 flex flex-col items-center">
               <Link href="/academy" className="w-full">
                 <Button className="w-full rounded-xl bg-[#0cf6bd] py-6 text-base font-semibold text-teal-950 hover:bg-[#0ae3ad] transition-colors shadow-lg shadow-[#0cf6bd]/20">
-                  Access Courses <ChevronRight className="ml-1 h-5 w-5" strokeWidth={2.5} />
+                  Access Studies & Books <ChevronRight className="ml-1 h-5 w-5" strokeWidth={2.5} />
                 </Button>
               </Link>
-              <span className="mt-3 text-xs text-slate-500 font-medium">Instant access to training materials.</span>
+              <span className="mt-3 text-xs text-slate-500 font-medium">Instant access to training materials and videos.</span>
             </div>
           </div>
         </Card>

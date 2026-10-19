@@ -36,6 +36,7 @@ export function AcademyPage() {
 
   const [isAddBookOpen, setIsAddBookOpen] = useState(false);
   const [newBook, setNewBook] = useState({ title: "", author: "", description: "", pages: "", googleBooksUrl: "" });
+  const [newBookFile, setNewBookFile] = useState<File | null>(null);
   const [selectedBookToRead, setSelectedBookToRead] = useState<any>(null);
 
   const [isEditCourseOpen, setIsEditCourseOpen] = useState(false);
@@ -437,22 +438,23 @@ export function AcademyPage() {
     if (!newBook.title) return;
     try {
       let res;
-      if (newBook.googleBooksUrl) {
-        addNotification("Fetching Book", "Downloading PDF from URL...");
-        res = await api.academy.fetchBookFromUrl({
-          url: newBook.googleBooksUrl,
-          title: newBook.title,
-          author: newBook.author,
-          description: newBook.description,
-          pages: parseInt(newBook.pages) || 0
-        });
+            if (newBookFile) {
+        addNotification("Uploading Book", "Uploading PDF to secure storage...");
+        const formData = new FormData();
+        formData.append("file", newBookFile);
+        formData.append("title", newBook.title);
+        formData.append("author", newBook.author || "Unknown");
+        formData.append("description", newBook.description || "");
+        formData.append("pages", newBook.pages ? newBook.pages.toString() : "0");
+        
+        res = await api.academy.uploadBook(formData);
       } else {
-        addNotification("Error", "Please provide a valid PDF link.");
+        addNotification("Error", "Please select a PDF file to upload.");
         return;
       }
       setBooks([...books, res.book]);
       setIsAddBookOpen(false);
-      setNewBook({ title: "", author: "", description: "", pages: "", googleBooksUrl: "" });
+      setNewBookFile(null);
       addNotification("New Book Added", `"${res.book.title}" is now available to read.`);
     } catch (e: any) {
       addNotification("Error", e.message || "Failed to fetch book");
@@ -679,10 +681,6 @@ export function AcademyPage() {
                         Read Full Book
                       </Button>
                       <div className="flex gap-2">
-                        <Button variant="outline" className="flex-1 border-primary/50 text-primary hover:bg-primary/10" title="Listen to a quick 5-minute audio summary">
-                          <Headphones className="mr-2 h-4 w-4" />
-                          Audio Summary
-                        </Button>
                         <Button variant="secondary" className="flex-1" title="Read the 3 key takeaways" onClick={() => handleTakeawaysClick(book)} disabled={isGeneratingTakeaways}>
                           {isGeneratingTakeaways ? (
                             <Loader2 className="mr-2 h-4 w-4 text-amber-500 animate-spin" />
@@ -1095,11 +1093,15 @@ export function AcademyPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label>Document URL (Google Books or Direct PDF)</Label>
+              <Label>Upload PDF File</Label>
               <Input 
-                placeholder="e.g. https://books.google.com/... or https://.../file.pdf" 
-                value={newBook.googleBooksUrl}
-                onChange={e => setNewBook({...newBook, googleBooksUrl: e.target.value})}
+                type="file"
+                accept="application/pdf"
+                onChange={e => {
+                  if (e.target.files && e.target.files[0]) {
+                    setNewBookFile(e.target.files[0]);
+                  }
+                }}
               />
             </div>
             <div className="flex gap-4">
@@ -1133,7 +1135,7 @@ export function AcademyPage() {
           </div>
           <div className="flex justify-end gap-3">
             <Button variant="outline" onClick={() => setIsAddBookOpen(false)}>Cancel</Button>
-            <Button onClick={handleAddBook} disabled={!newBook.title || !newBook.googleBooksUrl}>
+            <Button onClick={handleAddBook} disabled={!newBook.title || !newBookFile}>
               Add Book
             </Button>
           </div>
@@ -1591,7 +1593,7 @@ export function AcademyPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>Document URL (Google Books or Direct PDF)</Label>
+                <Label>Upload PDF File</Label>
                 <Input 
                   placeholder="e.g. https://books.google.com/... or https://.../file.pdf" 
                   value={editingBook.googleBooksUrl}

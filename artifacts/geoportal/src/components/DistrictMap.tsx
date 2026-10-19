@@ -362,13 +362,23 @@ export function DistrictMap({
             </Popup>
           </CircleMarker>
         ))}
-        {customGeojson && (
-          <GeoJSON 
-            key={JSON.stringify(customGeojson).length}
-            data={customGeojson} 
-            style={customGeojsonStyle || { color: "#3b82f6", weight: 2, fillOpacity: 0.2 }}
-          />
-        )}
+        {(() => {
+          let resolvedGeojson = customGeojson;
+          if (!resolvedGeojson && aoi?.geojson) {
+            try {
+              resolvedGeojson = typeof aoi.geojson === "string" ? JSON.parse(aoi.geojson) : aoi.geojson;
+            } catch (e) {
+              resolvedGeojson = null;
+            }
+          }
+          return resolvedGeojson ? (
+            <GeoJSON 
+              key={`custom-aoi-${JSON.stringify(resolvedGeojson).length}`}
+              data={resolvedGeojson} 
+              style={customGeojsonStyle || { color: "#3b82f6", weight: 2.5, fillColor: "#60a5fa", fillOpacity: 0.15 }}
+            />
+          ) : null;
+        })()}
         {riverGeojson && (
           <GeoJSON 
             key={`river-${JSON.stringify(riverGeojson).length}`}

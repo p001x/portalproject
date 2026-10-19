@@ -13,6 +13,7 @@ export interface HarvesterItem {
   stac_asset_key?: string;
   feature_count?: number;
   description?: string;
+  has_prj?: boolean;
 }
 
 export interface ScanResult {

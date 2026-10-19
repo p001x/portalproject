@@ -309,33 +309,27 @@ export function GEEAuthGate({ children }: GEEAuthGateProps) {
   // Authenticated — render children with auth status bar
   return (
     <div className="h-full flex flex-col">
-      {/* Auth status bar */}
-      <div className="shrink-0 px-4 py-1.5 bg-emerald-500/10 border-b border-emerald-500/20 flex items-center justify-between">
+      {/* Auth status bar - Sleek Minimalist */}
+      <div className="shrink-0 px-6 py-1.5 bg-muted/30 border-b border-border/50 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-          <span className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
+          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+          <span className="text-[11px] font-medium text-foreground/85 tracking-tight">
             GEE Authenticated
           </span>
-          <Badge
-            variant="outline"
-            className="text-[10px] px-1.5 py-0 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 font-mono"
-          >
+          <span className="text-[10px] font-mono px-2 py-0.5 bg-muted/60 text-muted-foreground border border-border/50 rounded">
             {email}
-          </Badge>
+          </span>
           {projectName && (
-            <Badge
-              variant="outline"
-              className="text-[10px] px-1.5 py-0 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20 font-mono ml-2"
-            >
+            <span className="text-[10px] font-mono px-2 py-0.5 bg-muted/40 text-muted-foreground/80 border border-border/30 rounded ml-1">
               Project: {projectName}
-            </Badge>
+            </span>
           )}
         </div>
         <Button
           variant="ghost"
           size="sm"
           onClick={handleLogout}
-          className="h-6 px-2 text-[11px] text-muted-foreground hover:text-destructive gap-1"
+          className="h-6 px-2 text-[11px] text-muted-foreground hover:text-foreground gap-1 transition-colors"
         >
           <LogOut className="w-3 h-3" />
           Sign Out

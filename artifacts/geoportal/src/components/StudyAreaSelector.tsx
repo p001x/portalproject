@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { AOIConfig } from "@/lib/api";
@@ -6,27 +6,37 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Upload, Loader2, Globe, Map, MapPin } from "lucide-react";
+import { 
+  Upload, 
+  Loader2, 
+  Globe, 
+  Map, 
+  MapPin, 
+  FileCheck2, 
+  Trash2, 
+  Sparkles, 
+  ShieldCheck, 
+  FileCode2, 
+  AlertCircle 
+} from "lucide-react";
 
 interface StudyAreaSelectorProps {
   value: AOIConfig;
   onChange: (value: AOIConfig) => void;
 }
 
-interface RwandaHierarchy {
-  [province: string]: {
-    [district: string]: string[];
-  };
-}
-
 export function StudyAreaSelector({ value, onChange }: StudyAreaSelectorProps) {
   const [tab, setTab] = useState<"rwanda" | "global" | "upload">(() => {
-    if (value.type === "geojson") return "upload";
+    if (value.type === "geojson" || value.type === "custom") return "upload";
     if (value.type === "rwanda" || value.country === "Rwanda") return "rwanda";
     return "global";
   });
   
   const [uploading, setUploading] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const dragCounter = useRef(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Queries for GAUL hierarchies (Global)
   const { data: countriesData, isLoading: loadingCountries, error: countriesError } = useQuery({
@@ -119,43 +129,124 @@ export function StudyAreaSelector({ value, onChange }: StudyAreaSelectorProps) {
     }
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 1) {
-      alert("Please upload only one zip file at a time.");
-      e.target.value = '';
-      return;
-    }
-    
-    const file = e.target.files?.[0];
-    if (!file) return;
+  // Process dropped or selected spatial file (GeoJSON, JSON, Shapefile .zip, KML)
+  const processFile = async (file: File) => {
+    setUploadError(null);
+    const fname = file.name.toLowerCase();
+    const isGeoJson = fname.endsWith(".geojson") || fname.endsWith(".json");
+    const isZip = fname.endsWith(".zip");
+    const isKml = fname.endsWith(".kml");
 
-    if (!file.name.toLowerCase().endsWith('.zip')) {
-      alert("Invalid file format. Please upload a .zip file.");
-      e.target.value = '';
+    if (!isGeoJson && !isZip && !isKml) {
+      setUploadError("Unsupported format. Please upload a GeoJSON (.geojson/.json), Shapefile (.zip), or KML (.kml).");
       return;
     }
 
     if (file.size > 50 * 1024 * 1024) {
-      alert("File is too large. Maximum size is 50MB.");
-      e.target.value = '';
+      setUploadError("File is too large. Maximum allowed size is 50MB.");
       return;
     }
 
+    setUploading(true);
     try {
-      setUploading(true);
-      const res = await api.uploadShapefile(file);
-      onChange({
-        type: "geojson",
-        geojson: res.geojson,
-        name: file.name.replace(".zip", ""),
-      });
-    } catch (err) {
-      console.error(err);
-      alert("Failed to upload shapefile.");
+      if (isGeoJson) {
+        // Fast client-side GeoJSON parsing with zero network delay
+        const text = await file.text();
+        const parsed = JSON.parse(text);
+
+        if (!parsed || (typeof parsed !== "object")) {
+          throw new Error("Invalid JSON structure.");
+        }
+
+        let normalizedGeojson = parsed;
+        const gtype = parsed.type;
+        if (gtype in ["Polygon", "MultiPolygon", "Point", "LineString"]) {
+          normalizedGeojson = {
+            type: "FeatureCollection",
+            features: [{ type: "Feature", geometry: parsed, properties: {} }]
+          };
+        } else if (gtype === "Feature") {
+          normalizedGeojson = {
+            type: "FeatureCollection",
+            features: [parsed]
+          };
+        }
+
+        const cleanName = file.name.replace(/\.[^/.]+$/, "");
+        onChange({
+          type: "geojson",
+          geojson: normalizedGeojson,
+          name: cleanName
+        });
+        setTab("upload");
+      } else {
+        // Zipped shapefiles or KML: process via backend
+        const res = await api.uploadShapefile(file);
+        const cleanName = file.name.replace(/\.[^/.]+$/, "");
+        onChange({
+          type: "geojson",
+          geojson: res.geojson,
+          name: cleanName
+        });
+        setTab("upload");
+      }
+    } catch (err: any) {
+      console.error("[StudyAreaSelector] Failed to process file:", err);
+      setUploadError(err.message || "Failed to process spatial file.");
     } finally {
       setUploading(false);
-      e.target.value = '';
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
+  };
+
+  // Drag-and-drop event handlers
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current += 1;
+    if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+      setDragActive(true);
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current -= 1;
+    if (dragCounter.current <= 0) {
+      dragCounter.current = 0;
+      setDragActive(false);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragCounter.current = 0;
+    setDragActive(false);
+
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const file = e.dataTransfer.files[0];
+      await processFile(file);
+    }
+  };
+
+  const handleFileInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      await processFile(file);
+    }
+  };
+
+  const handleClearCustomAOI = () => {
+    setTab("rwanda");
+    onChange({ type: "rwanda", country: "Rwanda", name: "Rwanda" });
+    setUploadError(null);
   };
 
   const handleTabChange = (v: any) => {
@@ -167,9 +258,40 @@ export function StudyAreaSelector({ value, onChange }: StudyAreaSelectorProps) {
     }
   };
 
+  const isCustomActive = (value.type === "geojson" || value.type === "custom") && !!value.geojson;
+
+  // Compute summary stats for custom GeoJSON
+  let featureCount = 0;
+  let customType = "GeoJSON";
+  if (isCustomActive && value.geojson) {
+    const gj = typeof value.geojson === "string" ? JSON.parse(value.geojson) : value.geojson;
+    customType = gj.type || "GeoJSON";
+    if (gj.type === "FeatureCollection" && Array.isArray(gj.features)) {
+      featureCount = gj.features.length;
+    } else if (gj.type === "Feature") {
+      featureCount = 1;
+    } else {
+      featureCount = 1;
+    }
+  }
+
   return (
-    <div className="space-y-4">
-      <Label className="text-sm font-semibold">Study Area</Label>
+    <div 
+      className="space-y-4 relative"
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      <div className="flex items-center justify-between">
+        <Label className="text-sm font-semibold flex items-center gap-1.5">
+          Study Area
+          <span className="text-[10px] font-normal text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded-full inline-flex items-center gap-1">
+            <ShieldCheck className="w-2.5 h-2.5" /> Isolated & Permanent Cache
+          </span>
+        </Label>
+      </div>
+
       <Tabs value={tab} onValueChange={handleTabChange} className="w-full">
         <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="rwanda" className="flex gap-2 text-xs">
@@ -178,13 +300,17 @@ export function StudyAreaSelector({ value, onChange }: StudyAreaSelectorProps) {
           <TabsTrigger value="global" className="flex gap-2 text-xs">
             <Globe className="w-4 h-4" /> Global
           </TabsTrigger>
-          <TabsTrigger value="upload" className="flex gap-2 text-xs">
+          <TabsTrigger value="upload" className="flex gap-2 text-xs relative">
             <Upload className="w-4 h-4" /> Custom
+            {isCustomActive && (
+              <span className="w-2 h-2 rounded-full bg-primary absolute top-1 right-2 animate-pulse" />
+            )}
           </TabsTrigger>
         </TabsList>
 
+        {/* RWANDA TAB */}
         <TabsContent value="rwanda" className="space-y-3 mt-3">
-           <div className="space-y-1.5">
+          <div className="space-y-1.5">
             <Label className="text-xs text-muted-foreground">Province (Optional)</Label>
             <Select value={value.type === "rwanda" ? ((value as any).province || "none") : "none"} onValueChange={handleRwandaProvinceChange} disabled={loadingRwanda}>
               <SelectTrigger className="w-full h-8 text-xs">
@@ -268,6 +394,7 @@ export function StudyAreaSelector({ value, onChange }: StudyAreaSelectorProps) {
           )}
         </TabsContent>
         
+        {/* GLOBAL TAB */}
         <TabsContent value="global" className="space-y-3 mt-3">
           <div className="space-y-1.5">
             <Label className="text-xs text-muted-foreground">Country</Label>
@@ -324,23 +451,112 @@ export function StudyAreaSelector({ value, onChange }: StudyAreaSelectorProps) {
           )}
         </TabsContent>
 
-        <TabsContent value="upload" className="mt-3">
-          <div className="flex flex-col gap-3 p-3 border rounded-md border-dashed bg-muted/30">
-            <div className="text-xs text-center text-muted-foreground">
-              Upload a .zip containing a shapefile (.shp, .shx, .dbf, .prj)
+        {/* CUSTOM STUDY AREA (DRAG & DROP) */}
+        <TabsContent value="upload" className="mt-3 space-y-3">
+          {/* Active Custom Study Area Card */}
+          {isCustomActive && (
+            <div className="p-3 border border-emerald-500/30 bg-emerald-500/5 rounded-lg space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <FileCheck2 className="w-4 h-4 text-emerald-500" />
+                  <span className="text-xs font-semibold text-foreground truncate max-w-[180px]">
+                    {value.name || "Custom Study Area"}
+                  </span>
+                </div>
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={handleClearCustomAOI}
+                  className="h-6 px-1.5 text-xs text-muted-foreground hover:text-destructive"
+                  title="Remove and reset study area"
+                >
+                  <Trash2 className="w-3.5 h-3.5 mr-1" /> Remove
+                </Button>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                <span className="bg-background/80 px-2 py-0.5 rounded border text-xs">
+                  Type: {customType}
+                </span>
+                {featureCount > 0 && (
+                  <span className="bg-background/80 px-2 py-0.5 rounded border text-xs">
+                    {featureCount} feature{featureCount > 1 ? "s" : ""}
+                  </span>
+                )}
+                <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
+                  <Sparkles className="w-3 h-3" /> Permanent Cache Ready
+                </span>
+              </div>
             </div>
-            {value.type === "geojson" && value.name && (
-              <div className="text-xs font-semibold text-center text-primary flex items-center justify-center gap-1">
-                <Map className="w-3 h-3" />
-                Active: {value.name}
+          )}
+
+          {/* Drag & Drop Dropzone */}
+          <div 
+            onClick={() => fileInputRef.current?.click()}
+            className={`
+              relative flex flex-col items-center justify-center gap-2 p-5 border-2 border-dashed rounded-xl cursor-pointer transition-all duration-200
+              ${dragActive 
+                ? "border-primary bg-primary/10 shadow-lg ring-2 ring-primary/40 scale-[1.01]" 
+                : "border-border/80 bg-muted/20 hover:border-primary/50 hover:bg-muted/40"
+              }
+            `}
+          >
+            <input 
+              ref={fileInputRef}
+              type="file" 
+              accept=".geojson,.json,.zip,.kml" 
+              className="hidden" 
+              onChange={handleFileInputChange} 
+            />
+
+            {uploading ? (
+              <div className="flex flex-col items-center gap-2 text-xs text-muted-foreground py-2">
+                <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                <span>Processing & reprojecting spatial boundary…</span>
               </div>
+            ) : (
+              <>
+                <div className={`p-2.5 rounded-full ${dragActive ? 'bg-primary/20 text-primary' : 'bg-muted text-muted-foreground'} transition-colors`}>
+                  {dragActive ? <Sparkles className="w-6 h-6 animate-bounce" /> : <Upload className="w-6 h-6" />}
+                </div>
+
+                <div className="text-center space-y-1">
+                  <div className="text-xs font-semibold text-foreground">
+                    {dragActive ? "Drop study area file now!" : "Drag & Drop Study Area Here"}
+                  </div>
+                  <div className="text-[11px] text-muted-foreground">
+                    or click to browse files
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-center gap-1.5 pt-1">
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-background border text-muted-foreground font-mono">
+                    .geojson
+                  </span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-background border text-muted-foreground font-mono">
+                    .zip (shp)
+                  </span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-background border text-muted-foreground font-mono">
+                    .kml
+                  </span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-background border text-muted-foreground font-mono">
+                    .json
+                  </span>
+                </div>
+              </>
             )}
-            <Label className="w-full">
-              <div className="w-full flex items-center justify-center h-8 text-xs border rounded cursor-pointer bg-card hover:bg-muted transition-colors">
-                {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Select .zip File"}
-              </div>
-              <input type="file" accept=".zip" className="hidden" onChange={handleFileUpload} />
-            </Label>
+          </div>
+
+          {/* Error Message */}
+          {uploadError && (
+            <div className="flex items-center gap-2 p-2.5 text-xs text-destructive bg-destructive/10 border border-destructive/20 rounded-md">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{uploadError}</span>
+            </div>
+          )}
+
+          <div className="text-[11px] text-muted-foreground/80 leading-relaxed bg-muted/10 p-2 rounded border border-border/50">
+            <strong>Permanent Caching Guarantee:</strong> When an analysis is executed for any study area, results are permanently stored in an isolated module corridor. Revisiting or re-running that study area returns immediately without reprocessing.
           </div>
         </TabsContent>
       </Tabs>

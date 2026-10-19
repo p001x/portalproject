@@ -1,70 +1,106 @@
-import React, { createContext, useContext, useState } from "react";
+import React, { createContext, useContext, useState, useEffect } from "react";
+import { BASE } from "@/lib/api";
+import { useAuth } from "@/hooks/use-auth";
 
 export type Notification = {
   id: string;
   title: string;
   message: string;
-  timestamp: Date;
+  timestamp: string;
   read: boolean;
+  type: string;
 };
 
 type NotificationContextType = {
   notifications: Notification[];
   unreadCount: number;
   addNotification: (title: string, message: string) => void;
-  markAsRead: (id: string) => void;
-  markAllAsRead: () => void;
+  markAsRead: (id: string) => Promise<void>;
+  markAllAsRead: () => Promise<void>;
+  fetchNotifications: () => Promise<void>;
 };
 
 const NotificationContext = createContext<NotificationContextType | undefined>(undefined);
 
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
-  const [notifications, setNotifications] = useState<Notification[]>([
-    {
-      id: "1",
-      title: "Welcome to SPETRO",
-      message: "Get started by exploring our analysis modules.",
-      timestamp: new Date(),
-      read: false,
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const { user } = useAuth();
+
+  const fetchNotifications = async () => {
+    if (!user) {
+      setNotifications([]);
+      return;
     }
-  ]);
+    try {
+      const token = localStorage.getItem("spetro_token");
+      const res = await fetch(`${BASE}/notifications`, {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setNotifications(data.notifications || []);
+      }
+    } catch (e) {
+      console.error("Failed to fetch notifications", e);
+    }
+  };
+
+  useEffect(() => {
+    fetchNotifications();
+    // Poll every 30 seconds
+    const interval = setInterval(fetchNotifications, 30000);
+    return () => clearInterval(interval);
+  }, [user]);
 
   const addNotification = (title: string, message: string) => {
-    setNotifications((prev) => [
-      {
-        id: Math.random().toString(36).substr(2, 9),
-        title,
-        message,
-        timestamp: new Date(),
-        read: false,
-      },
-      ...prev,
-    ]);
+    // This is for local optimistic updates if needed, though usually the backend creates them
   };
 
-  const markAsRead = (id: string) => {
-    setNotifications((prev) =>
-      prev.map((n) => (n.id === id ? { ...n, read: true } : n))
-    );
+  const markAsRead = async (id: string) => {
+    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: true } : n)));
+    try {
+      const token = localStorage.getItem("spetro_token");
+      await fetch(`${BASE}/notifications/${id}/read`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+    } catch (e) {
+      console.error(e);
+    }
   };
 
-  const markAllAsRead = () => {
+  const markAllAsRead = async () => {
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+    try {
+      const token = localStorage.getItem("spetro_token");
+      await fetch(`${BASE}/notifications/read-all`, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   const unreadCount = notifications.filter((n) => !n.read).length;
 
   return (
-    <NotificationContext.Provider value={{ notifications, unreadCount, addNotification, markAsRead, markAllAsRead }}>
+    <NotificationContext.Provider value={{ notifications, unreadCount, addNotification, markAsRead, markAllAsRead, fetchNotifications }}>
       {children}
     </NotificationContext.Provider>
   );
 }
 
+const fallbackNotificationsContext: NotificationContextType = {
+  notifications: [],
+  unreadCount: 0,
+  addNotification: () => {},
+  markAsRead: async () => {},
+  markAllAsRead: async () => {},
+  fetchNotifications: async () => {},
+};
+
 export function useNotifications() {
   const context = useContext(NotificationContext);
-  if (context === undefined) {
-    throw new Error("useNotifications must be used within a NotificationProvider");
-  }
-  return context;
+  return context || fallbackNotificationsContext;
 }

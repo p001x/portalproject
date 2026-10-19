@@ -103,50 +103,58 @@ export function AnalysisHubPage() {
     
     return (
       <Link key={module.path} href={module.path}>
-        <div className="group relative bg-card rounded-2xl p-6 border border-border shadow-sm hover:shadow-xl transition-all duration-300 cursor-pointer overflow-hidden flex flex-col h-full">
+        <div className="group relative bg-card rounded-2xl p-6 border border-border/80 shadow-sm hover:shadow-xl transition-all duration-300 cursor-pointer overflow-hidden flex flex-col h-full hover:-translate-y-1">
           
           <div className={`absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 bg-gradient-to-br from-transparent ${colors.glow}`} />
           
-          {/* Status Badge (NEW, BETA, PRO) */}
-          {module.status && (
-            <div className={`absolute top-4 left-1/2 -translate-x-1/2 text-[10px] font-bold px-2 py-0.5 rounded-full z-20 
-              ${module.status === 'NEW' ? 'bg-green-500 text-white' : 
-                module.status === 'BETA' ? 'bg-amber-500 text-white' : 
-                'bg-purple-500 text-white'}`}>
-              {module.status}
-            </div>
-          )}
+          {/* Subtle accent bar on hover */}
+          <div className={`absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-primary/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300`} />
 
-          <div className="flex items-start justify-between mb-4 relative z-10">
-            <div className={`w-14 h-14 rounded-xl flex items-center justify-center ${colors.bg} ${colors.text} border ${colors.border}`}>
-              <module.icon className="w-7 h-7" />
+          {/* Top Row: Status badge / Category tag + Actions */}
+          <div className="flex items-center justify-between mb-4 relative z-10">
+            <div className="flex items-center gap-2">
+              {module.status ? (
+                <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full z-20 shadow-sm
+                  ${module.status === 'NEW' ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30' : 
+                    module.status === 'BETA' ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30' : 
+                    'bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/30'}`}>
+                  {module.status}
+                </span>
+              ) : (
+                <span className={`text-[10px] font-semibold tracking-wide uppercase px-2.5 py-0.5 rounded-md ${colors.bg} ${colors.text} border ${colors.border}`}>
+                  Analytics
+                </span>
+              )}
             </div>
             
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               {/* Favorite Button */}
               <button 
                 onClick={(e) => toggleFavorite(e, module.path)}
-                className="w-8 h-8 rounded-full flex items-center justify-center transition-colors duration-300 hover:bg-muted"
+                className="w-8 h-8 rounded-full flex items-center justify-center transition-colors duration-200 hover:bg-muted"
+                title={isFav ? "Remove from favorites" : "Add to favorites"}
               >
-                <Star className={`w-4 h-4 ${isFav ? "fill-amber-400 text-amber-400" : "text-muted-foreground group-hover:text-amber-400/50"}`} />
+                <Star className={`w-4 h-4 ${isFav ? "fill-amber-400 text-amber-400" : "text-muted-foreground/60 group-hover:text-amber-400/70"}`} />
               </button>
               
-              <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center group-hover:bg-primary group-hover:text-primary-foreground transition-colors duration-300 hidden md:flex">
-                <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-primary-foreground" />
+              <div className="w-8 h-8 rounded-full bg-muted/60 flex items-center justify-center group-hover:bg-primary group-hover:text-primary-foreground transition-all duration-300">
+                <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-primary-foreground group-hover:translate-x-0.5 transition-transform" />
               </div>
             </div>
           </div>
           
-          <div className="relative z-10 mt-auto flex-1 flex flex-col">
-            <h3 className="text-xl font-bold text-foreground mb-2">{module.label}</h3>
+          <div className="relative z-10 flex-1 flex flex-col">
+            <h3 className="text-xl font-bold text-foreground mb-2 tracking-tight group-hover:text-primary transition-colors">
+              {module.label}
+            </h3>
             <p className="text-sm text-muted-foreground leading-relaxed flex-1">
               {module.description}
             </p>
             
-            <div className="mt-4 pt-4 border-t border-border/50 flex flex-wrap gap-2">
+            <div className="mt-5 pt-4 border-t border-border/50 flex flex-wrap gap-1.5 items-center">
               {module.dataBadges.map((badge: string) => (
-                <Badge key={badge} variant="secondary" className="text-[10px] bg-muted/50 text-muted-foreground font-medium px-2 py-0.5 rounded-md flex items-center gap-1">
-                  <Database className="w-3 h-3" /> {badge}
+                <Badge key={badge} variant="secondary" className="text-[10px] bg-muted/50 text-muted-foreground font-medium px-2 py-0.5 rounded-md flex items-center gap-1 border border-border/40">
+                  <Database className="w-3 h-3 opacity-60" /> {badge}
                 </Badge>
               ))}
             </div>
