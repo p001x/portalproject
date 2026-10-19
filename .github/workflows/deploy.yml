@@ -40,16 +40,18 @@ jobs:
           cache: 'pnpm'
 
       - name: Install Dependencies
-        run: pnpm install
+        run: pnpm install --no-frozen-lockfile
 
       - name: Build Production Frontend
         working-directory: artifacts/geoportal
         env:
           VITE_API_URL: ${{ secrets.VITE_API_URL }}
-        run: npx vite build
+        run: pnpm run build
 
       - name: Setup GitHub Pages
         uses: actions/configure-pages@v4
+        with:
+          enablement: true
 
       - name: Upload Pages Artifact
         uses: actions/upload-pages-artifact@v3
