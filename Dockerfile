@@ -13,12 +13,10 @@ ENV HOME=/home/user \
 
 WORKDIR $HOME/app
 
-# Copy the pyproject.toml and install dependencies
-COPY --chown=user pyproject.toml $HOME/app/
-RUN pip install --no-cache-dir .
-
-# Copy the backend code
+# Copy the backend code and install dependencies
 COPY --chown=user backend $HOME/app/backend
+RUN pip install --no-cache-dir $HOME/app/backend
+
 
 # Copy the sector shapefiles needed for Rwanda study areas
 COPY --chown=user sectrstu $HOME/app/sectrstu

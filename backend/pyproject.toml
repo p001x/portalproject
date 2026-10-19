@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "repl-nix-workspace"
+name = "geoportal-backend"
 version = "0.1.0"
-description = "Add your description here"
+description = "SPETRO GeoPortal FastAPI Backend"
 requires-python = ">=3.11"
 dependencies = [
     "cachetools>=5.3.0",
@@ -38,4 +38,4 @@ dependencies = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["backend*"]
+where = ["."]
