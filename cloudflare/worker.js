@@ -1,33 +1,26 @@
 /**
  * Cloudflare Edge Worker for SPETRO Geoportal
  * 
- * Functions:
- * 1. Unified Reverse Proxy: Eliminates CORS completely.
- * 2. Routes `/api/*` to Google Cloud Run container.
- * 3. Routes `/*` to GitHub Pages static frontend.
- * 4. Edge Caching: Caches GEE & Native Raster map tiles for 7 days at Cloudflare's edge,
- *    reducing GEE quota consumption and accelerating map zoom/pan speeds.
- * 5. WebSocket Forwarding: Seamlessly upgrades community chat WS connections.
+ * 1. Edge Reverse Proxy: Forwards all `/api/*`, `/docs`, and `/openapi.json`
+ *    traffic directly to the FastAPI backend (Render or Google Cloud Run).
+ * 2. Zero-CORS: Browser makes same-origin requests to /api/ on Cloudflare.
+ * 3. Edge Tile Caching: Automatically caches GEE & Native Raster map tiles
+ *    for 7 days across Cloudflare's global edge network (330+ datacenters).
+ * 4. Static Asset Delivery: Serves Vite React SPA directly via Cloudflare Assets (ASSETS binding).
+ * 5. WebSocket Upgrades: Seamlessly proxies WebSocket connections for community chat.
  */
 
-// Replace these two URLs with your actual deployed targets:
-const CLOUD_RUN_ORIGIN = "https://geoportal-backend-REPLACE_WITH_YOUR_ID.a.run.app";
-const GITHUB_PAGES_ORIGIN = "https://p001x.github.io/portalproject";
+const DEFAULT_BACKEND_ORIGIN = "https://geoportal-api-ygzi.onrender.com";
 
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const path = url.pathname;
 
-    // --- 1. Route API & Tile Requests to Google Cloud Run ---
-    if (path.startsWith("/api/") || path.startsWith("/docs") || path.startsWith("/openapi.json")) {
-      const targetUrl = new URL(url.pathname + url.search, env.CLOUD_RUN_ORIGIN || CLOUD_RUN_ORIGIN);
-      
-      // Preserve original request headers (auth, cookies, content-type)
-      const headers = new Headers(request.headers);
-      headers.set("X-Forwarded-Host", url.host);
-      headers.set("X-Forwarded-Proto", url.protocol.replace(":", ""));
-      headers.set("Host", targetUrl.host);
+    // --- 1. Proxy API, Documentation, and OpenAPI endpoints to Backend ---
+    if (path.startsWith("/api/") || path === "/api" || path.startsWith("/docs") || path.startsWith("/openapi.json")) {
+      const backendOrigin = (env.BACKEND_ORIGIN || env.CLOUD_RUN_ORIGIN || DEFAULT_BACKEND_ORIGIN).replace(/\/$/, "");
+      const targetUrl = new URL(url.pathname + url.search, backendOrigin);
 
       // Handle WebSocket upgrades (for Community chat)
       if (request.headers.get("Upgrade") === "websocket") {
@@ -54,18 +47,23 @@ export default {
         }
       }
 
-      // Fetch from Cloud Run
+      // Prepare forwarded headers
+      const headers = new Headers(request.headers);
+      headers.set("Host", new URL(backendOrigin).host);
+      headers.set("X-Forwarded-Host", url.host);
+      headers.set("X-Forwarded-Proto", url.protocol.replace(":", ""));
+
+      // Forward request to backend
       const response = await fetch(targetUrl.toString(), {
         method: request.method,
         headers: headers,
-        body: request.method !== "GET" && request.method !== "HEAD" ? request.body : undefined,
+        body: (request.method !== "GET" && request.method !== "HEAD") ? request.body : undefined,
         redirect: "follow",
       });
 
-      const responseHeaders = new Headers(response.headers);
-      
       // Cache map tiles at Cloudflare Edge for 7 days (604,800s)
       if (isTileRequest && response.status === 200) {
+        const responseHeaders = new Headers(response.headers);
         responseHeaders.set("Cache-Control", "public, max-age=86400, s-maxage=604800");
         responseHeaders.set("X-CF-Tile-Cache", "MISS");
 
@@ -75,31 +73,22 @@ export default {
           headers: responseHeaders,
         });
         ctx.waitUntil(cache.put(request, cachedCopy));
+
+        return new Response(response.body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers: responseHeaders,
+        });
       }
 
-      return new Response(response.body, {
-        status: response.status,
-        statusText: response.statusText,
-        headers: responseHeaders,
-      });
+      return response;
     }
 
-    // --- 2. Route All Static Frontend Traffic to GitHub Pages ---
-    const ghUrl = new URL(url.pathname + url.search, env.GITHUB_PAGES_ORIGIN || GITHUB_PAGES_ORIGIN);
-    const ghHeaders = new Headers(request.headers);
-    ghHeaders.set("Host", ghUrl.host);
-
-    const ghResponse = await fetch(ghUrl.toString(), {
-      method: request.method,
-      headers: ghHeaders,
-    });
-
-    // If GitHub Pages returns 404 on an SPA sub-route, serve the root index.html
-    if (ghResponse.status === 404 && !path.includes(".")) {
-      const fallbackUrl = new URL("/", env.GITHUB_PAGES_ORIGIN || GITHUB_PAGES_ORIGIN);
-      return fetch(fallbackUrl.toString(), { headers: ghHeaders });
+    // --- 2. Serve Static Frontend Assets from Cloudflare CDN Edge ---
+    if (env.ASSETS) {
+      return env.ASSETS.fetch(request);
     }
 
-    return ghResponse;
+    return new Response("Not Found", { status: 404 });
   },
 };
