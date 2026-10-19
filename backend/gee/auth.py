@@ -32,7 +32,7 @@ import threading
 
 _credentials_list = []
 _current_cred_idx = 0
-_auth_lock = threading.Lock()
+_auth_lock = threading.RLock()
 
 def initialize_gee(project_id: str | None = None, key_json_override: str | None = None) -> None:
     """Initialize the Earth Engine API using a pool of service account keys for load balancing.
@@ -41,15 +41,43 @@ def initialize_gee(project_id: str | None = None, key_json_override: str | None 
     global _initialized, _active_project_id, _active_sa_email, _credentials_list, _current_cred_idx
     
     with _auth_lock:
-        _credentials_list = []
-        
+        raw_keys = []
         if key_json_override:
-            _credentials_list.append(key_json_override)
+            raw_keys.append(key_json_override)
             
-        env_key = os.environ.get("GEE_SERVICE_ACCOUNT_KEY", "").strip()
-        if env_key:
-            _credentials_list.append(env_key)
-            
+        # Check environment variables for single or pooled keys
+        env_vars = [
+            "GEE_SERVICE_ACCOUNT_KEY_PRIMARY",
+            "GEE_SERVICE_ACCOUNT_KEY_1",
+            "GEE_SERVICE_ACCOUNT_KEY",
+            "GEE_SERVICE_ACCOUNT_KEY_BACKUP",
+            "GEE_SERVICE_ACCOUNT_KEY_2",
+        ]
+        for ev in env_vars:
+            val = os.environ.get(ev, "").strip()
+            if val:
+                if val.startswith("["):
+                    try:
+                        parsed = json.loads(val)
+                        if isinstance(parsed, list):
+                            for item in parsed:
+                                raw_keys.append(json.dumps(item) if isinstance(item, dict) else str(item))
+                    except Exception:
+                        raw_keys.append(val)
+                elif val.startswith("{"):
+                    raw_keys.append(val)
+
+        # Check for multi-key array in GEE_SERVICE_ACCOUNT_KEYS
+        env_multi = os.environ.get("GEE_SERVICE_ACCOUNT_KEYS", "").strip()
+        if env_multi:
+            try:
+                parsed = json.loads(env_multi)
+                if isinstance(parsed, list):
+                    for item in parsed:
+                        raw_keys.append(json.dumps(item) if isinstance(item, dict) else str(item))
+            except Exception:
+                pass
+
         base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         key_files = glob.glob(os.path.join(base_dir, "gee_key*.json"))
         for kf in key_files:
@@ -57,9 +85,35 @@ def initialize_gee(project_id: str | None = None, key_json_override: str | None 
                 with open(kf, "r", encoding="utf-8") as f:
                     content = f.read().strip()
                     if content and content.startswith("{"):
-                        _credentials_list.append(content)
+                        raw_keys.append(content)
             except Exception:
                 pass
+
+        # Deduplicate keys by client_email
+        seen_emails = set()
+        _credentials_list = []
+        for k in raw_keys:
+            try:
+                kd = json.loads(k)
+                em = kd.get("client_email")
+                if em and em not in seen_emails:
+                    seen_emails.add(em)
+                    _credentials_list.append(k)
+            except Exception:
+                pass
+
+        # Option 1: Guarantee Key 2 (peteryanservice) is PRIMARY (Index 0), Key 1 is BACKUP (Index 1)
+        def _cred_rank(k_str):
+            try:
+                kd = json.loads(k_str)
+                em = kd.get("client_email", "").lower()
+                if "peteryanservice" in em or "project-93a68124" in em:
+                    return 0 # Top priority (Primary - fast & fresh)
+                return 1 # Standby Backup
+            except Exception:
+                return 2
+
+        _credentials_list.sort(key=_cred_rank)
 
         if not _credentials_list:
             target_project = project_id or os.environ.get("GEE_PROJECT_ID") or "ee-petersonyang87"
@@ -92,8 +146,12 @@ def _activate_credential_unlocked(idx: int, project_id: str | None = None):
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"Credential {idx} is not valid JSON: {exc}") from exc
         
-    target_project = project_id or os.environ.get("GEE_PROJECT_ID") or key_data.get("project_id", "") or "ee-petersonyang87"
-    
+    target_project = project_id or os.environ.get("GEE_PROJECT_ID")
+    if not target_project:
+        pk = key_data.get("project_id", "")
+        if pk and not pk.startswith("project-"):
+            target_project = pk
+
     credentials = ee.ServiceAccountCredentials(
         email=key_data["client_email"],
         key_data=key_json,
@@ -101,14 +159,25 @@ def _activate_credential_unlocked(idx: int, project_id: str | None = None):
     
     try:
         if target_project:
-            ee.Initialize(credentials, project=target_project)
+            try:
+                ee.Initialize(credentials, project=target_project)
+            except Exception as pe:
+                logger.warning(
+                    "Service Account %s project initialization with '%s' failed: %s. Falling back to default initialization...",
+                    key_data["client_email"], target_project, pe
+                )
+                ee.Initialize(credentials)
+                target_project = None
         else:
             ee.Initialize(credentials)
     except Exception as e:
         logger.warning("Failed to initialize with Service Account %s. Error: %s", key_data.get("client_email"), e)
         raise
         
-    roots = ee.data.getAssetRoots()
+    try:
+        roots = ee.data.getAssetRoots()
+    except Exception:
+        pass
     _initialized = True
     _active_project_id = target_project
     _active_sa_email = key_data["client_email"]
@@ -116,20 +185,44 @@ def _activate_credential_unlocked(idx: int, project_id: str | None = None):
     print(f"Verified GEE initialization. Pool Size: {len(_credentials_list)}, Active SA: {_active_sa_email}")
 
 
-def rotate_credentials():
-    """Rotate to the next service account credential in the pool to bypass concurrency limits."""
-    global _current_cred_idx, _credentials_list
+_last_failover_time = 0.0
+_FAILOVER_COOLDOWN_SECONDS = 60.0
+
+def rotate_credentials() -> bool:
+    """Rotate to the alternate service account credential in the pool on limit/error."""
+    global _current_cred_idx, _credentials_list, _last_failover_time
     with _auth_lock:
         if len(_credentials_list) > 1:
             old_email = _active_sa_email
             _current_cred_idx = (_current_cred_idx + 1) % len(_credentials_list)
-            logger.warning("Rotating GEE Credentials! Switching from %s to credential index %d", old_email, _current_cred_idx)
+            _last_failover_time = time.time()
+            role = "BACKUP" if _current_cred_idx != 0 else "PRIMARY"
+            logger.warning("Shifting GEE Credentials! Switching from %s to %s (index %d)", old_email, role, _current_cred_idx)
+            print(f"[GEE Failover] Switched active account to {role} ({_active_sa_email})")
             try:
                 _activate_credential_unlocked(_current_cred_idx)
+                return True
             except Exception as e:
                 logger.error("Failed to rotate credentials: %s", e)
+                return False
         else:
             logger.warning("Cannot rotate credentials: only 1 credential in pool.")
+            return False
+
+
+def ensure_primary_credential():
+    """If temporarily operating on backup, automatically revert to fast Primary once cooldown elapses."""
+    global _current_cred_idx, _last_failover_time
+    if _current_cred_idx != 0 and (time.time() - _last_failover_time > _FAILOVER_COOLDOWN_SECONDS):
+        with _auth_lock:
+            if _current_cred_idx != 0 and (time.time() - _last_failover_time > _FAILOVER_COOLDOWN_SECONDS):
+                logger.info("Failover cooldown elapsed. Reverting to PRIMARY Service Account (Index 0)...")
+                print("[GEE Recovery] Cooldown elapsed. Automatically reverting to PRIMARY Service Account...")
+                try:
+                    _activate_credential_unlocked(0)
+                    _current_cred_idx = 0
+                except Exception as e:
+                    logger.warning("Could not revert to primary: %s", e)
 
 
 def get_gee_status() -> dict:
@@ -263,44 +356,63 @@ def get_all_sessions() -> list[dict]:
 
 import time, random, ee
 
+def _is_rotatable_error(e: Exception) -> bool:
+    err_str = str(e).lower()
+    retry_triggers = [
+        "429", "concurrency", "too many requests", "quota", 
+        "user limit", "rate limit", "deadline exceeded", 
+        "timeout", "timed out", "service unavailable", "503",
+        "restricted mode", "permission to use project", "serviceusage",
+        "internal error", "backend error", "connection reset"
+    ]
+    return any(trigger in err_str for trigger in retry_triggers)
+
+
 def apply_gee_patch():
     if getattr(ee.ComputedObject, '_patched_for_retry', False): return
     
     original_get_info = ee.ComputedObject.getInfo
     
     def safe_get_info(self, *args, **kwargs):
+        ensure_primary_credential()
         retries = 8
         for i in range(retries):
             try:
                 return original_get_info(self, *args, **kwargs)
             except Exception as e:
-                err_str = str(e).lower()
-                if "429" in err_str or "concurrency" in err_str or "too many requests" in err_str or "quota" in err_str or "user limit" in err_str:
-                    if i < retries - 1:
-                        sleep_time = (1.5 ** i) + random.uniform(0.5, 1.5)
-                        print(f"GEE Concurrency Limit Hit. Backing off for {sleep_time:.2f}s (Attempt {i+1}/{retries})...")
-                        time.sleep(sleep_time)
+                if _is_rotatable_error(e) and i < retries - 1:
+                    rotated = rotate_credentials()
+                    if rotated:
+                        print(f"[GEE Pool] Transient limit ({str(e)[:60]}). Automatically shifted account! Retrying...")
+                        time.sleep(0.2)
                         continue
+                    sleep_time = (1.5 ** i) + random.uniform(0.5, 1.5)
+                    print(f"GEE Limit Hit. Backing off for {sleep_time:.2f}s (Attempt {i+1}/{retries})...")
+                    time.sleep(sleep_time)
+                    continue
                 raise
     
     ee.ComputedObject.getInfo = safe_get_info
     
-
     original_get_download_url = ee.Image.getDownloadURL
     
     def safe_get_download_url(self, *args, **kwargs):
+        ensure_primary_credential()
         retries = 8
         for i in range(retries):
             try:
                 return original_get_download_url(self, *args, **kwargs)
             except Exception as e:
-                err_str = str(e).lower()
-                if "429" in err_str or "concurrency" in err_str or "too many requests" in err_str or "quota" in err_str or "user limit" in err_str:
-                    if i < retries - 1:
-                        sleep_time = (1.5 ** i) + random.uniform(0.5, 1.5)
-                        print(f"GEE Concurrency Limit Hit (getDownloadURL). Backing off for {sleep_time:.2f}s...")
-                        time.sleep(sleep_time)
+                if _is_rotatable_error(e) and i < retries - 1:
+                    rotated = rotate_credentials()
+                    if rotated:
+                        print(f"[GEE Pool getDownloadURL] Automatically shifted account! Retrying...")
+                        time.sleep(0.2)
                         continue
+                    sleep_time = (1.5 ** i) + random.uniform(0.5, 1.5)
+                    print(f"GEE Limit Hit (getDownloadURL). Backing off for {sleep_time:.2f}s...")
+                    time.sleep(sleep_time)
+                    continue
                 raise
                 
     ee.Image.getDownloadURL = safe_get_download_url
@@ -308,18 +420,22 @@ def apply_gee_patch():
     original_get_map_id = ee.Image.getMapId
     
     def safe_get_map_id(self, *args, **kwargs):
+        ensure_primary_credential()
         retries = 8
         for i in range(retries):
             try:
                 return original_get_map_id(self, *args, **kwargs)
             except Exception as e:
-                err_str = str(e).lower()
-                if "429" in err_str or "concurrency" in err_str or "too many requests" in err_str or "quota" in err_str or "user limit" in err_str:
-                    if i < retries - 1:
-                        sleep_time = (1.5 ** i) + random.uniform(0.5, 1.5)
-                        print(f"GEE Concurrency Limit Hit (getMapId). Backing off for {sleep_time:.2f}s...")
-                        time.sleep(sleep_time)
+                if _is_rotatable_error(e) and i < retries - 1:
+                    rotated = rotate_credentials()
+                    if rotated:
+                        print(f"[GEE Pool getMapId] Automatically shifted account! Retrying...")
+                        time.sleep(0.2)
                         continue
+                    sleep_time = (1.5 ** i) + random.uniform(0.5, 1.5)
+                    print(f"GEE Limit Hit (getMapId). Backing off for {sleep_time:.2f}s...")
+                    time.sleep(sleep_time)
+                    continue
                 raise
                 
     ee.Image.getMapId = safe_get_map_id

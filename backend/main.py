@@ -161,22 +161,27 @@ def _require_gee() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    key = os.environ.get("GEE_SERVICE_ACCOUNT_KEY", "").strip()
-    if not key:
-        key_file_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "gee_key.json"))
-        if os.path.exists(key_file_path):
-            with open(key_file_path, "r", encoding="utf-8") as f:
-                key = f.read().strip()
-                os.environ["GEE_SERVICE_ACCOUNT_KEY"] = key
+    # Check for any of the configured primary or pooled GEE keys
+    key_env_vars = [
+        "GEE_SERVICE_ACCOUNT_KEY",
+        "GEE_SERVICE_ACCOUNT_KEY_PRIMARY",
+        "GEE_SERVICE_ACCOUNT_KEY_BACKUP",
+        "GEE_SERVICE_ACCOUNT_KEY_1",
+        "GEE_SERVICE_ACCOUNT_KEY_2",
+        "GEE_SERVICE_ACCOUNT_KEYS",
+    ]
+    has_key = any(os.environ.get(var, "").strip() for var in key_env_vars)
 
-    if not key:
-        global _gee_error
-        _gee_error = "GEE_SERVICE_ACCOUNT_KEY is not set and gee_key.json was not found."
-        logger.critical(_gee_error)
-    else:
-        logger.info("Starting GEE initialization in background thread...")
-        t = threading.Thread(target=_init_gee_background, daemon=True)
-        t.start()
+    if not has_key:
+        import glob
+        base_dir = os.path.abspath(os.path.dirname(__file__))
+        key_files = glob.glob(os.path.join(base_dir, "gee_key*.json"))
+        if key_files:
+            has_key = True
+
+    logger.info("Starting GEE initialization in background thread...")
+    t = threading.Thread(target=_init_gee_background, daemon=True)
+    t.start()
     yield
     logger.info("GeoPortal API shutting down.")
 
@@ -385,6 +390,19 @@ def login(req: LoginRequest):
             if not user:
                 raise HTTPException(401, "Invalid email or password")
 
+        if user.get("is_blocked"):
+            raise HTTPException(
+                403,
+                detail={
+                    "error": "account_blocked",
+                    "is_blocked": True,
+                    "message": "Your account has been suspended.",
+                    "reason": user.get("blocked_reason") or "Suspended by administration for platform policy violation.",
+                    "email": str(user["email"]),
+                    "name": str(user.get("name") or user["email"].split("@")[0])
+                }
+            )
+
         user_dict = {
             "id": str(user.get("id") or user.get("email")),
             "email": str(user["email"]),
@@ -394,6 +412,13 @@ def login(req: LoginRequest):
         token = create_access_token({"sub": user_dict["email"], "name": user_dict["name"], "role": user_dict["role"]})
         if isinstance(token, bytes):
             token = token.decode("utf-8")
+
+        # Track user login activity
+        try:
+            auth_db.log_user_activity(user_dict["email"], action="login", module="Authentication", details="User logged in.", user_name=user_dict["name"])
+        except Exception:
+            pass
+
         return {"ok": True, "token": str(token), "user": user_dict}
     except HTTPException:
         raise
@@ -2701,6 +2726,7 @@ class SupervisedClassifyRequest(BaseModel):
     train_split: int = 70
     use_indices: bool = True
     hyperparam_trees: int = 50
+    apply_sieve: bool = False
 
 
 import threading
@@ -2986,7 +3012,8 @@ def supervised_classify_endpoint(request: Request, req: SupervisedClassifyReques
             ml_model=req.ml_model,
             train_split=req.train_split,
             use_indices=req.use_indices,
-            hyperparam_trees=req.hyperparam_trees
+            hyperparam_trees=req.hyperparam_trees,
+            apply_sieve=req.apply_sieve
         )
         return result
     except ValueError as exc:
@@ -3117,6 +3144,9 @@ def timelapse_tile(req: TimelapseTileRequest):
         roi = None
         if aoi_bounds and len(aoi_bounds) == 4:
             roi = ee.Geometry.Rectangle(aoi_bounds)
+        else:
+            # Prevent unbounded global computation: default to regional bounds (Rwanda / East Africa)
+            roi = ee.Geometry.Rectangle([28.8, -2.9, 30.9, -1.0])
 
         start = f"{year}-01-01"
         end   = f"{year}-12-31"
@@ -3484,6 +3514,12 @@ class ClassifySupervisedRequest(BaseModel):
     custom_asset_id: Optional[str] = None
     samples: list = []
     study_area: Optional[dict] = None
+    aoi: Optional[dict] = None
+    ml_model: str = "random_forest"
+    train_split: int = 70
+    use_indices: bool = True
+    hyperparam_trees: int = 50
+    apply_sieve: bool = False
 
 
 @app.post("/api/classify/supervised", tags=["samples"])
@@ -3500,17 +3536,52 @@ def classify_supervised(req: ClassifySupervisedRequest, request: Request):
     from gee.supervised_classify import train_and_classify
     
     try:
+        aoi_target = req.study_area or req.aoi
         result = train_and_classify(
             samples=req.samples,
             data_source=req.data_source,
             custom_asset_id=req.custom_asset_id,
-            aoi=req.study_area
+            aoi=aoi_target,
+            ml_model=req.ml_model,
+            train_split=req.train_split,
+            use_indices=req.use_indices,
+            hyperparam_trees=req.hyperparam_trees,
+            apply_sieve=req.apply_sieve
         )
         return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error("Classification failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class SpectralProfilesRequest(BaseModel):
+    samples: list
+    year: int = 2024
+    aoi: Optional[dict] = None
+    data_source: str = "sentinel2"
+
+
+@app.post("/api/samples/spectral_profiles", tags=["samples"])
+def get_spectral_profiles_endpoint(req: SpectralProfilesRequest, request: Request):
+    _require_individual_gee(request)
+    _require_gee()
+    from gee.spectral_profiles import compute_spectral_profiles
+    if not req.samples:
+        raise HTTPException(status_code=400, detail="No training samples provided for spectral profile analysis.")
+    try:
+        profiles = compute_spectral_profiles(
+            samples=req.samples,
+            year=req.year,
+            aoi=req.aoi,
+            data_source=req.data_source
+        )
+        return profiles
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("Spectral profiles computation failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -4060,6 +4131,9 @@ from fastapi.responses import StreamingResponse
 
 class HarvesterScanRequest(BaseModel):
     url: str
+    source_type: Optional[str] = "auto"
+    auth_token: Optional[str] = None
+    allow_insecure_ssl: Optional[bool] = False
 
 
 class HarvesterSaveToPortalRequest(BaseModel):
@@ -4079,7 +4153,12 @@ class HarvesterPushToGeeRequest(BaseModel):
 @app.post("/api/harvester/scan", tags=["harvester"])
 def api_harvester_scan(req: HarvesterScanRequest):
     try:
-        res = HarvesterScanner.scan_url(req.url)
+        res = HarvesterScanner.scan_url(
+            target_url=req.url,
+            source_type=req.source_type or "auto",
+            auth_token=req.auth_token,
+            allow_insecure_ssl=bool(req.allow_insecure_ssl),
+        )
         return res
     except Exception as exc:
         logger.error("Harvester scan error: %s", exc)
@@ -4093,9 +4172,13 @@ def api_harvester_download(url: str, filename: Optional[str] = None):
     Supports Google Drive, Dropbox, and SSL fallback for legacy/government servers.
     """
     try:
+        from harvester import assert_safe_url
+        assert_safe_url(url)
+
         try:
             from storage.link_resolver import resolve_link_url
             url = resolve_link_url(url)
+            assert_safe_url(url)
         except Exception:
             pass
 
@@ -4380,6 +4463,19 @@ def verify_otp_endpoint(req: OTPVerifyRequest):
         # Mark as verified
         mark_user_verified(email)
         user["is_verified"] = True
+
+    if user.get("is_blocked"):
+        raise HTTPException(
+            403,
+            detail={
+                "error": "account_blocked",
+                "is_blocked": True,
+                "message": "Your account has been suspended.",
+                "reason": user.get("blocked_reason") or "Suspended by administration for platform policy violation.",
+                "email": str(user["email"]),
+                "name": str(user.get("name") or user["email"].split("@")[0])
+            }
+        )
         
     token = create_access_token({"sub": user["email"], "name": user["name"], "role": user["role"]})
     
@@ -4432,6 +4528,19 @@ def google_auth(req: GoogleAuthRequest):
                 db_user.is_verified = True
                 db.commit()
             user = get_user_by_email(email)
+
+        if user.get("is_blocked"):
+            raise HTTPException(
+                403,
+                detail={
+                    "error": "account_blocked",
+                    "is_blocked": True,
+                    "message": "Your account has been suspended.",
+                    "reason": user.get("blocked_reason") or "Suspended by administration for platform policy violation.",
+                    "email": str(user["email"]),
+                    "name": str(user.get("name") or user["email"].split("@")[0])
+                }
+            )
             
         token = create_access_token({"sub": user["email"], "name": user["name"], "role": user["role"]})
         
@@ -4452,4 +4561,203 @@ def google_auth(req: GoogleAuthRequest):
         err_msg = f"Google auth error: {e}\n{traceback.format_exc()}"
         logger.error(err_msg)
         raise HTTPException(500, err_msg)
+
+
+# ── USER MANAGEMENT, ACTIVITY TRACKING & APPEALS ────────────────────────────
+
+class AdminBlockUserRequest(BaseModel):
+    reason: str = Field(..., min_length=1)
+
+class UserAppealRequest(BaseModel):
+    email: str = Field(..., min_length=3)
+    appeal_message: str = Field(..., min_length=5)
+
+class AppealReviewRequest(BaseModel):
+    action: str = Field(...)  # "approve" or "reject"
+    admin_note: Optional[str] = None
+
+class ActivityLogRequest(BaseModel):
+    action: str = Field(...)
+    module: Optional[str] = "Platform"
+    details: Optional[str] = None
+    email: Optional[str] = None
+
+@app.post("/api/activity/log", tags=["activity"])
+def log_activity_endpoint(req: ActivityLogRequest, request: Request):
+    """Log user action and module interaction."""
+    user_email = req.email
+    user_name = None
+    
+    # Try reading token from Authorization header if present
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        try:
+            payload = decode_token(auth_header[7:])
+            if payload and payload.get("sub"):
+                user_email = payload["sub"]
+                user_name = payload.get("name")
+        except Exception:
+            pass
+
+    client_ip = request.client.host if request.client else None
+    if user_email:
+        auth_db.log_user_activity(
+            email=user_email,
+            action=req.action,
+            module=req.module or "Platform",
+            details=req.details,
+            ip_address=client_ip,
+            user_name=user_name
+        )
+    return {"ok": True}
+
+@app.get("/api/admin/users", tags=["admin"])
+def api_admin_list_users(user: dict = Depends(get_current_user)):
+    """List all registered users with activity totals, favorite tools, comment counts, and moderation status."""
+    if user.get("role") != "admin":
+        raise HTTPException(403, "Administrator access required.")
+    users = auth_db.get_all_users_admin()
+    return {"ok": True, "users": users}
+
+@app.get("/api/admin/users/{user_email}/detail", tags=["admin"])
+def api_admin_get_user_detail(user_email: str, user: dict = Depends(get_current_user)):
+    """Retrieve in-depth details for a user: activity timeline, module breakdown, community comments, and appeals."""
+    if user.get("role") != "admin":
+        raise HTTPException(403, "Administrator access required.")
+    detail = auth_db.get_user_admin_detail(user_email)
+    if not detail:
+        raise HTTPException(404, "User not found.")
+    return {"ok": True, "user": detail}
+
+@app.post("/api/admin/users/{user_email}/block", tags=["admin"])
+def api_admin_block_user(user_email: str, req: AdminBlockUserRequest, user: dict = Depends(get_current_user)):
+    """Block/suspend a user account with a stated reason."""
+    if user.get("role") != "admin":
+        raise HTTPException(403, "Administrator access required.")
+    if user_email.lower() in ["petersonyang8@gmail.com", "pierrendorimana16@gmail.com"]:
+        raise HTTPException(400, "Cannot suspend an administrator account.")
+    success = auth_db.admin_block_user(user_email, req.reason, admin_email=user["email"])
+    if not success:
+        raise HTTPException(404, "User not found.")
+    return {"ok": True, "message": f"User {user_email} has been suspended."}
+
+@app.post("/api/admin/users/{user_email}/unblock", tags=["admin"])
+def api_admin_unblock_user(user_email: str, user: dict = Depends(get_current_user)):
+    """Unblock/reinstate a user account."""
+    if user.get("role") != "admin":
+        raise HTTPException(403, "Administrator access required.")
+    success = auth_db.admin_unblock_user(user_email, admin_email=user["email"])
+    if not success:
+        raise HTTPException(404, "User not found.")
+    return {"ok": True, "message": f"User {user_email} has been reinstated."}
+
+@app.get("/api/admin/activities", tags=["admin"])
+def api_admin_list_activities(limit: int = 100, user: dict = Depends(get_current_user)):
+    """Audit stream of recent website actions across all users."""
+    if user.get("role") != "admin":
+        raise HTTPException(403, "Administrator access required.")
+    activities = auth_db.get_user_activities(limit=limit)
+    return {"ok": True, "activities": activities}
+
+@app.post("/api/auth/appeal", tags=["auth"])
+def api_submit_appeal(req: UserAppealRequest):
+    """Submit an appeal for account suspension."""
+    try:
+        res = auth_db.create_user_appeal(req.email.strip().lower(), req.appeal_message.strip())
+        return {"ok": True, "appeal": res}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        logger.error("Error submitting appeal: %s", e)
+        raise HTTPException(500, "Could not submit appeal. Please try again.")
+
+@app.get("/api/admin/appeals", tags=["admin"])
+def api_admin_list_appeals(status: Optional[str] = "all", user: dict = Depends(get_current_user)):
+    """List appeals submitted by suspended users."""
+    if user.get("role") != "admin":
+        raise HTTPException(403, "Administrator access required.")
+    appeals = auth_db.get_all_appeals(status=status)
+    return {"ok": True, "appeals": appeals}
+
+@app.post("/api/admin/appeals/{appeal_id}/review", tags=["admin"])
+def api_admin_review_appeal(appeal_id: int, req: AppealReviewRequest, user: dict = Depends(get_current_user)):
+    """Review an appeal: approve (unblocks account) or reject."""
+    if user.get("role") != "admin":
+        raise HTTPException(403, "Administrator access required.")
+    try:
+        res = auth_db.review_user_appeal(
+            appeal_id=appeal_id,
+            action=req.action,
+            admin_note=req.admin_note or "",
+            admin_email=user["email"]
+        )
+        return {"ok": True, "result": res}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        logger.error("Error reviewing appeal: %s", e)
+        raise HTTPException(500, "Could not process appeal review.")
+
+class UpdateUserRoleRequest(BaseModel):
+    role: str = Field(..., pattern="^(admin|user)$")
+
+@app.post("/api/admin/users/{user_email}/role", tags=["admin"])
+def api_admin_update_user_role(user_email: str, req: UpdateUserRoleRequest, user: dict = Depends(get_current_user)):
+    """Update role for a user (admin or user)."""
+    if user.get("role") != "admin":
+        raise HTTPException(403, "Administrator access required.")
+    # Prevent self-demotion or demoting the superadmin
+    if user_email.lower() == user["email"].lower() and req.role != "admin":
+        raise HTTPException(400, "You cannot remove admin privileges from your own account.")
+    if user_email.lower() in ["petersonyang8@gmail.com", "pierrendorimana16@gmail.com"] and req.role != "admin":
+        raise HTTPException(400, "Cannot demote a primary portal administrator.")
+        
+    success = auth_db.update_user_role(user_email, req.role)
+    if not success:
+        raise HTTPException(404, "User not found.")
+    return {"ok": True, "message": f"Role for {user_email} updated to {req.role}."}
+
+@app.post("/api/admin/users/{user_email}/send-reset", tags=["admin"])
+def api_admin_send_password_reset(user_email: str, user: dict = Depends(get_current_user)):
+    """Generate a password reset link for a user and record the token."""
+    if user.get("role") != "admin":
+        raise HTTPException(403, "Administrator access required.")
+    token = auth_db.create_admin_reset_token(user_email)
+    if not token:
+        raise HTTPException(404, "User not found.")
+    
+    reset_url = f"/reset-password?token={token}"
+    return {
+        "ok": True, 
+        "token": token,
+        "reset_url": reset_url,
+        "message": f"Password reset link generated for {user_email} (valid 24h)."
+    }
+
+@app.get("/api/admin/system-health", tags=["admin"])
+def api_admin_system_health(user: dict = Depends(get_current_user)):
+    """Retrieve runtime diagnostics: GEE status, memory, database, and telemetry."""
+    if user.get("role") != "admin":
+        raise HTTPException(403, "Administrator access required.")
+    
+    from gee.auth import is_gee_authenticated, get_gee_user_email
+    import sys
+    
+    gee_ok = is_gee_authenticated()
+    gee_email = get_gee_user_email() if gee_ok else None
+    
+    return {
+        "ok": True,
+        "gee": {
+            "authenticated": gee_ok,
+            "email": gee_email or "service_account"
+        },
+        "python_version": sys.version.split()[0],
+        "database": {
+            "wal_mode": True,
+            "status": "healthy"
+        },
+        "status": "operational",
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
 

@@ -88,9 +88,10 @@ export function CommunityPage() {
     let ws: WebSocket;
     const connectWs = () => {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = import.meta.env.PROD 
-        ? `${protocol}//geoportal-api-ygzi.onrender.com/api/community/ws`
-        : `${protocol}//localhost:8000/api/community/ws`;
+      const wsHost = import.meta.env.VITE_API_URL 
+        ? import.meta.env.VITE_API_URL.replace(/^https?:\/\//, "").replace(/\/api$/, "").replace(/\/$/, "")
+        : window.location.host;
+      const wsUrl = `${protocol}//${wsHost}/api/community/ws`;
       
       ws = new WebSocket(wsUrl);
       

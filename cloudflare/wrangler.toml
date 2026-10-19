@@ -1,0 +1,7 @@
+name = "spetro-geoportal-edge"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+[vars]
+CLOUD_RUN_ORIGIN = "https://geoportal-backend-REPLACE_WITH_YOUR_ID.a.run.app"
+GITHUB_PAGES_ORIGIN = "https://p001x.github.io/portalproject"

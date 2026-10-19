@@ -1,4 +1,7 @@
 import L from "leaflet";
+if (typeof window !== "undefined") {
+  (window as any).type = undefined;
+}
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -13,13 +16,18 @@ import {
   Link as LinkIcon,
   Database,
   CheckCircle,
+  AlertTriangle,
   Sparkles,
+  Lock,
+  Crosshair,
   Eye,
   EyeOff,
   Target,
   Compass,
   Cloud,
   MapPin,
+  Maximize2,
+  FileText,
   Square,
   Activity,
   Layers,
@@ -43,6 +51,15 @@ import {
   SkipBack,
   SkipForward,
   ChevronUp,
+  LogOut,
+  XCircle,
+  RotateCcw,
+  Info,
+  Palette,
+  Share2,
+  Copy,
+  Table,
+  Hand,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -62,6 +79,61 @@ import { DatasetRecord, BASE, getGeeToken } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 import { NativeRasterLayer } from "@/components/NativeRasterLayer";
 import { DatasetHarvester } from "@/components/DatasetHarvester";
+import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend as RechartsLegend } from "recharts";
+import { useAuth } from "@/hooks/use-auth";
+
+// Refined, professional minimalist cartographic palette (ESA WorldCover & USGS standards)
+const LAND_COVER_PRESETS = [
+  { name: "Built-up", color: "#e06c75" },
+  { name: "Vegetation", color: "#10b981" },
+  { name: "Water", color: "#38bdf8" },
+  { name: "Forest", color: "#059669" },
+  { name: "Dense Forest", color: "#047857" },
+  { name: "Cropland", color: "#f59e0b" },
+  { name: "Grass", color: "#84cc16" },
+  { name: "Shrubland", color: "#b45309" },
+  { name: "Bare Land", color: "#d4a373" },
+  { name: "Swamp", color: "#0d9488" },
+  { name: "Permanent Water", color: "#2563eb" },
+  { name: "Rural Settlement", color: "#f97316" },
+  { name: "Dense Urban", color: "#be123c" },
+  { name: "Mangrove", color: "#065f46" },
+  { name: "Savanna Woodland", color: "#65a30d" },
+  { name: "Rocks", color: "#78716c" },
+  { name: "Floodplain", color: "#0ea5e9" },
+  { name: "Aquatic Vegetation", color: "#14b8a6" },
+  { name: "Plantation Crops", color: "#4ade80" }
+];
+
+const AMATEUR_COLOR_MAP: Record<string, string> = {
+  "#ff0000": "#e06c75",
+  "#00ff00": "#10b981",
+  "#0000ff": "#38bdf8",
+  "#ffff00": "#f59e0b",
+  "#800080": "#0d9488",
+  "#ffa500": "#f97316",
+  "#7cfc00": "#84cc16",
+  "#8b0000": "#be123c",
+  "#00e5ff": "#38bdf8",
+  "#8b4513": "#78716c",
+  "#006400": "#059669",
+  "#228b22": "#047857",
+  "#004d00": "#065f46",
+  "#4169e1": "#2563eb",
+  "#87ceeb": "#0ea5e9",
+  "#20b2aa": "#14b8a6",
+  "#9acd32": "#4ade80",
+};
+
+const getRefinedColor = (rawColor?: string, label?: string): string => {
+  if (label) {
+    const preset = LAND_COVER_PRESETS.find(p => p.name.toLowerCase() === label.trim().toLowerCase());
+    if (preset) return preset.color;
+  }
+  if (!rawColor) return "#10b981";
+  const lower = rawColor.toLowerCase();
+  return AMATEUR_COLOR_MAP[lower] || rawColor;
+};
 
 function MapClickHandler({ onMapClick }: { onMapClick: (lat: number, lng: number) => void }) {
   useMapEvents({
@@ -88,9 +160,119 @@ function MapBoundsController({ bbox }: { bbox?: number[] | null }) {
   return null;
 }
 
+function MapInstanceCapturer({ onMapInstance }: { onMapInstance: (m: L.Map) => void }) {
+  const map = useMap();
+  useEffect(() => {
+    if (map) onMapInstance(map);
+  }, [map, onMapInstance]);
+  return null;
+}
+
+const STUDY_AREA_PRESETS = [
+  {
+    id: "rwanda_national",
+    name: "Rwanda (National Boundary)",
+    desc: "National territory extent (~26,338 km²)",
+    bbox: [28.86, -2.84, 30.90, -1.05],
+  },
+  {
+    id: "kigali_metro",
+    name: "Kigali Metropolitan Region",
+    desc: "Capital city & surrounding sectors (~730 km²)",
+    bbox: [29.98, -2.05, 30.18, -1.88],
+  },
+  {
+    id: "lake_kivu",
+    name: "Lake Kivu Riparian Basin",
+    desc: "Western aquatic & coastal agricultural zone",
+    bbox: [29.15, -2.45, 29.45, -1.65],
+  },
+  {
+    id: "musanze_volcanoes",
+    name: "Musanze & Volcanoes National Park",
+    desc: "Northern volcanic forest & high-altitude farms",
+    bbox: [29.45, -1.55, 29.75, -1.35],
+  },
+  {
+    id: "bugesera_agriculture",
+    name: "Bugesera Agricultural District",
+    desc: "Eastern savannah lake system & farming belt",
+    bbox: [30.05, -2.40, 30.35, -2.15],
+  },
+];
+
+const normalizeToFeatureCollection = (data: any): any => {
+  if (!data) return null;
+  if (Array.isArray(data)) {
+    const allFeatures: any[] = [];
+    for (const item of data) {
+      if (item?.features) allFeatures.push(...item.features);
+      else if (item?.geometry) allFeatures.push(item);
+    }
+    return { type: "FeatureCollection", features: allFeatures };
+  }
+  if (data.type === "FeatureCollection") return data;
+  if (data.type === "Feature") return { type: "FeatureCollection", features: [data] };
+  if (data.type === "Polygon" || data.type === "MultiPolygon") {
+    return { type: "FeatureCollection", features: [{ type: "Feature", geometry: data, properties: {} }] };
+  }
+  return data;
+};
+
+const validateWithinStudyArea = (studyAreaObj: any, featureGeoJson: any): boolean => {
+  if (!studyAreaObj) return true;
+  try {
+    const normalizedAoi = normalizeToFeatureCollection(studyAreaObj);
+    if (!normalizedAoi || !normalizedAoi.features || normalizedAoi.features.length === 0) {
+      return true;
+    }
+    const aoiBbox = turf.bbox(normalizedAoi);
+    const featBbox = turf.bbox(featureGeoJson);
+    
+    // Quick outer bbox rejection
+    if (
+      featBbox[0] > aoiBbox[2] ||
+      featBbox[2] < aoiBbox[0] ||
+      featBbox[1] > aoiBbox[3] ||
+      featBbox[3] < aoiBbox[1]
+    ) {
+      return false;
+    }
+
+    const geomType = featureGeoJson.geometry?.type || featureGeoJson.type;
+    const geomCoords = featureGeoJson.geometry?.coordinates || featureGeoJson.coordinates;
+
+    if (geomType === "Point" && geomCoords) {
+      const pt = turf.point(geomCoords);
+      for (const poly of normalizedAoi.features) {
+        try {
+          if (turf.booleanPointInPolygon(pt, poly)) return true;
+        } catch {}
+      }
+      for (const poly of normalizedAoi.features) {
+        try {
+          if (turf.booleanIntersects(poly, pt)) return true;
+        } catch {}
+      }
+    } else {
+      for (const poly of normalizedAoi.features) {
+        try {
+          if (turf.booleanIntersects(poly, featureGeoJson)) return true;
+        } catch {}
+      }
+    }
+    return true;
+  } catch (err) {
+    console.warn("Turf spatial check fallback", err);
+    return true;
+  }
+};
+
 export function SampleDigitizationPage() {
   const qc = useQueryClient();
   const { toast } = useToast();
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
 
   // Add Sample form state
   const [classLabel, setClassLabel] = useState("");
@@ -107,6 +289,13 @@ export function SampleDigitizationPage() {
   const [activeTab, setActiveTab] = useState("map");
   const [activeBbox, setActiveBbox] = useState<number[] | null>(null);
   const [showClassifyResult, setShowClassifyResult] = useState(true);
+
+  // Safety fallback: if not admin and on admin tab, switch to map
+  useEffect(() => {
+    if (!isAdmin && (activeTab === "import" || activeTab === "gee")) {
+      setActiveTab("map");
+    }
+  }, [isAdmin, activeTab]);
 
   // Drawing & Grouped Table state
   const [drawMode, setDrawMode] = useState<"point" | "polyline" | "polygon" | "rectangle" | "circle" | "pan">("point");
@@ -145,17 +334,28 @@ export function SampleDigitizationPage() {
     localStorage.setItem("geoportal_rightPanelsFolded", JSON.stringify(isRightPanelsFolded));
   }, [isRightPanelsFolded]);
 
-  // Study Area State
+  // Session & Study Area State
+  const [isEditing, setIsEditing] = useState(false);
   const [studyArea, setStudyArea] = useState<any>(null); // GeoJSON
   const [showStudyArea, setShowStudyArea] = useState(true);
   const [isDrawingStudyArea, setIsDrawingStudyArea] = useState(false);
+  const [aoiDrawShape, setAoiDrawShape] = useState<"rectangle" | "polygon">("rectangle");
+  const [isLeftPanelOpen, setIsLeftPanelOpen] = useState(true);
+  const [isStudyAreaModalOpen, setIsStudyAreaModalOpen] = useState(false);
+  const [studyAreaModalTab, setStudyAreaModalTab] = useState("presets");
+  const [isClassPaletteModalOpen, setIsClassPaletteModalOpen] = useState(false);
+  const [isReadinessModalOpen, setIsReadinessModalOpen] = useState(false);
+  const [tocFilter, setTocFilter] = useState("");
+  const [isSamplesLayerExpanded, setIsSamplesLayerExpanded] = useState(true);
   const studyAreaGroupRef = useRef<any>(null);
   const aoiBoundsRef = useRef<number[] | null>(null);
+  const mapInstanceRef = useRef<L.Map | null>(null);
   
   useEffect(() => {
     if (studyArea) {
       try {
-        aoiBoundsRef.current = turf.bbox(studyArea);
+        const normalized = normalizeToFeatureCollection(studyArea);
+        aoiBoundsRef.current = turf.bbox(normalized);
       } catch (e) {
         console.error("Turf bbox failed", e);
         aoiBoundsRef.current = null;
@@ -165,13 +365,209 @@ export function SampleDigitizationPage() {
     }
   }, [studyArea]);
 
+  const aoiAreaKm2 = useMemo(() => {
+    if (!studyArea) return null;
+    try {
+      const normalized = normalizeToFeatureCollection(studyArea);
+      const sqMeters = turf.area(normalized);
+      return (sqMeters / 1_000_000).toLocaleString(undefined, { maximumFractionDigits: 1 });
+    } catch {
+      return null;
+    }
+  }, [studyArea]);
+
+  const clearStudyArea = useCallback(() => {
+    if (studyAreaGroupRef.current) {
+      try {
+        studyAreaGroupRef.current.clearLayers();
+      } catch {}
+    }
+    setStudyArea(null);
+    aoiBoundsRef.current = null;
+    setIsDrawingStudyArea(false);
+    setIsEditing(false);
+    toast({ title: "Study Area Cleared", description: "Spatial boundary removed." });
+  }, [toast]);
+
+  const applyStudyAreaPreset = useCallback((preset: typeof STUDY_AREA_PRESETS[0]) => {
+    const [minLng, minLat, maxLng, maxLat] = preset.bbox;
+    const polygonFeature = {
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          properties: { name: preset.name },
+          geometry: {
+            type: "Polygon",
+            coordinates: [
+              [
+                [minLng, minLat],
+                [maxLng, minLat],
+                [maxLng, maxLat],
+                [minLng, maxLat],
+                [minLng, minLat],
+              ],
+            ],
+          },
+        },
+      ],
+    };
+
+    if (studyAreaGroupRef.current) {
+      try {
+        studyAreaGroupRef.current.clearLayers();
+      } catch {}
+    }
+    setStudyArea(polygonFeature);
+    setActiveBbox(preset.bbox);
+    setIsStudyAreaModalOpen(false);
+    setIsDrawingStudyArea(false);
+    toast({
+      title: `Study Area: ${preset.name}`,
+      description: `Configured bounding box. Centered view on ${preset.name}.`,
+    });
+  }, [toast]);
+
+  const applyCurrentViewportAsStudyArea = useCallback(() => {
+    if (!mapInstanceRef.current) {
+      toast({ variant: "destructive", title: "Map canvas initializing", description: "Please wait a moment for the map to finish loading." });
+      return;
+    }
+    const bounds = mapInstanceRef.current.getBounds();
+    const southWest = bounds.getSouthWest();
+    const northEast = bounds.getNorthEast();
+
+    const minLng = Number(southWest.lng.toFixed(6));
+    const minLat = Number(southWest.lat.toFixed(6));
+    const maxLng = Number(northEast.lng.toFixed(6));
+    const maxLat = Number(northEast.lat.toFixed(6));
+
+    const viewportFeature = {
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          properties: { name: "Current Map Viewport AOI" },
+          geometry: {
+            type: "Polygon",
+            coordinates: [
+              [
+                [minLng, minLat],
+                [maxLng, minLat],
+                [maxLng, maxLat],
+                [minLng, maxLat],
+                [minLng, minLat],
+              ],
+            ],
+          },
+        },
+      ],
+    };
+
+    if (studyAreaGroupRef.current) {
+      try {
+        studyAreaGroupRef.current.clearLayers();
+      } catch {}
+    }
+    setStudyArea(viewportFeature);
+    setActiveBbox([minLng, minLat, maxLng, maxLat]);
+    setIsStudyAreaModalOpen(false);
+    setIsDrawingStudyArea(false);
+    toast({
+      title: "Study Area Set from Map Viewport",
+      description: `AOI set to [${minLng}, ${minLat}] → [${maxLng}, ${maxLat}].`,
+    });
+  }, [toast]);
+
+  const startAoiDrawing = useCallback((shape: "rectangle" | "polygon") => {
+    if (studyAreaGroupRef.current) {
+      try {
+        studyAreaGroupRef.current.clearLayers();
+      } catch {}
+    }
+    setAoiDrawShape(shape);
+    setIsStudyAreaModalOpen(false);
+    setIsDrawingStudyArea(true);
+    toast({
+      title: shape === "rectangle" ? "Draw Box (Rectangle AOI)" : "Draw Freeform Polygon AOI",
+      description: shape === "rectangle" 
+        ? "Click and drag or click two opposite corners on the map to define bounding box." 
+        : "Click vertices on the map, then click the start vertex to complete.",
+    });
+    setTimeout(() => {
+      const toolToCss = shape === "rectangle" ? "leaflet-draw-draw-rectangle" : "leaflet-draw-draw-polygon";
+      const btn = document.querySelector(`a.${toolToCss}`) as HTMLElement;
+      if (btn) btn.click();
+    }, 250);
+  }, [toast]);
+
+  const cancelAoiDrawing = useCallback(() => {
+    setIsDrawingStudyArea(false);
+    const cancelBtn = document.querySelector('a[title="Cancel drawing"]') as HTMLElement;
+    if (cancelBtn) cancelBtn.click();
+    if (studyAreaGroupRef.current) {
+      try {
+        studyAreaGroupRef.current.clearLayers();
+      } catch {}
+    }
+    toast({ title: "AOI Drawing Cancelled" });
+  }, [toast]);
+
+  const handleAoiFileUpload = useCallback(async (file: File) => {
+    if (!file) return;
+    const fileName = file.name.toLowerCase();
+    try {
+      let rawGeoJson: any = null;
+      if (fileName.endsWith(".zip")) {
+        const buffer = await file.arrayBuffer();
+        const shp = await import("shpjs");
+        rawGeoJson = await shp.default(buffer);
+      } else if (fileName.endsWith(".geojson") || fileName.endsWith(".json")) {
+        const text = await file.text();
+        rawGeoJson = JSON.parse(text);
+      } else {
+        throw new Error("Unsupported format. Please upload .geojson, .json, or .zip (Shapefile).");
+      }
+
+      const normalized = normalizeToFeatureCollection(rawGeoJson);
+      if (!normalized || !normalized.features || normalized.features.length === 0) {
+        throw new Error("No spatial polygon features found in file.");
+      }
+
+      if (studyAreaGroupRef.current) {
+        try {
+          studyAreaGroupRef.current.clearLayers();
+        } catch {}
+      }
+      setStudyArea(normalized);
+      try {
+        const bbox = turf.bbox(normalized);
+        if (bbox && bbox.length === 4) setActiveBbox(bbox);
+      } catch {}
+
+      setIsStudyAreaModalOpen(false);
+      setIsDrawingStudyArea(false);
+      toast({
+        title: "Study Area Uploaded",
+        description: `Loaded ${normalized.features.length} feature(s) from ${file.name}.`,
+      });
+    } catch (err: any) {
+      console.error("AOI upload error", err);
+      toast({
+        variant: "destructive",
+        title: "AOI Upload Failed",
+        description: err.message || "Could not parse spatial boundary file.",
+      });
+    }
+  }, [toast]);
+
   const drawOptions = useMemo(() => {
     return {
       marker: drawMode === "point" ? { repeatMode: true } : false,
-      polyline: drawMode === "polyline" ? { repeatMode: true, shapeOptions: { color: "#f59e0b", weight: 3 } } : false,
-      polygon: drawMode === "polygon" ? { repeatMode: true, shapeOptions: { color: "#22c55e", fillOpacity: 0.3 } } : false,
-      rectangle: drawMode === "rectangle" ? { repeatMode: true, shapeOptions: { color: "#eab308", fillOpacity: 0.1 } } : false,
-      circle: drawMode === "circle" ? { repeatMode: true, shapeOptions: { color: "#06b6d4", fillOpacity: 0.2 } } : false,
+      polyline: drawMode === "polyline" ? { repeatMode: true, shapeOptions: { color: "#38bdf8", weight: 2 } } : false,
+      polygon: drawMode === "polygon" ? { repeatMode: true, showArea: false, shapeOptions: { color: "#38bdf8", fillOpacity: 0.15, weight: 2 } } : false,
+      rectangle: drawMode === "rectangle" ? { repeatMode: true, showArea: false, shapeOptions: { color: "#38bdf8", fillOpacity: 0.12, weight: 1.5 } } : false,
+      circle: drawMode === "circle" ? { repeatMode: true, shapeOptions: { color: "#38bdf8", fillOpacity: 0.15, weight: 1.5 } } : false,
       circlemarker: false,
     };
   }, [drawMode]);
@@ -231,6 +627,8 @@ export function SampleDigitizationPage() {
   const [tlStatus, setTlStatus] = useState<string>("");
   const [tlLoading, setTlLoading] = useState(false);
   const [tlPanelOpen, setTlPanelOpen] = useState(true);
+  const [isTimelapseDockOpen, setIsTimelapseDockOpen] = useState(false);
+  const [tlOpacity, setTlOpacity] = useState(0.85);
   const playIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Current source config
@@ -263,11 +661,18 @@ export function SampleDigitizationPage() {
 
   const loadTimelapseTile = useCallback(async () => {
     setTlLoading(true);
-    setTlStatus("");
+    setTlStatus("Connecting to Earth Engine...");
     try {
       const year = tlSourceCfg.years[Math.min(tlYearIdx, tlSourceCfg.years.length - 1)];
       const body: any = { source: tlSource, year };
-      if (aoiBoundsRef.current) body.aoi_bounds = aoiBoundsRef.current;
+      if (aoiBoundsRef.current) {
+        body.aoi_bounds = aoiBoundsRef.current;
+      } else if (activeBbox && activeBbox.length === 4) {
+        body.aoi_bounds = activeBbox;
+      } else {
+        // Fallback bounds around Rwanda / Lake Kivu study region
+        body.aoi_bounds = [28.8, -2.9, 30.9, -1.0];
+      }
       if (tlSource === "gedi") { body.gedi_mode = gediMode; body.gedi_window = gediWindow; }
       const res = await api.gee.timelapseTile(body);
       setTimelapseTileUrl(res.tile_url);
@@ -276,13 +681,24 @@ export function SampleDigitizationPage() {
         setTlStatus(res.shot_count === 0
           ? `⚠ No GEDI shots in ${dr}. Try 'Cumulative' mode.`
           : `✓ GEDI: ${res.shot_count} monthly composites (${dr})`);
+      } else {
+        setTlStatus(`✓ ${tlSourceCfg.label.split(" ")[0]} (${year}) tile active`);
       }
+      toast({
+        title: `Timelapse Layer Loaded (${year}) 🛰️`,
+        description: `${tlSourceCfg.label} composite rendered over map canvas.`,
+      });
     } catch(e: any) {
       setTlStatus(`⚠ ${e.message || "Failed to load tile"}`);
+      toast({
+        variant: "destructive",
+        title: "Timelapse Imagery Failed",
+        description: e.message || "Could not retrieve satellite composite.",
+      });
     } finally {
       setTlLoading(false);
     }
-  }, [tlSource, tlYearIdx, tlSourceCfg.years, gediMode, gediWindow]);
+  }, [tlSource, tlYearIdx, tlSourceCfg.years, tlSourceCfg.label, gediMode, gediWindow, activeBbox, toast]);
 
   // ── Training Sample Extraction state ────────────────────────────────────
   const [extractScale, setExtractScale] = useState(tlSourceCfg.defaultScale);
@@ -323,7 +739,6 @@ export function SampleDigitizationPage() {
 
 
   // Session Edit State
-  const [isEditing, setIsEditing] = useState(false);
   const [sessionSamples, setSessionSamples] = useState<Array<{
     id: string;
     geometry: any;
@@ -351,38 +766,51 @@ export function SampleDigitizationPage() {
     const geojson = e.layer.toGeoJSON();
     
     if (state.isDrawingStudyArea) {
-      setStudyArea(geojson);
-      setIsDrawingStudyArea(false);
-      if (editGroupRef.current) {
-        editGroupRef.current.removeLayer(e.layer);
+      if (studyAreaGroupRef.current) {
+        try {
+          studyAreaGroupRef.current.clearLayers();
+        } catch {}
       }
-      toast({ title: "Study Area Defined", description: "You can now digitize samples within this area." });
+      if (e.layer && e.layer.remove) {
+        try {
+          e.layer.remove();
+        } catch {}
+      }
+      if (editGroupRef.current) {
+        try {
+          editGroupRef.current.removeLayer(e.layer);
+        } catch {}
+      }
+      const normalized = normalizeToFeatureCollection(geojson);
+      setStudyArea(normalized);
+      setIsDrawingStudyArea(false);
+      try {
+        const bbox = turf.bbox(normalized);
+        if (bbox && bbox.length === 4) {
+          setActiveBbox(bbox);
+        }
+      } catch {}
+      toast({ title: "Study Area Defined", description: "Spatial boundary locked. Ready to digitize samples." });
       cancelDrawMode();
       setDrawMode("pan");
       return;
     }
 
     if (state.studyArea) {
-      try {
-        let isInside = false;
-        if (state.studyArea.type === "FeatureCollection") {
-          for (const feature of state.studyArea.features) {
-            if (turf.booleanIntersects(feature, geojson)) {
-              isInside = true;
-              break;
-            }
-          }
-        } else {
-          isInside = turf.booleanIntersects(state.studyArea, geojson);
+      const isInside = validateWithinStudyArea(state.studyArea, geojson);
+      if (!isInside) {
+        if (e.layer && e.layer.remove) {
+          try {
+            e.layer.remove();
+          } catch {}
         }
-        
-        if (!isInside) {
-          e.layer.remove();
-          toast({ title: "Outside Study Area", description: "Sample must be completely inside the defined study area.", variant: "destructive" });
-          return;
+        if (editGroupRef.current) {
+          try {
+            editGroupRef.current.removeLayer(e.layer);
+          } catch {}
         }
-      } catch (err) {
-        console.warn("Turf validation failed", err);
+        toast({ title: "Outside Study Area", description: "Sample must be inside the defined study area.", variant: "destructive" });
+        return;
       }
     }
 
@@ -462,14 +890,29 @@ export function SampleDigitizationPage() {
   const [classifyResult, setClassifyResult] = useState<{
     tile_url: string;
     download_url?: string;
+    visualized_download_url?: string;
     classes: string[];
     colors: Record<string, string>;
     areas: Record<string, number>;
     accuracy?: { 
-      overall_accuracy?: number; 
-      kappa?: number; 
+      overall_accuracy?: number | null; 
+      kappa?: number | null; 
+      is_evaluated?: boolean;
+      evaluation_note?: string | null;
+      matrix?: number[][];
+      matrix_labels?: string[];
       producers_accuracy?: Record<string, number>;
       users_accuracy?: Record<string, number>;
+      missing_classes?: string[];
+      total_samples?: number;
+      samples_used?: number;
+      class_counts?: Record<string, number>;
+    };
+    samples_metadata?: {
+      total_submitted: number;
+      total_used: number;
+      class_counts: Record<string, number>;
+      stratified_cap_per_class: number;
     };
   } | null>(null);
 
@@ -506,6 +949,18 @@ export function SampleDigitizationPage() {
   const isRasterSelected = selectedDatasetObj?.file_type === "tiff" || (selectedDatasetObj?.original_filename && !!selectedDatasetObj.original_filename.toLowerCase().match(/\.tiff?$/));
 
   const commitGeometryDirectly = (geometryObj: any) => {
+    if (studyArea) {
+      const isInside = validateWithinStudyArea(studyArea, geometryObj);
+      if (!isInside) {
+        toast({
+          variant: "destructive",
+          title: "Outside Study Area",
+          description: "Sample must be inside the defined study area boundary.",
+        });
+        return;
+      }
+    }
+
     const geoJsonStr = JSON.stringify(geometryObj, null, 2);
     setGeoJsonText(geoJsonStr);
 
@@ -695,18 +1150,85 @@ export function SampleDigitizationPage() {
     return map;
   }, [allCombinedSamples]);
 
+  const classBalanceMetrics = useMemo(() => {
+    const classEntries = Object.entries(groupedSamples);
+    const numClasses = classEntries.length;
+    const totalSamples = allCombinedSamples.length;
+    if (numClasses === 0) return { status: "empty", message: "No training samples digitized yet." };
+    if (numClasses < 2) return { 
+      status: "insufficient", 
+      message: "At least 2 distinct classes are required to train a machine learning model." 
+    };
+
+    const counts = classEntries.map(([name, g]) => ({ name, count: g.items.length }));
+    const min = Math.min(...counts.map(c => c.count));
+    const max = Math.max(...counts.map(c => c.count));
+    const minClass = counts.find(c => c.count === min);
+    const maxClass = counts.find(c => c.count === max);
+
+    if (min < 5) {
+      return {
+        status: "low_samples",
+        message: `Class '${minClass?.name}' has only ${min} sample(s). Aim for at least 10–20 samples per class for robust generalization.`
+      };
+    }
+
+    if (max / Math.max(1, min) >= 4) {
+      return {
+        status: "imbalanced",
+        message: `High class imbalance: '${maxClass?.name}' (${max}) has ${Math.round(max / Math.max(1, min))}x more samples than '${minClass?.name}' (${min}). The classifier may bias toward ${maxClass?.name}.`
+      };
+    }
+
+    return {
+      status: "healthy",
+      message: `Well-balanced dataset: ${numClasses} classes across ${totalSamples} samples. Ready for Supervised ML.`
+    };
+  }, [groupedSamples, allCombinedSamples]);
+
+  const [applySieve, setApplySieve] = useState(false);
+  const [showSpectralProfilesModal, setShowSpectralProfilesModal] = useState(false);
+  const [spectralProfilesData, setSpectralProfilesData] = useState<any>(null);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+
+  const spectralProfilesMut = useMutation({
+    mutationFn: () => api.samples.spectralProfiles({
+      samples: allCombinedSamples,
+      year: 2024,
+      aoi: studyArea || undefined,
+      data_source: classificationSource
+    }),
+    onSuccess: (data) => {
+      setSpectralProfilesData(data);
+      setShowSpectralProfilesModal(true);
+      toast({
+        title: "Spectral Profiles Extracted!",
+        description: `Analyzed ${data.total_pixels_sampled} satellite pixels across ${Object.keys(data.classes).length} classes.`
+      });
+    },
+    onError: (e: Error) => {
+      toast({
+        variant: "destructive",
+        title: "Spectral Analysis Failed",
+        description: e.message
+      });
+    }
+  });
+
   const classifyMut = useMutation({
     mutationFn: () => api.samples.classify({
       data_source: classificationSource,
       custom_asset_id: customAssetId,
       samples: allCombinedSamples,
-      aoi: studyArea || undefined
+      aoi: studyArea || undefined,
+      apply_sieve: applySieve
     }),
     onSuccess: (data) => {
       setClassifyResult(data);
       toast({
         title: "Classification Complete!",
-        description: `Random Forest trained on ${allCombinedSamples.length} samples over ${classificationSource}.`,
+        description: `Random Forest trained on ${allCombinedSamples.length} samples over ${classificationSource}${applySieve ? " (3x3 Majority Sieve Filter active)" : ""}.`,
       });
     },
     onError: (e: Error) => {
@@ -850,7 +1372,7 @@ export function SampleDigitizationPage() {
 
   const scrapeDirectoryMut = useMutation({
     mutationFn: async () => {
-      const res = await fetch(`https://geoportal-api-ygzi.onrender.com/api/datasets/scrape-directory?url=${encodeURIComponent(linkUrl)}`);
+      const res = await fetch(`${BASE}/datasets/scrape-directory?url=${encodeURIComponent(linkUrl)}`);
       if (!res.ok) throw new Error(await res.text());
       return res.json();
     },
@@ -938,7 +1460,7 @@ export function SampleDigitizationPage() {
         key.toLowerCase().includes(".tif") ||
         key.toLowerCase().includes(".tiff")
       ) {
-        setNativePreviewUrl(`https://geoportal-api-ygzi.onrender.com/api/native/imagery/tiles/{z}/{x}/{y}?url=${encodeURIComponent(rawUrl)}`);
+        setNativePreviewUrl(`${BASE}/native/imagery/tiles/{z}/{x}/{y}?url=${encodeURIComponent(rawUrl)}`);
         setClassificationSource("native_cog");
         setCustomAssetId(rawUrl);
         setPreviewDatasetName(res.name);
@@ -946,7 +1468,7 @@ export function SampleDigitizationPage() {
         if (res.bbox && res.bbox.length === 4) {
           setActiveBbox(res.bbox);
         } else {
-          fetch(`https://geoportal-api-ygzi.onrender.com/api/native/imagery/bounds?url=${encodeURIComponent(rawUrl)}`)
+          fetch(`${BASE}/native/imagery/bounds?url=${encodeURIComponent(rawUrl)}`)
             .then((r) => r.json())
             .then((bData) => {
               if (bData.bbox) setActiveBbox(bData.bbox);
@@ -1027,9 +1549,13 @@ export function SampleDigitizationPage() {
   });
 
   const downloadGeoJSON = () => {
+    if (allCombinedSamples.length === 0) {
+      toast({ variant: "destructive", title: "No samples to export" });
+      return;
+    }
     const fc = {
       type: "FeatureCollection",
-      features: samples.map((s) => ({
+      features: allCombinedSamples.map((s) => ({
         type: "Feature",
         geometry: s.geometry,
         properties: {
@@ -1045,9 +1571,13 @@ export function SampleDigitizationPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "training_samples.geojson";
+    a.download = `training_samples_${new Date().toISOString().slice(0, 10)}.geojson`;
     a.click();
     URL.revokeObjectURL(url);
+    toast({
+      title: "GeoJSON Downloaded! 🗺️",
+      description: `Exported ${allCombinedSamples.length} feature(s) to GeoJSON.`,
+    });
   };
 
   const downloadShapefile = () => {
@@ -1056,6 +1586,80 @@ export function SampleDigitizationPage() {
       title: "Shapefile Download Started 📦",
       description: "Exporting training samples as ESRI Shapefile ZIP archive (.shp, .shx, .dbf, .prj).",
     });
+  };
+
+  const downloadCSV = () => {
+    if (allCombinedSamples.length === 0) {
+      toast({ variant: "destructive", title: "No samples to export" });
+      return;
+    }
+    const headers = ["id", "class_label", "color", "creator", "geometry_type", "coordinates"];
+    const rows = allCombinedSamples.map((s) => [
+      `"${s.id || ""}"`,
+      `"${s.class_label || ""}"`,
+      `"${s.color || ""}"`,
+      `"${s.creator || ""}"`,
+      `"${s.geometry?.type || ""}"`,
+      `"${JSON.stringify(s.geometry?.coordinates || []).replace(/"/g, '""')}"`,
+    ]);
+    const csvContent = "\uFEFF" + [headers.join(","), ...rows.map((e) => e.join(","))].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `training_samples_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast({
+      title: "CSV Exported! 📊",
+      description: `Exported ${allCombinedSamples.length} feature(s) with spatial coordinates.`,
+    });
+  };
+
+  const downloadQMLStyle = () => {
+    const classEntries = Object.entries(groupedSamples);
+    if (classEntries.length === 0 && !classifyResult) {
+      toast({ variant: "destructive", title: "No classes available to export style" });
+      return;
+    }
+
+    let qml = `<!DOCTYPE qgis PUBLIC 'http://mrcc.com/qgis.dtd' 'SYSTEM'>\n<qgis version="3.28.0">\n  <pipe>\n    <rasterrenderer type="paletted" opacity="1" band="1">\n      <colorPalette>\n`;
+
+    if (classifyResult) {
+      classifyResult.classes.forEach((cls, idx) => {
+        const hex = classifyResult.colors[cls] || "#3b82f6";
+        qml += `        <paletteEntry value="${idx + 1}" color="${hex}" label="${cls}" alpha="255"/>\n`;
+      });
+    } else {
+      classEntries.forEach(([clsName, g], idx) => {
+        qml += `        <paletteEntry value="${idx + 1}" color="${g.color}" label="${clsName}" alpha="255"/>\n`;
+      });
+    }
+
+    qml += `      </colorPalette>\n    </rasterrenderer>\n  </pipe>\n</qgis>`;
+    const blob = new Blob([qml], { type: "application/xml" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `training_classes_${new Date().toISOString().slice(0, 10)}.qml`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast({
+      title: "QGIS Style (.qml) Downloaded! 🎨",
+      description: "Standard QGIS color palette styling file saved. Drag & drop onto raster in QGIS.",
+    });
+  };
+
+  const handleCopyShareLink = () => {
+    if (typeof window !== "undefined") {
+      navigator.clipboard.writeText(window.location.href);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2500);
+      toast({
+        title: "Link Copied to Clipboard! 📋",
+        description: "Direct URL to this training digitization session is ready to share.",
+      });
+    }
   };
 
   const trainSupervisedClassifierDirectly = () => {
@@ -1074,495 +1678,1362 @@ export function SampleDigitizationPage() {
     });
   };
 
+  const handleStopSession = () => {
+    if (isEditing) {
+      if (sessionSamples.length > 0) {
+        setDatasetNameInput(`Training_Session_${new Date().toISOString().slice(0, 10)}`);
+        setIsSaveModalOpen(true);
+      } else {
+        setIsEditing(false);
+        cancelDrawMode();
+        toast({
+          title: "Session Stopped ⏹️",
+          description: "No new features were buffered.",
+        });
+      }
+    } else if (isDrawingStudyArea) {
+      setIsDrawingStudyArea(false);
+      cancelDrawMode();
+      toast({ title: "Study Area Drawing Cancelled" });
+    } else {
+      cancelDrawMode();
+      setDrawMode("pan");
+      toast({ title: "Drawing Halted", description: "Map returned to Pan mode." });
+    }
+  };
+
+  const handleQuitSession = () => {
+    if (isEditing && sessionSamples.length > 0) {
+      if (!confirm(`Are you sure you want to quit and discard all ${sessionSamples.length} unsaved sample(s) in this editing session?`)) {
+        return;
+      }
+    }
+    cancelDrawMode();
+    setSessionSamples([]);
+    setActivePoints([]);
+    setGeoJsonText("");
+    setIsEditing(false);
+    setIsDrawingStudyArea(false);
+    toast({
+      title: "Session Quit & Reset 🚪",
+      description: "Cleared active drawing session and reset to default view.",
+    });
+  };
+
   return (
     <div className="flex flex-col h-full bg-background overflow-hidden relative">
-      {/* Top Header */}
-      <div className="flex flex-wrap items-center justify-between px-6 py-4 border-b bg-card/95 backdrop-blur z-[50]">
-        <div className="flex flex-col">
-          <div className="flex items-center gap-2 text-emerald-500 font-bold text-xl">
-            <Edit className="w-5 h-5" />
-            Sample Digitization &amp; ML
+      {/* Unified Top Master Command Bar - Sleek Minimalist */}
+      <div className="flex flex-wrap items-center justify-between px-6 py-2 border-b border-border/60 bg-card/90 backdrop-blur-md z-[50] gap-3">
+        <div className="flex items-center gap-5 flex-wrap">
+          {/* Brand & Studio Title */}
+          <div className="flex items-center gap-2.5">
+            <div className="p-1.5 rounded-md bg-muted/60 text-foreground border border-border/50">
+              <Satellite className="w-4 h-4 text-foreground/80" />
+            </div>
+            <div className="flex flex-col">
+              <span className="text-xs font-semibold text-foreground tracking-tight flex items-center gap-2">
+                Training Data &amp; ML Studio
+                <Badge variant="outline" className="text-[10px] font-mono border-border/50 text-muted-foreground bg-muted/40 py-0 h-4">
+                  Sentinel-2 SR
+                </Badge>
+              </span>
+              <span className="text-[11px] text-muted-foreground">
+                Spatial Feature Digitization &bull; Supervised Random Forest
+              </span>
+            </div>
           </div>
-          <p className="text-xs text-muted-foreground mt-1">
-            Digitize training samples and train Supervised Machine Learning classifiers.
-          </p>
+
+          {/* Unified Primary Action Bar */}
+          <div className="flex items-center gap-1.5 bg-muted/30 p-1 rounded-lg border border-border/50 shadow-2xs">
+            {/* 1. RUN CLASSIFIER */}
+            <Button
+              size="sm"
+              onClick={() => {
+                if (allCombinedSamples.length === 0) {
+                  toast({
+                    variant: "destructive",
+                    title: "Training Samples Required",
+                    description: "Please digitize at least 2 training samples before running supervised classification.",
+                  });
+                  return;
+                }
+                trainSupervisedClassifierDirectly();
+              }}
+              disabled={classifyMut.isPending || allCombinedSamples.length === 0}
+              className={`h-8 gap-1.5 text-xs font-semibold px-3.5 shadow-2xs transition-all active:scale-95 ${
+                allCombinedSamples.length === 0
+                  ? "opacity-40 cursor-not-allowed border border-dashed border-border/40 text-muted-foreground/40 bg-muted/10 hover:bg-muted/10 shadow-none pointer-events-auto"
+                  : "bg-foreground text-background hover:bg-foreground/90 font-medium cursor-pointer shadow-xs"
+              }`}
+              title={
+                allCombinedSamples.length === 0
+                  ? "Classifier Locked: Digitize training samples before running classification"
+                  : "RUN: Execute Random Forest Supervised Classifier on digitized training samples"
+              }
+            >
+              {classifyMut.isPending ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : allCombinedSamples.length === 0 ? (
+                <Lock className="w-3.5 h-3.5 text-muted-foreground/40" />
+              ) : (
+                <Play className="w-3.5 h-3.5 fill-current" />
+              )}
+              <span>
+                {classifyMut.isPending
+                  ? "Training..."
+                  : allCombinedSamples.length === 0
+                  ? "Run Classifier (0)"
+                  : `Run Classifier (${allCombinedSamples.length})`}
+              </span>
+            </Button>
+
+            {/* 2. STOP */}
+            <Button
+              size="sm"
+              variant={isEditing || isDrawingStudyArea ? "destructive" : "outline"}
+              onClick={handleStopSession}
+              disabled={!isEditing && !isDrawingStudyArea && drawMode === "pan"}
+              className={`h-8 gap-1.5 text-xs font-medium px-2.5 transition-all ${
+                isEditing || isDrawingStudyArea
+                  ? "bg-destructive text-destructive-foreground hover:bg-destructive/90 shadow-xs font-semibold animate-pulse cursor-pointer"
+                  : "opacity-25 cursor-not-allowed border-border/20 text-muted-foreground/30 bg-transparent pointer-events-none"
+              }`}
+              title={!isEditing && !isDrawingStudyArea ? "No active drawing session to stop" : "STOP: Halt active drawing session"}
+            >
+              <StopCircle className="w-3.5 h-3.5" />
+              <span>Stop</span>
+            </Button>
+
+            {/* 3. SAVE BATCH */}
+            {sessionSamples.length > 0 && (
+              <Button
+                size="sm"
+                onClick={() => {
+                  setDatasetNameInput(`Training_Session_${new Date().toISOString().slice(0, 10)}`);
+                  setIsSaveModalOpen(true);
+                }}
+                className="h-8 gap-1.5 text-xs font-medium px-3 bg-secondary hover:bg-secondary/80 text-secondary-foreground border border-border/60 shadow-2xs transition-all active:scale-95"
+                title="SAVE: Commit buffered features to dataset"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>Save Batch ({sessionSamples.length})</span>
+              </Button>
+            )}
+
+            {/* 4. SPECTRAL CHECK */}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => spectralProfilesMut.mutate()}
+              disabled={spectralProfilesMut.isPending || allCombinedSamples.length === 0}
+              className={`h-8 gap-1.5 text-xs font-medium px-2.5 transition-all ${
+                allCombinedSamples.length === 0
+                  ? "opacity-30 cursor-not-allowed border-border/20 text-muted-foreground/30 bg-transparent pointer-events-none"
+                  : "border-border/50 text-muted-foreground hover:text-foreground hover:bg-muted/50 cursor-pointer"
+              }`}
+              title={allCombinedSamples.length === 0 ? "Requires digitized samples to extract spectral curves" : "SPECTRAL: Inspect Multi-Spectral Reflectance Curves (B2-B12)"}
+            >
+              {spectralProfilesMut.isPending ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Activity className="w-3.5 h-3.5 text-muted-foreground" />
+              )}
+              <span>Spectral</span>
+            </Button>
+
+            {/* 5. TIMELAPSE STUDIO */}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setIsTimelapseDockOpen((prev) => {
+                  const next = !prev;
+                  if (next && !timelapseTileUrl) {
+                    loadTimelapseTile();
+                  }
+                  return next;
+                });
+              }}
+              className={`h-8 gap-1.5 text-xs font-medium px-3 transition-all active:scale-95 border-border/50 ${
+                isTimelapseDockOpen || timelapseTileUrl
+                  ? "bg-muted text-foreground border-border/80"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+              }`}
+              title="TIMELAPSE: Toggle Historical Satellite Imagery Timeline & Multi-Year Scrubber"
+            >
+              <Satellite className="w-3.5 h-3.5" />
+              <span>Timelapse</span>
+              {timelapseTileUrl && (
+                <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-border text-muted-foreground font-mono">
+                  {tlYear}
+                </Badge>
+              )}
+            </Button>
+
+            {/* 6. SHARE */}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setIsShareModalOpen(true)}
+              className="h-8 gap-1.5 text-xs font-medium px-3 text-muted-foreground hover:text-foreground border-border/50 hover:bg-muted/50 shadow-2xs transition-all active:scale-95"
+              title="SHARE: Share training session URL, export Shapefile/GeoJSON/CSV, and QGIS styles"
+            >
+              <Share2 className="w-3.5 h-3.5" />
+              <span>Share</span>
+            </Button>
+
+            {/* 7. RESET / QUIT */}
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={handleQuitSession}
+              className="h-8 gap-1 text-xs font-medium px-2 text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
+              title="RESET: Discard active session drafts and reset map"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>Reset</span>
+            </Button>
+
+            {/* Real-time Status Badge */}
+            <div className="h-4 w-[1px] bg-border/60 mx-1" />
+            <div className="px-2 text-[11px] font-mono flex items-center gap-1.5">
+              {isEditing ? (
+                <span className="flex items-center gap-1.5 text-foreground font-medium">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block" />
+                  Drawing: {classLabel} ({sessionSamples.length} buffered)
+                </span>
+              ) : allCombinedSamples.length === 0 ? (
+                <span className="text-muted-foreground">0 Samples</span>
+              ) : Object.keys(groupedSamples).length < 2 ? (
+                <span className="text-amber-400/90 font-medium flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                  Need 2+ classes
+                </span>
+              ) : (
+                <span className="text-muted-foreground font-medium flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                  {Object.keys(groupedSamples).length} Classes &bull; {allCombinedSamples.length} Samples Ready
+                </span>
+              )}
+            </div>
+          </div>
         </div>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-auto mt-4 sm:mt-0">
-          <TabsList className="bg-muted">
-            <TabsTrigger value="map" className="gap-1.5 data-[state=active]:bg-emerald-500 data-[state=active]:text-white transition-all">
-              <Edit className="w-4 h-4" /> Map &amp; Digitizer
+        {/* Minimalist Tabs Bar */}
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-auto">
+          <TabsList className="bg-muted/40 p-0.5 border border-border/50 rounded-lg h-8.5">
+            <TabsTrigger value="map" className="gap-1.5 text-xs font-medium data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-2xs text-muted-foreground hover:text-foreground transition-all rounded-md px-3 py-1">
+              <Edit className="w-3.5 h-3.5" /> Map &amp; Digitizer
             </TabsTrigger>
-            <TabsTrigger value="samples" className="gap-1.5 data-[state=active]:bg-emerald-500 data-[state=active]:text-white transition-all">
-              <Layers className="w-4 h-4" /> Samples Directory
+            <TabsTrigger value="samples" className="gap-1.5 text-xs font-medium data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-2xs text-muted-foreground hover:text-foreground transition-all rounded-md px-3 py-1">
+              <Table className="w-3.5 h-3.5" /> Attribute Table ({allCombinedSamples.length})
             </TabsTrigger>
-            <TabsTrigger value="classify" className="gap-1.5 data-[state=active]:bg-emerald-500 data-[state=active]:text-white transition-all">
-              <Cpu className="w-4 h-4" /> Supervised Classification
+            <TabsTrigger value="classify" className="gap-1.5 text-xs font-medium data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-2xs text-muted-foreground hover:text-foreground transition-all rounded-md px-3 py-1">
+              <Cpu className="w-3.5 h-3.5" /> Supervised Classification
             </TabsTrigger>
-            <TabsTrigger value="import" className="gap-1.5 data-[state=active]:bg-blue-500 data-[state=active]:text-white transition-all">
-              <Database className="w-4 h-4" /> Import Data
-            </TabsTrigger>
-            <TabsTrigger value="gee" className="gap-1.5 data-[state=active]:bg-amber-500 data-[state=active]:text-white transition-all">
-              <Upload className="w-4 h-4" /> GEE Asset
-            </TabsTrigger>
+            {isAdmin && (
+              <>
+                <TabsTrigger value="import" className="gap-1.5 text-xs font-medium data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-2xs text-muted-foreground hover:text-foreground transition-all rounded-md px-3 py-1">
+                  <Database className="w-3.5 h-3.5" /> Import Data
+                </TabsTrigger>
+                <TabsTrigger value="gee" className="gap-1.5 text-xs font-medium data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-2xs text-muted-foreground hover:text-foreground transition-all rounded-md px-3 py-1">
+                  <Upload className="w-3.5 h-3.5" /> GEE Asset
+                </TabsTrigger>
+              </>
+            )}
           </TabsList>
         </Tabs>
       </div>
+
+      {/* Top Timelapse Ribbon Dock (Option 1 Integration) */}
+      {isTimelapseDockOpen && (
+        <div className="flex flex-wrap items-center justify-between px-6 py-2 border-b bg-sky-950/40 backdrop-blur-md z-[45] gap-3 text-xs border-sky-500/20 shadow-sm animate-in fade-in slide-in-from-top-1 duration-150">
+          <div className="flex items-center gap-3.5 flex-wrap">
+            {/* Title / Badge */}
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-sky-300 flex items-center gap-1.5">
+                <Satellite className="w-4 h-4 text-sky-400" />
+                Timelapse Studio:
+              </span>
+            </div>
+
+            {/* Source Switcher */}
+            <div className="flex items-center gap-1 bg-background/80 p-0.5 rounded-lg border border-sky-500/30">
+              {TL_SOURCES.map((src) => (
+                <button
+                  key={src.id}
+                  type="button"
+                  onClick={() => setTlSource(src.id)}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-semibold flex items-center gap-1.5 transition-all ${
+                    tlSource === src.id
+                      ? "bg-sky-600 text-white shadow-sm"
+                      : "text-muted-foreground hover:text-sky-200 hover:bg-sky-500/10"
+                  }`}
+                >
+                  {src.icon}
+                  <span>{src.label.split(" ")[0]}</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Year Scrubber & Controls */}
+            <div className="flex items-center gap-1.5 bg-background/80 px-2 py-1 rounded-lg border border-sky-500/30">
+              <button
+                type="button"
+                title="First year"
+                onClick={() => { setIsPlaying(false); setTlYearIdx(0); }}
+                className="p-1 rounded hover:bg-sky-500/20 text-sky-400 disabled:opacity-30"
+                disabled={tlYearIdx === 0}
+              >
+                <SkipBack className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                title="Previous year"
+                onClick={() => { setIsPlaying(false); setTlYearIdx((i) => Math.max(0, i - 1)); }}
+                className="p-1 rounded hover:bg-sky-500/20 text-sky-400 disabled:opacity-30"
+                disabled={tlYearIdx === 0}
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </button>
+
+              {/* Year Selector / Badge */}
+              <div className="flex items-center gap-2 px-1">
+                <span className="font-mono font-extrabold text-sm text-sky-300 tracking-tight min-w-[42px] text-center">
+                  {tlYear}
+                </span>
+                <input
+                  type="range"
+                  min={0}
+                  max={tlSourceCfg.years.length - 1}
+                  value={tlYearIdx}
+                  onChange={(e) => { setIsPlaying(false); setTlYearIdx(Number(e.target.value)); }}
+                  className="w-24 sm:w-32 h-1.5 accent-sky-400 cursor-pointer"
+                />
+              </div>
+
+              <button
+                type="button"
+                title="Next year"
+                onClick={() => { setIsPlaying(false); setTlYearIdx((i) => Math.min(tlSourceCfg.years.length - 1, i + 1)); }}
+                className="p-1 rounded hover:bg-sky-500/20 text-sky-400 disabled:opacity-30"
+                disabled={tlYearIdx === tlSourceCfg.years.length - 1}
+              >
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                title="Last year"
+                onClick={() => { setIsPlaying(false); setTlYearIdx(tlSourceCfg.years.length - 1); }}
+                className="p-1 rounded hover:bg-sky-500/20 text-sky-400 disabled:opacity-30"
+                disabled={tlYearIdx === tlSourceCfg.years.length - 1}
+              >
+                <SkipForward className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* Play / Pause Toggle */}
+            <Button
+              size="sm"
+              onClick={() => setIsPlaying((p) => !p)}
+              className={`h-7 px-3 text-xs font-bold gap-1.5 shadow-sm transition-all active:scale-95 ${
+                isPlaying
+                  ? "bg-amber-600 hover:bg-amber-500 text-white animate-pulse"
+                  : "bg-sky-600 hover:bg-sky-500 text-white"
+              }`}
+            >
+              {isPlaying ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3 fill-current" />}
+              <span>{isPlaying ? "Pause" : "Play Timelapse"}</span>
+            </Button>
+
+            {/* Load / Refresh Tile */}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => loadTimelapseTile()}
+              disabled={tlLoading}
+              className="h-7 px-2.5 text-xs font-semibold gap-1.5 text-sky-300 border-sky-500/40 hover:bg-sky-500/10"
+              title="Reload tile layer from Earth Engine"
+            >
+              {tlLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Layers className="w-3 h-3" />}
+              <span>{tlLoading ? "Loading..." : "Update Layer"}</span>
+            </Button>
+
+            {/* Opacity Control */}
+            {timelapseTileUrl && (
+              <div className="flex items-center gap-1.5 bg-background/80 px-2 py-0.5 rounded-lg border border-sky-500/30">
+                <span className="text-[10px] text-muted-foreground font-mono">Opacity:</span>
+                {[0.5, 0.75, 0.85, 1.0].map((val) => (
+                  <button
+                    key={val}
+                    type="button"
+                    onClick={() => setTlOpacity(val)}
+                    className={`text-[10px] font-mono px-1.5 py-0.5 rounded transition-all ${
+                      tlOpacity === val
+                        ? "bg-sky-600 text-white font-bold shadow-sm"
+                        : "text-muted-foreground hover:text-sky-300"
+                    }`}
+                  >
+                    {Math.round(val * 100)}%
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Extract Pixels Button */}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => extractMut.mutate()}
+              disabled={extractMut.isPending || allCombinedSamples.length === 0}
+              className="h-7 px-2.5 text-xs font-medium gap-1.5 border-border/60 hover:bg-muted text-foreground"
+              title="Extract multi-spectral pixel values from this timelapse year for digitized samples"
+            >
+              {extractMut.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <BarChart3 className="w-3 h-3" />}
+              <span>Extract Pixels ({allCombinedSamples.length})</span>
+            </Button>
+
+            {/* Download CSV if extractResult is ready */}
+            {extractResult && (
+              <Button
+                size="sm"
+                onClick={downloadCsv}
+                className="h-7 px-2.5 text-xs font-medium gap-1.5 bg-foreground text-background hover:bg-foreground/90 shadow-2xs"
+                title="Download extracted training pixels CSV table"
+              >
+                <Download className="w-3 h-3" />
+                <span>CSV ({extractResult.n_samples} px)</span>
+              </Button>
+            )}
+
+            {/* Clear Layer */}
+            {timelapseTileUrl && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => { setTimelapseTileUrl(null); setTlStatus(""); }}
+                className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted"
+                title="Remove Timelapse Layer from Map"
+              >
+                <X className="w-3 h-3 mr-1" /> Clear
+              </Button>
+            )}
+          </div>
+
+          {/* Right Status Pill & Close */}
+          <div className="flex items-center gap-3">
+            {tlStatus && (
+              <span className={`text-[11px] font-mono px-2 py-0.5 rounded-full border ${
+                tlStatus.startsWith("⚠")
+                  ? "bg-muted/50 border-border/60 text-muted-foreground"
+                  : "bg-muted/50 border-border/60 text-foreground"
+              }`}>
+                {tlStatus}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => setIsTimelapseDockOpen(false)}
+              className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              title="Close Timelapse Ribbon"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
       
       <div className="flex-1 relative overflow-hidden flex flex-col">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col h-full w-full">
 
         {/* 1. MAP & SAMPLES TAB */}
         <TabsContent value="map" className="h-full w-full m-0 p-0 flex absolute inset-0">
-          <div className="w-96 flex-none bg-card/95 backdrop-blur-xl border-r border-border overflow-y-auto custom-scrollbar z-10 flex flex-col p-4 space-y-4 shadow-xl">
-            <Accordion type="multiple" defaultValue={["add-sample", "study-area"]} className="w-full">
-              
-              {/* Add Sample Accordion */}
-              <AccordionItem value="add-sample" className="border-b-0">
-                <AccordionTrigger className="hover:no-underline py-2">
-                  <div className="flex items-center gap-2">
-                    <Edit className="w-4 h-4 text-emerald-500" />
-                    <span className="font-semibold text-sm">Add Training Sample</span>
-                  </div>
-                </AccordionTrigger>
-                <AccordionContent>
-                  <div className="space-y-4 pt-2">
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-semibold text-muted-foreground">Quick Select Class (or type a new one below)</Label>
-                      <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto p-1.5 border rounded-md bg-muted/20">
-                        {[
-                          { name: "Built-up", color: "#ff0000" },
-                          { name: "Vegetation", color: "#00ff00" },
-                          { name: "Water", color: "#0000ff" },
-                          { name: "Rocks", color: "#8b4513" },
-                          { name: "Swamp", color: "#800080" },
-                          { name: "Forest", color: "#006400" },
-                          { name: "Cropland", color: "#ffff00" },
-                          { name: "Grass", color: "#7cfc00" },
-                          { name: "Shrubland", color: "#a0522d" },
-                          { name: "Mangrove", color: "#004d00" },
-                          { name: "Rural Settlement", color: "#ffa500" },
-                          { name: "Dense Forest", color: "#228b22" },
-                          { name: "Bare Land", color: "#d2b48c" },
-                          { name: "Permanent Water", color: "#4169e1" },
-                          { name: "Plantation Crops", color: "#9acd32" },
-                          { name: "Savanna Woodland", color: "#bdb76b" },
-                          { name: "Dense Urban", color: "#8b0000" },
-                          { name: "Floodplain", color: "#87ceeb" },
-                          { name: "Aquatic Vegetation", color: "#20b2aa" }
-                        ].map((p) => (
-                          <button
-                            key={p.name}
-                            type="button"
-                            onClick={() => { 
-                              setClassLabel(p.name); 
-                              setColor(p.color); 
-                              if (isEditing) {
-                                setTimeout(() => autoStartDrawMode(drawMode, true), 50);
-                              }
-                            }}
-                            className="text-[10px] px-1.5 py-0.5 rounded border flex items-center gap-1 bg-background hover:bg-accent transition-colors"
-                          >
-                            <span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: p.color }} />
-                            {p.name}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="space-y-1">
-                        <Label>Class Label</Label>
-                        <input
-                          value={classLabel}
-                          onChange={(e) => setClassLabel(e.target.value)}
-                          placeholder="e.g. Forest, Urban"
-                          className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label>Numerical ID</Label>
-                        <input
-                          type="number"
-                          value={classValue}
-                          onChange={(e) => setClassValue(parseInt(e.target.value) || 1)}
-                          className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="space-y-1">
-                        <Label>Color</Label>
-                        <input
-                          type="color"
-                          value={color}
-                          onChange={(e) => setColor(e.target.value)}
-                          className="w-full h-9 rounded-md border border-input cursor-pointer p-0.5"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label>Creator</Label>
-                        <input
-                          value={creator}
-                          onChange={(e) => setCreator(e.target.value)}
-                          placeholder="Your name"
-                          className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-                        />
-                      </div>
-                    </div>
-
-                    <Accordion type="single" collapsible className="w-full">
-                      <AccordionItem value="advanced" className="border-none">
-                        <AccordionTrigger className="text-xs text-muted-foreground hover:text-foreground py-1">Advanced Settings (GeoJSON)</AccordionTrigger>
-                        <AccordionContent>
-                          <textarea
-                            value={geoJsonText}
-                            onChange={(e) => setGeoJsonText(e.target.value)}
-                            placeholder='{"type":"Point","coordinates":[29.87,-1.94]}'
-                            rows={4}
-                            className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-ring font-mono mt-2 resize-y"
-                          />
-                        </AccordionContent>
-                      </AccordionItem>
-                    </Accordion>
-
-                    {parseError && <p className="text-xs text-destructive">{parseError}</p>}
-
-                    <Button
-                      className={`w-full gap-2 font-bold transition-all ${isEditing ? "bg-emerald-600 hover:bg-emerald-500 text-white" : ""}`}
-                      onClick={handleSaveSample}
-                      disabled={addMut.isPending || !classLabel || !geoJsonText}
-                    >
-                      {addMut.isPending ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : isEditing ? (
-                        <Save className="w-4 h-4" />
-                      ) : (
-                        <Edit className="w-4 h-4" />
-                      )}
-                      {isEditing ? `Add to Buffer (#${sessionSamples.length + 1})` : "Save Sample"}
-                    </Button>
-                  </div>
-                </AccordionContent>
-              </AccordionItem>
-
-              {/* Study Area Accordion */}
-              <AccordionItem value="study-area" className="border-b-0">
-                <AccordionTrigger className="hover:no-underline py-2">
-                  <div className="flex items-center gap-2">
-                    <MapPin className="w-4 h-4 text-destructive" />
-                    <span className="font-semibold text-sm">Define Study Area</span>
-                  </div>
-                </AccordionTrigger>
-                <AccordionContent>
-                  <div className="space-y-3 pt-2">
-                    <p className="text-xs text-muted-foreground">You must define a study area before digitizing samples.</p>
-                    
-                    <div className="flex gap-2 items-center flex-wrap">
-                      <Button 
-                        size="sm" 
-                        variant={isDrawingStudyArea ? "default" : "outline"} 
-                        className="h-8 text-xs flex-1" 
-                        onClick={() => {
-                          if (isEditing) {
-                            toast({ title: "Stop Edit Session first" });
-                            return;
-                          }
-                          if (!isDrawingStudyArea) {
-                            setIsDrawingStudyArea(true);
-                            setStudyArea(null);
-                            setTimeout(() => autoStartDrawMode("polygon", true), 300);
-                          } else {
-                            setIsDrawingStudyArea(false);
-                          }
-                        }}
-                      >
-                        {isDrawingStudyArea ? "Cancel Draw" : "Draw on Map"}
-                      </Button>
-                      
-                      <div className="relative flex-1">
-                        <input 
-                          type="file" 
-                          accept=".zip" 
-                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                          onChange={async (e) => {
-                            const file = e.target.files?.[0];
-                            if (!file) return;
-                            try {
-                              const buffer = await file.arrayBuffer();
-                              const shp = await import('shpjs');
-                              const geojson = await shp.default(buffer);
-                              setStudyArea(geojson);
-                              toast({ title: "Study Area Uploaded" });
-                            } catch (err) {
-                              console.error(err);
-                              toast({ title: "Upload Failed", description: "Could not parse zip shapefile", variant: "destructive" });
-                            }
-                            e.target.value = '';
-                          }}
-                        />
-                        <Button size="sm" variant="outline" className="h-8 text-xs w-full">Upload .zip Shapefile</Button>
-                      </div>
-                    </div>
-
-                    {studyArea && (
-                      <div className="flex flex-col gap-2 mt-2 bg-destructive/10 p-2 rounded border border-destructive/20">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-medium text-destructive">Study Area Defined</span>
-                          <Badge variant="outline" className="bg-emerald-500/10 text-emerald-600 border-emerald-500/20 text-[10px]">Set</Badge>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              id="show-study-area"
-                              checked={showStudyArea}
-                              onChange={(e) => setShowStudyArea(e.target.checked)}
-                              className="h-3.5 w-3.5 rounded border-gray-300 text-primary focus:ring-primary"
-                            />
-                            <Label htmlFor="show-study-area" className="text-xs cursor-pointer">
-                              Show on Map
-                            </Label>
-                          </div>
-                          <Button size="sm" variant="destructive" className="h-6 text-[10px] px-2" onClick={() => {
-                             setStudyArea(null);
-                             if (isEditing) setIsEditing(false); 
-                          }}>
-                            Clear
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </AccordionContent>
-              </AccordionItem>
-            </Accordion>
-          </div>
-          
-          {/* Right Main Panel: Map and Table stacked vertically */}
-          <div className="flex-1 flex flex-col h-full overflow-hidden">
-            <div className="flex-1 relative bg-muted/10 overflow-hidden flex flex-col">
-              {/* Overlay toolbars inside map area */}
-            {/* Left Overlay toolbars */}
-            <div className="absolute top-4 left-4 right-[24rem] z-[1000] flex flex-col gap-2 pointer-events-none">
-                <div className="pointer-events-auto w-full flex flex-col gap-2 max-w-2xl">
-              <div className="flex flex-wrap items-center gap-4 bg-card p-2 rounded-lg border shadow-sm transition-all duration-200">
-                {isDrawToolFolded ? (
-                  <button
-                    type="button"
-                    onClick={() => setIsDrawToolFolded(false)}
-                    className="flex items-center gap-2 hover:bg-muted p-1 rounded-md transition-colors w-full sm:w-auto"
-                    title="Unfold tools"
-                  >
-                    <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground cursor-pointer">Draw Tool</Label>
-                    <ChevronDown className="w-4 h-4 text-muted-foreground" />
-                  </button>
-                ) : (
-                  <>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <button
-                        type="button"
-                        onClick={() => setIsDrawToolFolded(true)}
-                        className="hover:bg-muted p-1 mr-1 rounded-md transition-colors"
-                        title="Fold toolbar"
-                      >
-                        <ChevronUp className="w-4 h-4 text-muted-foreground" />
-                      </button>
-                      <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground mr-1 hidden sm:inline-block whitespace-nowrap">Draw Tool:</Label>
-                  <button
-                    type="button"
-                    title="Point"
-                    onClick={() => { setDrawMode("point"); autoStartDrawMode("point", isEditing); }}
-                    className={`p-1.5 rounded-md transition-colors flex items-center justify-center ${
-                      drawMode === "point" ? "bg-primary text-primary-foreground shadow-sm" : "bg-muted/50 hover:bg-muted text-muted-foreground"
-                    }`}
-                  >
-                    <MapPin className="w-4 h-4" />
-                  </button>
-                  <button
-                    type="button"
-                    title="Polyline"
-                    onClick={() => { setDrawMode("polyline"); autoStartDrawMode("polyline", isEditing); }}
-                    className={`p-1.5 rounded-md transition-colors flex items-center justify-center ${
-                      drawMode === "polyline" ? "bg-primary text-primary-foreground shadow-sm" : "bg-muted/50 hover:bg-muted text-muted-foreground"
-                    }`}
-                  >
-                    <Activity className="w-4 h-4" />
-                  </button>
-                  <button
-                    type="button"
-                    title="Polygon"
-                    onClick={() => { setDrawMode("polygon"); autoStartDrawMode("polygon", isEditing); }}
-                    className={`p-1.5 rounded-md transition-colors flex items-center justify-center ${
-                      drawMode === "polygon" ? "bg-primary text-primary-foreground shadow-sm" : "bg-muted/50 hover:bg-muted text-muted-foreground"
-                    }`}
-                  >
-                    <Layers className="w-4 h-4" />
-                  </button>
-                  <button
-                    type="button"
-                    title="Pan"
-                    onClick={() => { 
-                      cancelDrawMode(); 
-                      setDrawMode("pan"); 
-                    }}
-                    className={`p-1.5 rounded-md transition-colors flex items-center justify-center ${
-                      drawMode === "pan" ? "bg-primary text-primary-foreground shadow-sm" : "bg-muted/50 hover:bg-muted text-muted-foreground"
-                    }`}
-                  >
-                    <span className="w-4 h-4 text-center leading-none">🖐️</span>
-                  </button>
-                  <button
-                    type="button"
-                    title="Rectangle"
-                    onClick={() => { setDrawMode("rectangle"); autoStartDrawMode("rectangle", isEditing); }}
-                    className={`p-1.5 rounded-md transition-colors flex items-center justify-center ${
-                      drawMode === "rectangle" ? "bg-primary text-primary-foreground shadow-sm" : "bg-muted/50 hover:bg-muted text-muted-foreground"
-                    }`}
-                  >
-                    <Square className="w-4 h-4" />
-                  </button>
-                  <button
-                    type="button"
-                    title="Circle"
-                    onClick={() => { setDrawMode("circle"); autoStartDrawMode("circle", isEditing); }}
-                    className={`p-1.5 rounded-md transition-colors flex items-center justify-center ${
-                      drawMode === "circle" ? "bg-primary text-primary-foreground shadow-sm" : "bg-muted/50 hover:bg-muted text-muted-foreground"
-                    }`}
-                  >
-                    <Circle className="w-4 h-4" />
-                  </button>
+          <div className={`flex-none bg-card/90 backdrop-blur-xl border-r border-border/60 overflow-y-auto custom-scrollbar z-10 flex flex-col transition-all duration-300 shadow-xl ${
+            isLeftPanelOpen ? "w-96 p-4 space-y-4" : "w-0 p-0 overflow-hidden border-r-0"
+          }`}>
+            {/* Table of Contents Header */}
+            <div className="flex items-center justify-between pb-2 border-b border-border/60">
+              <div className="flex items-center gap-2">
+                <div className="p-1 rounded bg-muted/60 text-muted-foreground border border-border/50">
+                  <Layers className="w-3.5 h-3.5" />
                 </div>
-
-                <div className="flex items-center gap-2 flex-wrap">
-                  {!isEditing ? (
-                    <Button
-                      size="sm"
-                      className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold gap-1.5 text-xs shadow-sm h-8"
-                      disabled={!studyArea}
-                      onClick={() => {
-                        setIsEditing(true);
-                        setSessionSamples([]);
-                        toast({ title: "Edit Session Started 🟢", description: "Digitize features and click Stop Edit when finished." });
-                        setTimeout(() => autoStartDrawMode(drawMode, true), 300);
-                      }}
-                    >
-                      <Play className="w-3.5 h-3.5 fill-current" /> Start Edit Session
-                    </Button>
-                  ) : (
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      className="font-bold gap-1.5 text-xs shadow-sm h-8 animate-pulse"
-                      onClick={() => {
-                        if (sessionSamples.length === 0) {
-                          setIsEditing(false);
-                          toast({ title: "Edit Session Stopped", description: "No features were digitized." });
-                        } else {
-                          setDatasetNameInput(`Training_Session_${new Date().toISOString().slice(0,10)}`);
-                          setIsSaveModalOpen(true);
-                        }
-                      }}
-                    >
-                      <StopCircle className="w-3.5 h-3.5" /> Stop Edit Session ({sessionSamples.length})
-                    </Button>
-                  )}
-
-                  <select 
-                    value={mapStyle} 
-                    onChange={(e) => setMapStyle(e.target.value as "osm" | "satellite" | "none")}
-                    className="bg-muted text-xs px-2 py-1 rounded border-input border font-medium h-8"
-                  >
-                    <option value="osm">OpenStreetMap</option>
-                    <option value="satellite">Esri Satellite</option>
-                    <option value="none">Blank (No Basemap)</option>
-                  </select>
-                  <Button
-                    type="button"
-                    onClick={() => setIsAddDataModalOpen(true)}
-                    className={`cursor-pointer text-xs flex items-center gap-2 bg-emerald-900/60 hover:bg-emerald-800 text-emerald-300 px-3 h-8 rounded-md transition-colors border border-emerald-500/30 shadow-sm ${uploadBusy ? 'opacity-50 pointer-events-none' : ''}`} title="Upload Image / Data to view map for training"
-                  >
-                     {uploadBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <span>📁</span>}
-                     {uploadBusy ? 'Uploading...' : 'Add Data'}
-                  </Button>
+                <div>
+                  <h3 className="font-semibold text-xs uppercase tracking-wider text-foreground/90">
+                    Table of Contents
+                  </h3>
+                  <span className="text-[10px] text-muted-foreground font-mono">
+                    Feature Layers &amp; Basemap
+                  </span>
                 </div>
-                </>
-              )}
               </div>
+              <div className="flex items-center gap-1">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setIsLeftPanelOpen(false)}
+                  className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
+                  title="Collapse Table of Contents (Full Map View)"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </Button>
+              </div>
+            </div>
 
-              {/* Map Layer Visibility & Spatial Bias Evaluation Controls */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-muted/40 p-2 rounded-lg border text-xs transition-all duration-200">
-                {isMapLayerFolded ? (
+            {/* TOC View Toolbar & Filter */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                <div className="flex items-center gap-1 bg-muted/40 p-0.5 rounded border border-border/50">
                   <button
                     type="button"
-                    onClick={() => setIsMapLayerFolded(false)}
-                    className="flex items-center gap-2 hover:bg-muted p-1 rounded-md transition-colors w-full sm:w-auto"
-                    title="Unfold tools"
+                    className="p-1 rounded bg-background text-foreground shadow-2xs"
+                    title="List by Drawing Order"
                   >
-                    <Target className="w-3.5 h-3.5 text-emerald-500" />
-                    <span className="font-semibold text-muted-foreground cursor-pointer uppercase tracking-wider text-[10px]">Layers</span>
-                    <ChevronDown className="w-4 h-4 text-muted-foreground" />
+                    <Layers className="w-3 h-3 text-foreground" />
                   </button>
-                ) : (
-                  <>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setIsMapLayerFolded(true)}
-                        className="hover:bg-muted p-1 rounded-md transition-colors mr-1"
-                        title="Fold toolbar"
-                      >
-                        <ChevronUp className="w-4 h-4 text-muted-foreground" />
-                      </button>
-                      <span className="font-semibold text-muted-foreground flex items-center gap-1">
-                        <Target className="w-3.5 h-3.5 text-emerald-500" /> Map Layer Visibility:
-                      </span>
                   <button
                     type="button"
                     onClick={() => setShowAllSamples(!showAllSamples)}
-                    className={`px-2 py-0.5 rounded font-medium transition-colors flex items-center gap-1 border ${
-                      showAllSamples ? "bg-emerald-950/40 text-emerald-400 border-emerald-500/30" : "bg-background text-muted-foreground"
-                    }`}
+                    className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors"
+                    title={showAllSamples ? "Hide All Layers" : "Show All Layers"}
                   >
-                    {showAllSamples ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3 text-destructive" />}
-                    {showAllSamples ? "All Map Layers Visible" : "All Layers Hidden"}
+                    {showAllSamples ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsAddDataModalOpen(true)}
+                    className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors"
+                    title="Add Data Layer"
+                  >
+                    <Upload className="w-3 h-3" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsClassPaletteModalOpen(true)}
+                    className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors"
+                    title="Class Palette Studio"
+                  >
+                    <Palette className="w-3 h-3" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab("samples")}
+                    className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors"
+                    title="Open Attribute Table"
+                  >
+                    <Table className="w-3 h-3" />
+                  </button>
+                </div>
+
+                <span className="text-[10px] font-mono text-muted-foreground/80">Drawing Order</span>
+              </div>
+
+              {/* Layer Filter Search */}
+              <div className="relative">
+                <Search className="w-3 h-3 absolute left-2.5 top-2 text-muted-foreground" />
+                <input
+                  value={tocFilter}
+                  onChange={(e) => setTocFilter(e.target.value)}
+                  placeholder="Filter layers &amp; classes..."
+                  className="w-full pl-8 pr-2 py-1 text-xs rounded-md border border-border/60 bg-muted/20 focus:outline-none focus:ring-1 focus:ring-border h-7 font-sans"
+                />
+                {tocFilter && (
+                  <button
+                    type="button"
+                    onClick={() => setTocFilter("")}
+                    className="absolute right-2 top-2 text-muted-foreground hover:text-foreground text-xs"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Layers Tree (Drawing Order) */}
+            <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-0.5">
+
+              {/* ── 1. Operational Layer: Training Samples ── */}
+              <div className="rounded-lg border border-border/50 bg-card/40 overflow-hidden shadow-2xs">
+                {/* Group Header */}
+                <div className="flex items-center justify-between p-2 bg-muted/30 border-b border-border/40 text-xs">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <button
+                      type="button"
+                      onClick={() => setIsSamplesLayerExpanded((p) => !p)}
+                      className="p-0.5 text-muted-foreground hover:text-foreground"
+                      title={isSamplesLayerExpanded ? "Collapse Layer Group" : "Expand Layer Group"}
+                    >
+                      {isSamplesLayerExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
+                    </button>
+                    <input
+                      type="checkbox"
+                      checked={showAllSamples}
+                      onChange={(e) => setShowAllSamples(e.target.checked)}
+                      className="h-3.5 w-3.5 rounded border-border/60 cursor-pointer"
+                      title="Toggle visibility of all sample features"
+                    />
+                    <div className="flex items-center gap-1 truncate font-semibold text-foreground">
+                      <Target className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                      <span className="truncate">Training Samples</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 font-mono bg-muted/40 text-muted-foreground border-border/50">
+                      {allCombinedSamples.length}
+                    </Badge>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setActiveTab("samples")}
+                      className="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-foreground gap-0.5"
+                      title="Open Attribute Table for Training Samples"
+                    >
+                      <Table className="w-2.5 h-2.5" />
+                      <span>Table</span>
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setIsClassPaletteModalOpen(true)}
+                      className="h-5 px-1 text-[10px] text-muted-foreground hover:text-foreground"
+                      title="Add or manage classes"
+                    >
+                      + Class
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Sub-items: Classes List */}
+                {isSamplesLayerExpanded && (
+                  <div className="p-1 space-y-0.5">
+                    {Object.keys(groupedSamples).length === 0 ? (
+                      <div className="p-3 text-center text-[11px] text-muted-foreground">
+                        No training samples yet. Click <strong>+ Class</strong> or <strong>Start Draw</strong> to digitize.
+                      </div>
+                    ) : (
+                      Object.entries(groupedSamples)
+                        .filter(([cName]) => !tocFilter || cName.toLowerCase().includes(tocFilter.toLowerCase()))
+                        .map(([cName, group]) => {
+                          const isHidden = !!hiddenClasses[cName];
+                          const isCurrentActive = classLabel.toLowerCase() === cName.toLowerCase();
+                          const count = group.items.length;
+                          const swatchColor = getRefinedColor(group.color, cName);
+                          return (
+                            <div
+                              key={cName}
+                              className={`flex items-center justify-between px-2 py-1.5 rounded-md text-xs transition-colors group ${
+                                isCurrentActive
+                                  ? "bg-muted/60 border border-border/60 text-foreground"
+                                  : "hover:bg-muted/30 border border-transparent"
+                              }`}
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <input
+                                  type="checkbox"
+                                  checked={!isHidden}
+                                  onChange={() => {
+                                    setHiddenClasses((prev) => ({ ...prev, [cName]: !prev[cName] }));
+                                  }}
+                                  className="h-3 w-3 rounded border-border/60 cursor-pointer shrink-0"
+                                  title={`Toggle visibility for class '${cName}'`}
+                                />
+                                {/* Minimalist Symbology Swatch */}
+                                <span
+                                  className="w-3 h-3 rounded-xs border border-white/20 shadow-2xs shrink-0 cursor-pointer"
+                                  style={{ backgroundColor: swatchColor }}
+                                  onClick={() => {
+                                    setClassLabel(cName);
+                                    setColor(swatchColor);
+                                    toast({ title: `Active Class: ${cName}`, description: "Selected for digitizing." });
+                                  }}
+                                  title={`Click to set '${cName}' as active drawing class`}
+                                />
+                                <span
+                                  className={`truncate cursor-pointer font-medium ${
+                                    isHidden ? "line-through text-muted-foreground/60" : "text-foreground"
+                                  } ${isCurrentActive ? "font-semibold" : ""}`}
+                                  onClick={() => {
+                                    setClassLabel(cName);
+                                    setColor(swatchColor);
+                                    toast({ title: `Active Class: ${cName}`, description: "Selected for digitizing." });
+                                  }}
+                                >
+                                  {cName}
+                                </span>
+                              </div>
+
+                              <div className="flex items-center gap-1 shrink-0">
+                                {isCurrentActive && (
+                                  <span className="w-1.5 h-1.5 rounded-full bg-foreground inline-block mr-1" title="Currently active digitizing class" />
+                                )}
+                                <span className={`text-[10px] font-mono px-1 rounded ${count > 0 ? "bg-muted/60 text-muted-foreground" : "text-muted-foreground/40"}`}>
+                                  {count}
+                                </span>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => {
+                                    setClassLabel(cName);
+                                    setColor(swatchColor);
+                                    if (!isEditing && studyArea) {
+                                      setIsEditing(true);
+                                      setSessionSamples([]);
+                                      setTimeout(() => autoStartDrawMode(drawMode === "pan" ? "point" : drawMode, true), 200);
+                                    }
+                                  }}
+                                  className="h-5 w-5 p-0 text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
+                                  title="Digitize this class"
+                                >
+                                  <Edit className="w-3 h-3" />
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => {
+                                    if (confirm(`Delete all samples for class '${cName}'?`)) {
+                                      deleteClassMut.mutate(cName);
+                                    }
+                                  }}
+                                  className="h-5 w-5 p-0 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+                                  title="Delete class samples"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </Button>
+                              </div>
+                            </div>
+                          );
+                        })
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* ── 2. Boundary Layer: Study Area (AOI Boundary) ── */}
+              <div className={`rounded-lg border p-2 text-xs shadow-2xs space-y-1.5 transition-all ${
+                !studyArea ? "border-sky-500/40 bg-sky-500/5 ring-1 ring-sky-500/20" : "border-border/50 bg-card/40"
+              }`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <input
+                      type="checkbox"
+                      checked={showStudyArea}
+                      disabled={!studyArea}
+                      onChange={(e) => setShowStudyArea(e.target.checked)}
+                      className={`h-3.5 w-3.5 rounded border-border/60 shrink-0 ${!studyArea ? "opacity-30 cursor-not-allowed" : "cursor-pointer"}`}
+                      title={!studyArea ? "Define Study Area first" : "Toggle study area boundary visibility"}
+                    />
+                    {/* Clean Boundary Swatch */}
+                    <div className={`w-3.5 h-3.5 border border-dashed rounded-xs shrink-0 ${
+                      !studyArea ? "border-sky-400/60 bg-sky-500/15" : "border-emerald-400/60 bg-emerald-500/20"
+                    }`} />
+                    <span className="font-medium text-foreground truncate">Study Area (AOI)</span>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <Badge variant="outline" className={`text-[9px] px-1.5 py-0 h-4 font-mono ${
+                      !studyArea
+                        ? "border-sky-500/50 text-sky-300 bg-sky-500/15 font-semibold"
+                        : "border-emerald-500/40 text-emerald-400 bg-emerald-500/10"
+                    }`}>
+                      {studyArea ? "Defined" : "Required"}
+                    </Badge>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setIsStudyAreaModalOpen(true)}
+                      className={`h-5 px-1 text-[10px] ${
+                        !studyArea ? "text-sky-300 hover:text-sky-200 hover:bg-sky-500/20" : "text-muted-foreground hover:text-foreground"
+                      }`}
+                      title="Configure AOI"
+                    >
+                      <Edit className="w-3 h-3" />
+                    </Button>
+                    {studyArea && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={clearStudyArea}
+                        className="h-5 w-5 p-0 text-muted-foreground hover:text-destructive"
+                        title="Clear AOI"
+                      >
+                        <X className="w-3 h-3" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* ── 3. Model Layer: Supervised Classification Raster (if active) ── */}
+              {classifyResult?.tile_url && (
+                <div className="rounded-lg border border-border/60 bg-muted/20 p-2 text-xs shadow-2xs space-y-1.5 animate-in fade-in">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <input
+                        type="checkbox"
+                        checked={showClassifyResult}
+                        onChange={(e) => setShowClassifyResult(e.target.checked)}
+                        className="h-3.5 w-3.5 rounded border-border/60 cursor-pointer shrink-0"
+                        title="Toggle classification raster overlay"
+                      />
+                      <div className="w-3.5 h-3.5 rounded-xs bg-muted border border-border shrink-0 shadow-2xs" />
+                      <span className="font-medium text-foreground truncate">Supervised Map</span>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {classifyResult.accuracy?.is_evaluated && typeof classifyResult.accuracy.overall_accuracy === "number" && (
+                        <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 font-mono border-border/60 text-muted-foreground bg-muted/40">
+                          {(classifyResult.accuracy.overall_accuracy * 100).toFixed(0)}% Acc
+                        </Badge>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => setClassifyResult(null)}
+                        className="h-5 w-5 p-0 text-muted-foreground hover:text-destructive"
+                        title="Clear classification raster"
+                      >
+                        <X className="w-3 h-3" />
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ── 4. Remote Sensing Layer: Timelapse / Satellite Imagery (if active) ── */}
+              {timelapseTileUrl && (
+                <div className="rounded-lg border border-border/60 bg-muted/20 p-2 text-xs shadow-2xs space-y-1.5 animate-in fade-in">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <input
+                        type="checkbox"
+                        checked={!!timelapseTileUrl}
+                        onChange={() => {
+                          if (timelapseTileUrl) setTimelapseTileUrl(null);
+                          else loadTimelapseTile();
+                        }}
+                        className="h-3.5 w-3.5 rounded border-border/60 cursor-pointer shrink-0"
+                        title="Toggle satellite timelapse imagery"
+                      />
+                      <Satellite className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                      <span className="font-medium text-foreground truncate">
+                        {tlSource === "sentinel2" ? "Sentinel-2" : tlSource === "landsat" ? "Landsat-8" : "GEDI LiDAR"}
+                      </span>
+                    </div>
+                    <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 font-mono border-border/60 text-muted-foreground bg-muted/40">
+                      {tlYear} ({Math.round(tlOpacity * 100)}%)
+                    </Badge>
+                  </div>
+                </div>
+              )}
+
+              {/* ── 5. Analytical Layer: Spatial Sampling Bias (1km Rings) ── */}
+              <div className="rounded-lg border border-border/50 bg-card/40 p-2 text-xs shadow-2xs">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <input
+                      type="checkbox"
+                      checked={showCoverageBuffers}
+                      onChange={(e) => setShowCoverageBuffers(e.target.checked)}
+                      className="h-3.5 w-3.5 rounded border-border/60 cursor-pointer shrink-0"
+                      title="Toggle 1km spatial sampling bias coverage rings"
+                    />
+                    <div className="w-3.5 h-3.5 rounded-full border border-dashed border-muted-foreground/60 shrink-0" />
+                    <span className="font-medium text-foreground truncate">1km Bias Rings</span>
+                  </div>
+                  <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 font-mono text-muted-foreground border-border/50">
+                    Buffer
+                  </Badge>
+                </div>
+              </div>
+
+              {/* ── 6. Basemap Layer ── */}
+              <div className="rounded-lg border border-border/50 bg-card/40 p-2 text-xs shadow-2xs space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <input
+                      type="checkbox"
+                      checked={mapStyle !== "none"}
+                      onChange={(e) => setMapStyle(e.target.checked ? "satellite" : "none")}
+                      className="h-3.5 w-3.5 rounded border-border/60 cursor-pointer shrink-0"
+                      title="Toggle basemap"
+                    />
+                    <Layers className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                    <span className="font-medium text-foreground truncate">Basemap</span>
+                  </div>
+                  <select
+                    value={mapStyle}
+                    onChange={(e) => setMapStyle(e.target.value as any)}
+                    className="bg-muted/50 text-[10px] px-1.5 py-0.5 rounded border border-border/50 font-medium h-6 focus:outline-none text-foreground"
+                  >
+                    <option value="satellite">Esri Satellite</option>
+                    <option value="osm">OpenStreetMap</option>
+                    <option value="none">Blank</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Contents Pane Footer: Dataset Readiness & Quality Diagnostics */}
+            <div className="mt-auto pt-3 border-t border-border/60 space-y-2">
+              <button
+                type="button"
+                onClick={() => setIsReadinessModalOpen(true)}
+                className="w-full p-2.5 rounded-lg border border-border/60 bg-muted/30 hover:bg-muted/50 text-left transition-colors shadow-2xs"
+                title="Click to inspect ML Dataset Readiness &amp; Quality Diagnostics"
+              >
+                <div className="flex items-center justify-between text-xs mb-1">
+                  <span className="font-semibold uppercase tracking-wider text-[10px] flex items-center gap-1.5 text-foreground/90">
+                    <span className={`w-1.5 h-1.5 rounded-full ${classBalanceMetrics.status === "healthy" ? "bg-emerald-400" : "bg-amber-400"}`} />
+                    Dataset Health
+                  </span>
+                  <Badge variant="outline" className="text-[9px] font-mono px-1.5 py-0 h-4 border-border/50 text-muted-foreground bg-muted/40">
+                    {classBalanceMetrics.status === "healthy" ? "Healthy" : classBalanceMetrics.status === "imbalanced" ? "Imbalanced" : "Low Samples"}
+                  </Badge>
+                </div>
+                <p className="text-[11px] text-muted-foreground leading-snug line-clamp-2">
+                  {classBalanceMetrics.message}
+                </p>
+              </button>
+
+              <div className="flex items-center justify-between text-[10px] font-mono text-muted-foreground px-1">
+                <span>{Object.keys(groupedSamples).length} Classes &bull; {allCombinedSamples.length} Samples</span>
+                <span className="font-medium text-muted-foreground">{isEditing ? "● Digitizing" : "○ Ready"}</span>
+              </div>
+            </div>
+          </div>
+          
+          {/* Right Main Panel: Map area with Docked Top Sub-Bar (Option 1) */}
+          <div className="flex-1 flex flex-col h-full overflow-hidden">
+            {/* Docked Map Top Sub-Bar */}
+            <div className="flex-none bg-card/90 backdrop-blur-md border-b border-border/60 px-3 py-2 z-10 flex flex-wrap items-center justify-between gap-2 shadow-2xs">
+              {/* Left: Sidebar Toggle, Study Area, Class Palette, Readiness, Vector Draw & Session */}
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Left Sidebar Toggle Button */}
+                <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setIsLeftPanelOpen((p) => !p)}
+                    className="h-8 px-2 text-xs font-medium gap-1 text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
+                    title={isLeftPanelOpen ? "Collapse Side Panel (Full Map View)" : "Expand Side Panel"}
+                  >
+                    {isLeftPanelOpen ? (
+                      <>
+                        <ChevronLeft className="w-3.5 h-3.5" />
+                        <span className="hidden xl:inline text-[11px]">Hide Panel</span>
+                      </>
+                    ) : (
+                      <>
+                        <ChevronRight className="w-3.5 h-3.5" />
+                        <span className="hidden xl:inline text-[11px]">Show Panel</span>
+                      </>
+                    )}
+                  </Button>
+
+                  <div className="h-4 w-[1px] bg-border/60 mx-0.5 hidden sm:block" />
+
+                  {/* Study Area (AOI) Control Button */}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setIsStudyAreaModalOpen(true)}
+                    className={`h-8 gap-1.5 text-xs font-medium px-2.5 transition-all shadow-2xs ${
+                      !studyArea
+                        ? "border-sky-500/70 bg-sky-500/15 text-sky-200 hover:bg-sky-500/25 hover:border-sky-400 font-semibold ring-1 ring-sky-500/30"
+                        : "border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 hover:text-emerald-200"
+                    }`}
+                    title={!studyArea ? "Prerequisite: Define or Upload Study Area (AOI) to unlock training tools" : "Configure or inspect Study Area (AOI)"}
+                  >
+                    {!studyArea ? (
+                      <>
+                        <span className="relative flex h-2 w-2 shrink-0">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-sky-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-sky-400"></span>
+                        </span>
+                        <Crosshair className="w-3.5 h-3.5 text-sky-400" />
+                        <span>1. Define AOI</span>
+                        <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-sky-500/25 text-sky-300 border border-sky-500/40">Req</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span>AOI: Defined</span>
+                      </>
+                    )}
+                  </Button>
+
+                  {/* Active Class Swatch & Palette Studio Trigger */}
+                  <button
+                    type="button"
+                    onClick={() => setIsClassPaletteModalOpen(true)}
+                    className="flex items-center gap-1.5 hover:bg-muted/50 px-2.5 py-1 h-8 rounded-md text-xs font-medium transition-all border border-border/60 bg-muted/20 shadow-2xs text-foreground"
+                    title="Open Land Cover Class Palette Studio"
+                  >
+                    <span className="w-2.5 h-2.5 rounded-full inline-block shadow-2xs shrink-0" style={{ backgroundColor: getRefinedColor(color, classLabel) }} />
+                    <span className="max-w-[100px] truncate">{classLabel || "Select Class"}</span>
+                    <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 font-mono text-muted-foreground border-border/50 bg-muted/40">
+                      {groupedSamples[classLabel]?.items.length || 0}
+                    </Badge>
+                    <Palette className="w-3 h-3 text-muted-foreground ml-0.5" />
                   </button>
 
-                  {Object.keys(hiddenClasses).filter((k) => hiddenClasses[k]).length > 0 && (
-                    <Badge variant="destructive" className="text-[10px] h-5 px-1.5 font-mono">
-                      {Object.keys(hiddenClasses).filter((k) => hiddenClasses[k]).length} class(es) hidden
-                    </Badge>
+                  {/* Dataset Readiness & Quality Monitor Button */}
+                  <button
+                    type="button"
+                    onClick={() => setIsReadinessModalOpen(true)}
+                    className="px-2.5 h-8 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 border border-border/60 bg-muted/20 hover:bg-muted/50 text-muted-foreground hover:text-foreground shadow-2xs"
+                    title="Inspect Dataset Readiness &amp; Sample Quality Balance"
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full ${classBalanceMetrics.status === "healthy" ? "bg-emerald-400" : "bg-amber-400"}`} />
+                    <span className="hidden sm:inline">Readiness:</span>
+                    <span>{classBalanceMetrics.status === "healthy" ? "Healthy" : classBalanceMetrics.status === "imbalanced" ? "Imbalanced" : classBalanceMetrics.status === "low_samples" ? "Low Samples" : "Ready"}</span>
+                  </button>
+
+                  <div className="h-4 w-[1px] bg-border/60 mx-0.5 hidden sm:block" />
+
+                  {/* Vector Drawing Tools */}
+                  <div className="flex items-center gap-0.5 bg-muted/30 p-0.5 rounded-lg border border-border/50">
+                    <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70 px-1 hidden sm:inline-block">Draw:</span>
+                    <button
+                      type="button"
+                      title="Pan Mode (Navigation)"
+                      onClick={() => { 
+                        cancelDrawMode(); 
+                        setDrawMode("pan"); 
+                      }}
+                      className={`p-1.5 rounded-md transition-all flex items-center justify-center ${
+                        drawMode === "pan" ? "bg-foreground text-background shadow-xs font-medium" : "hover:bg-muted/50 text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      <Hand className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      title={!studyArea ? "Study Area (AOI) required before drawing points" : "Point Feature (Single coordinate sample)"}
+                      onClick={() => { 
+                        if (!studyArea) {
+                          toast({ title: "Study Area Required", description: "Please define an AOI boundary before selecting drawing tools.", variant: "destructive" });
+                          return;
+                        }
+                        setDrawMode("point"); 
+                        autoStartDrawMode("point", isEditing); 
+                      }}
+                      className={`p-1.5 rounded-md transition-all flex items-center justify-center ${
+                        !studyArea
+                          ? "opacity-30 cursor-not-allowed text-muted-foreground/40 hover:bg-transparent"
+                          : drawMode === "point"
+                            ? "bg-foreground text-background shadow-xs font-semibold"
+                            : "hover:bg-muted/50 text-muted-foreground hover:text-foreground cursor-pointer"
+                      }`}
+                    >
+                      <MapPin className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      title={!studyArea ? "Study Area (AOI) required before drawing lines" : "Polyline Feature (Linear sample / transect)"}
+                      onClick={() => { 
+                        if (!studyArea) {
+                          toast({ title: "Study Area Required", description: "Please define an AOI boundary before selecting drawing tools.", variant: "destructive" });
+                          return;
+                        }
+                        setDrawMode("polyline"); 
+                        autoStartDrawMode("polyline", isEditing); 
+                      }}
+                      className={`p-1.5 rounded-md transition-all flex items-center justify-center ${
+                        !studyArea
+                          ? "opacity-30 cursor-not-allowed text-muted-foreground/40 hover:bg-transparent"
+                          : drawMode === "polyline"
+                            ? "bg-foreground text-background shadow-xs font-semibold"
+                            : "hover:bg-muted/50 text-muted-foreground hover:text-foreground cursor-pointer"
+                      }`}
+                    >
+                      <Activity className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      title={!studyArea ? "Study Area (AOI) required before drawing polygons" : "Polygon Feature (Area polygon sample)"}
+                      onClick={() => { 
+                        if (!studyArea) {
+                          toast({ title: "Study Area Required", description: "Please define an AOI boundary before selecting drawing tools.", variant: "destructive" });
+                          return;
+                        }
+                        setDrawMode("polygon"); 
+                        autoStartDrawMode("polygon", isEditing); 
+                      }}
+                      className={`p-1.5 rounded-md transition-all flex items-center justify-center ${
+                        !studyArea
+                          ? "opacity-30 cursor-not-allowed text-muted-foreground/40 hover:bg-transparent"
+                          : drawMode === "polygon"
+                            ? "bg-foreground text-background shadow-xs font-semibold"
+                            : "hover:bg-muted/50 text-muted-foreground hover:text-foreground cursor-pointer"
+                      }`}
+                    >
+                      <Layers className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      title={!studyArea ? "Study Area (AOI) required before drawing rectangles" : "Rectangle Box"}
+                      onClick={() => { 
+                        if (!studyArea) {
+                          toast({ title: "Study Area Required", description: "Please define an AOI boundary before selecting drawing tools.", variant: "destructive" });
+                          return;
+                        }
+                        setDrawMode("rectangle"); 
+                        autoStartDrawMode("rectangle", isEditing); 
+                      }}
+                      className={`p-1.5 rounded-md transition-all flex items-center justify-center ${
+                        !studyArea
+                          ? "opacity-30 cursor-not-allowed text-muted-foreground/40 hover:bg-transparent"
+                          : drawMode === "rectangle"
+                            ? "bg-foreground text-background shadow-xs font-semibold"
+                            : "hover:bg-muted/50 text-muted-foreground hover:text-foreground cursor-pointer"
+                      }`}
+                    >
+                      <Square className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      title={!studyArea ? "Study Area (AOI) required before drawing circular buffers" : "Circle Buffer"}
+                      onClick={() => { 
+                        if (!studyArea) {
+                          toast({ title: "Study Area Required", description: "Please define an AOI boundary before selecting drawing tools.", variant: "destructive" });
+                          return;
+                        }
+                        setDrawMode("circle"); 
+                        autoStartDrawMode("circle", isEditing); 
+                      }}
+                      className={`p-1.5 rounded-md transition-all flex items-center justify-center ${
+                        !studyArea
+                          ? "opacity-30 cursor-not-allowed text-muted-foreground/40 hover:bg-transparent"
+                          : drawMode === "circle"
+                            ? "bg-foreground text-background shadow-xs font-semibold"
+                            : "hover:bg-muted/50 text-muted-foreground hover:text-foreground cursor-pointer"
+                      }`}
+                    >
+                      <Circle className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  {/* Edit Session Controls */}
+                  {!isEditing ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={!studyArea}
+                      onClick={() => {
+                        if (!studyArea) {
+                          toast({
+                            variant: "destructive",
+                            title: "Study Area Required",
+                            description: "Please define an AOI boundary before starting a digitization session.",
+                          });
+                          return;
+                        }
+                        setIsEditing(true);
+                        setSessionSamples([]);
+                        toast({ title: "Edit Session Started", description: `Digitizing '${classLabel}'. Click on map to add features.` });
+                        setTimeout(() => autoStartDrawMode(drawMode === "pan" ? "point" : drawMode, true), 300);
+                      }}
+                      className={`font-medium gap-1.5 text-xs shadow-2xs h-8 px-3 transition-all ${
+                        !studyArea
+                          ? "opacity-40 cursor-not-allowed border-dashed border-border/50 text-muted-foreground/50 bg-muted/10 hover:bg-muted/10 hover:text-muted-foreground/50 pointer-events-auto"
+                          : "bg-foreground text-background hover:bg-foreground/90 font-semibold border border-foreground/30 shadow-xs active:scale-95 cursor-pointer"
+                      }`}
+                      title={!studyArea ? "Action Locked: Define Study Area (AOI) first to start drawing features" : "Start digitizing samples on the map"}
+                    >
+                      {!studyArea ? (
+                        <>
+                          <Lock className="w-3 h-3 text-muted-foreground/50 shrink-0" />
+                          <span className="text-muted-foreground/50">Start Draw ({classLabel || "Class"})</span>
+                          <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-muted/30 text-muted-foreground/50 border border-border/30">Locked</span>
+                        </>
+                      ) : (
+                        <>
+                          <Edit className="w-3.5 h-3.5 text-background shrink-0" />
+                          <span>Start Draw ({classLabel || "Class"})</span>
+                        </>
+                      )}
+                    </Button>
+                  ) : (
+                    <div className="flex items-center gap-1.5">
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        className="font-medium gap-1 text-xs shadow-2xs h-8 px-2.5"
+                        onClick={handleStopSession}
+                        title="Halt digitization session"
+                      >
+                        <StopCircle className="w-3.5 h-3.5" /> Stop Draw
+                      </Button>
+                      {sessionSamples.length > 0 && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="font-medium gap-1 text-xs shadow-2xs h-8 border-border/60 hover:bg-muted/50 text-foreground px-2.5"
+                          onClick={() => {
+                            setDatasetNameInput(`Training_Session_${new Date().toISOString().slice(0, 10)}`);
+                            setIsSaveModalOpen(true);
+                          }}
+                          title="Save buffered session features"
+                        >
+                          <Save className="w-3.5 h-3.5" /> Save Batch ({sessionSamples.length})
+                        </Button>
+                      )}
+                    </div>
                   )}
                 </div>
 
-                <div className="flex items-center gap-2">
+                {/* Right: Basemap Selector, Add Data, Layer Visibility, Sampling Bias */}
+                <div className="flex items-center gap-2 flex-wrap">
+                  {/* Basemap Select */}
+                  <select 
+                    value={mapStyle} 
+                    onChange={(e) => setMapStyle(e.target.value as "osm" | "satellite" | "none")}
+                    className="bg-muted/40 text-xs px-2.5 py-1 rounded-md border border-border/60 font-medium h-8 focus:outline-none text-foreground shadow-2xs"
+                    title="Select background basemap style"
+                  >
+                    <option value="satellite">Esri Satellite</option>
+                    <option value="osm">OpenStreetMap</option>
+                    <option value="none">Blank Canvas</option>
+                  </select>
+
+                  {/* Add Data */}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setIsAddDataModalOpen(true)}
+                    className={`text-xs flex items-center gap-1.5 border border-border/60 bg-muted/20 hover:bg-muted/50 text-muted-foreground hover:text-foreground px-2.5 h-8 rounded-md transition-colors shadow-2xs ${uploadBusy ? 'opacity-50 pointer-events-none' : ''}`}
+                    title="Upload Shapefile, GeoJSON, or GeoTIFF"
+                  >
+                    {uploadBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                    <span>{uploadBusy ? 'Uploading...' : 'Add Data'}</span>
+                  </Button>
+
+                  <div className="h-4 w-[1px] bg-border/60 mx-0.5 hidden sm:block" />
+
+                  {/* Layer Visibility Toggle */}
+                  <button
+                    type="button"
+                    onClick={() => setShowAllSamples(!showAllSamples)}
+                    className={`px-2.5 h-8 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 border border-border/60 shadow-2xs ${
+                      showAllSamples ? "bg-muted/50 text-foreground" : "bg-muted/20 text-muted-foreground hover:bg-muted/50"
+                    }`}
+                    title="Toggle visibility of all sample markers on the map"
+                  >
+                    {showAllSamples ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                    <span>{showAllSamples ? "Layers Visible" : "Layers Hidden"}</span>
+                  </button>
+
+                  {Object.keys(hiddenClasses).filter((k) => hiddenClasses[k]).length > 0 && (
+                    <Badge variant="outline" className="text-[10px] h-6 px-1.5 font-mono shadow-2xs border-border/50 text-muted-foreground bg-muted/40">
+                      {Object.keys(hiddenClasses).filter((k) => hiddenClasses[k]).length} hidden
+                    </Badge>
+                  )}
+
+                  {/* Sampling Bias Rings Toggle */}
                   <button
                     type="button"
                     onClick={() => setShowCoverageBuffers(!showCoverageBuffers)}
-                    className={`px-2.5 py-1 rounded font-medium transition-colors flex items-center gap-1.5 border ${
-                      showCoverageBuffers ? "bg-amber-950/60 text-amber-300 border-amber-500/40 font-bold" : "bg-background text-muted-foreground hover:text-foreground"
+                    className={`px-2.5 h-8 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 border border-border/60 shadow-2xs ${
+                      showCoverageBuffers 
+                        ? "bg-muted/60 text-foreground font-medium" 
+                        : "bg-muted/20 text-muted-foreground hover:text-foreground hover:bg-muted/50"
                     }`}
                     title="Toggle 1km buffer coverage rings around point samples to evaluate spatial clustering and sampling bias"
                   >
-                    <Compass className="w-3.5 h-3.5 text-amber-400" />
-                    {showCoverageBuffers ? "1km Bias Rings (Active)" : "Evaluate Sampling Bias (1km Rings)"}
+                    <Compass className="w-3.5 h-3.5 text-muted-foreground" />
+                    <span>{showCoverageBuffers ? "1km Bias Rings (Active)" : "1km Bias Rings"}</span>
                   </button>
                 </div>
-                </>
-              )}
               </div>
 
-              {/* Active Classification Overlay Banner */}
+              {/* Contextual Status Banners (Docked directly beneath sub-bar) */}
+              {!studyArea && !isDrawingStudyArea && (
+                <div className="flex-none flex items-center justify-between bg-card/95 backdrop-blur-md border-b border-sky-500/25 px-4 py-2 text-xs shadow-2xs animate-in fade-in">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-6 h-6 rounded-md bg-sky-500/10 border border-sky-500/30 flex items-center justify-center text-sky-400 shrink-0">
+                      <Crosshair className="w-3.5 h-3.5" />
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-sky-200">Prerequisite Step:</span>
+                      <span className="text-foreground">Define Study Area (AOI) to delineate your spatial boundary.</span>
+                      <span className="text-[11px] text-muted-foreground hidden lg:inline">Digitization tools and ML training remain locked until an AOI is set.</span>
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    onClick={() => setIsStudyAreaModalOpen(true)}
+                    className="h-7 text-xs gap-1.5 bg-sky-500 hover:bg-sky-400 text-slate-950 font-semibold px-3 shadow-xs transition-all active:scale-95 shrink-0"
+                  >
+                    <Crosshair className="w-3.5 h-3.5" /> Define Study Area
+                  </Button>
+                </div>
+              )}
+
+              {isDrawingStudyArea && (
+                <div className="flex-none flex items-center justify-between bg-card/95 backdrop-blur-md border-b border-sky-500/40 px-4 py-2 text-xs animate-in fade-in shadow-2xs">
+                  <div className="flex items-center gap-3">
+                    <div className="w-6 h-6 rounded-md bg-sky-500/15 border border-sky-500/30 flex items-center justify-center text-sky-400 shrink-0">
+                      <Crosshair className="w-3.5 h-3.5 animate-pulse" />
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-sky-300">Defining Study Area:</span>
+                      <span className="text-foreground">
+                        {aoiDrawShape === "rectangle" 
+                          ? "Click & drag or click opposite corners on map to define rectangular boundary."
+                          : "Click vertices on the map, then click the starting vertex to close polygon."}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1 bg-muted/40 p-0.5 rounded-md border border-border/60">
+                      <button
+                        type="button"
+                        onClick={() => startAoiDrawing("rectangle")}
+                        className={`px-2 py-0.5 rounded text-[11px] font-medium transition-all ${
+                          aoiDrawShape === "rectangle"
+                            ? "bg-sky-500/20 text-sky-300 border border-sky-500/40 font-semibold"
+                            : "text-muted-foreground hover:text-foreground hover:bg-muted/30"
+                        }`}
+                        title="Draw rectangular bounding box AOI"
+                      >
+                        Box (Rectangle)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => startAoiDrawing("polygon")}
+                        className={`px-2 py-0.5 rounded text-[11px] font-medium transition-all ${
+                          aoiDrawShape === "polygon"
+                            ? "bg-sky-500/20 text-sky-300 border border-sky-500/40 font-semibold"
+                            : "text-muted-foreground hover:text-foreground hover:bg-muted/30"
+                        }`}
+                        title="Draw freeform polygon AOI"
+                      >
+                        Freeform Polygon
+                      </button>
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 text-xs text-muted-foreground hover:text-destructive gap-1 px-2.5"
+                    onClick={cancelAoiDrawing}
+                    title="Cancel AOI drawing"
+                  >
+                    <X className="w-3.5 h-3.5" /> Cancel Drawing
+                  </Button>
+                </div>
+              )}
+
               {classifyResult?.tile_url && (
-                <div className="flex items-center justify-between bg-emerald-950/60 border border-emerald-500/50 p-2.5 rounded-lg text-xs animate-in fade-in shadow-sm">
-                  <span className="flex items-center gap-2 text-emerald-300 font-semibold">
-                    <Sparkles className="w-4 h-4 text-emerald-400 animate-pulse" />
-                    Supervised Classification Map Overlay Active!
+                <div className="flex-none flex items-center justify-between bg-muted/80 backdrop-blur-md border-b border-border/60 px-4 py-2 text-xs animate-in fade-in shadow-2xs">
+                  <span className="flex items-center gap-2 text-foreground font-medium">
+                    <Sparkles className="w-3.5 h-3.5 text-muted-foreground" />
+                    Supervised Classification Map Overlay Active
                     {classifyResult.accuracy && (
-                      <Badge variant="outline" className="border-emerald-500/40 text-emerald-300 bg-emerald-950 font-mono text-[10px] ml-2">
-                        Overall Accuracy: {((classifyResult.accuracy.overall_accuracy || 0.945) * 100).toFixed(1)}% | Kappa: {(classifyResult.accuracy.kappa || 0.912).toFixed(3)}
-                      </Badge>
+                      classifyResult.accuracy.is_evaluated && typeof classifyResult.accuracy.overall_accuracy === "number" ? (
+                        <Badge variant="outline" className="border-border/60 text-muted-foreground bg-muted/40 font-mono text-[10px] ml-2">
+                          Overall Accuracy: {(classifyResult.accuracy.overall_accuracy * 100).toFixed(1)}% | Kappa: {typeof classifyResult.accuracy.kappa === "number" ? classifyResult.accuracy.kappa.toFixed(3) : "N/A"}
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="border-border/60 text-muted-foreground bg-muted/40 font-mono text-[10px] ml-2">
+                          Holdout validation: sample count too small for test split
+                        </Badge>
+                      )
                     )}
                   </span>
                   <div className="flex items-center gap-2">
@@ -1578,17 +3049,16 @@ export function SampleDigitizationPage() {
                 </div>
               )}
 
-              {/* Active Editing Session Banner */}
               {isEditing && (
-                <div className="flex items-center justify-between bg-emerald-950/60 border border-emerald-500/50 p-2.5 rounded-lg text-xs animate-in fade-in">
-                  <div className="flex items-center gap-2 text-emerald-300 font-semibold">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping inline-block" />
+                <div className="flex-none flex items-center justify-between bg-muted/80 backdrop-blur-md border-b border-border/60 px-4 py-2 text-xs animate-in fade-in shadow-2xs">
+                  <div className="flex items-center gap-2 text-foreground font-medium">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block" />
                     <span>Active Digitization Session: {sessionSamples.length} feature(s) buffered</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <Button
                       size="sm"
-                      className="h-7 text-xs gap-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
+                      className="h-7 text-xs gap-1 bg-foreground text-background hover:bg-foreground/90 font-medium px-2.5 rounded-md"
                       onClick={() => {
                         setDatasetNameInput(`Training_Session_${new Date().toISOString().slice(0,10)}`);
                         setIsSaveModalOpen(true);
@@ -1615,19 +3085,16 @@ export function SampleDigitizationPage() {
                 </div>
               )}
 
-              {/* Active Drawing Banner */}
-              
-
               {previewGeoJSON && (
-                <div className="flex items-center justify-between bg-cyan-950/40 border border-cyan-500/30 p-2.5 rounded-lg text-xs">
-                  <span className="flex items-center gap-2 text-cyan-400 font-medium">
-                    <Database className="w-4 h-4" /> Active Map Overlay: {previewDatasetName}
+                <div className="flex-none flex items-center justify-between bg-muted/80 backdrop-blur-md border-b border-border/60 px-4 py-2 text-xs shadow-2xs">
+                  <span className="flex items-center gap-2 text-foreground font-medium">
+                    <Database className="w-4 h-4 text-muted-foreground" /> Active Map Overlay: {previewDatasetName}
                   </span>
                   <div className="flex items-center gap-2">
                     <Button
                       size="sm"
                       variant="outline"
-                      className="h-7 text-xs gap-1 border-cyan-500/40 text-cyan-300 hover:bg-cyan-950/60"
+                      className="h-7 text-xs gap-1 border-border/60 text-foreground hover:bg-muted/50"
                       onClick={() => importDatasetMut.mutate()}
                       disabled={importDatasetMut.isPending}
                     >
@@ -1637,7 +3104,7 @@ export function SampleDigitizationPage() {
                     <Button
                       size="sm"
                       variant="ghost"
-                      className="h-7 text-xs text-muted-foreground"
+                      className="h-7 text-xs text-muted-foreground hover:text-foreground"
                       onClick={() => {
                          setPreviewGeoJSON(null);
                          setImageryTileUrl(null);
@@ -1650,9 +3117,9 @@ export function SampleDigitizationPage() {
               )}
 
               {nativePreviewUrl && (
-                <div className="flex items-center justify-between bg-emerald-950/50 border border-emerald-500/40 p-2.5 rounded-lg text-xs animate-in fade-in shadow-sm">
-                  <span className="flex items-center gap-2 text-emerald-300 font-medium">
-                    <Layers className="w-4 h-4 text-emerald-400 animate-pulse" /> Active Raster Preview: {nativePreviewName || customAssetId || "GeoTIFF Layer"}
+                <div className="flex-none flex items-center justify-between bg-muted/80 backdrop-blur-md border-b border-border/60 px-4 py-2 text-xs animate-in fade-in shadow-2xs">
+                  <span className="flex items-center gap-2 text-foreground font-medium">
+                    <Layers className="w-4 h-4 text-muted-foreground" /> Active Raster Preview: {nativePreviewName || customAssetId || "GeoTIFF Layer"}
                   </span>
                   <div className="flex items-center gap-2">
                     <Button
@@ -1664,308 +3131,18 @@ export function SampleDigitizationPage() {
                         setClassificationSource("sentinel2");
                       }}
                     >
-                      <X className="w-3.5 h-3.5" /> Clear Raster Overlay
+                      <X className="w-3.5 h-3.5 mr-1" /> Clear Raster Overlay
                     </Button>
                   </div>
                 </div>
               )}
 
-                </div>
-            </div>
-            {/* Right Overlay toolbars */}
-            <div className="absolute top-4 right-4 z-[1000] flex flex-col gap-2 pointer-events-none w-80 items-end">
-                <div className="pointer-events-auto w-full flex flex-col gap-2 items-end">
-                  {isRightPanelsFolded ? (
-                    <button
-                      type="button"
-                      onClick={() => setIsRightPanelsFolded(false)}
-                      className="flex items-center gap-2 bg-card border shadow-sm hover:bg-muted p-1.5 rounded-md transition-colors w-auto"
-                      title="Unfold right panels"
-                    >
-                      <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground cursor-pointer">Panels</span>
-                      <ChevronDown className="w-4 h-4 text-muted-foreground" />
-                    </button>
-                  ) : (
-                    <>
-                      <div className="w-full flex justify-end mb-[-4px]">
-                        <button
-                          type="button"
-                          onClick={() => setIsRightPanelsFolded(true)}
-                          className="bg-card border shadow-sm hover:bg-muted p-1 rounded-md transition-colors pointer-events-auto"
-                          title="Fold right panels"
-                        >
-                          <ChevronUp className="w-4 h-4 text-muted-foreground" />
-                        </button>
-                      </div>
-                      <div className="w-full flex flex-col gap-2">
-              {/* ──────────────────────────────────────────────────────────────
-                   TIMELAPSE IMAGERY PANEL
-              ────────────────────────────────────────────────────────────── */}
-              <div className="border border-sky-500/30 rounded-lg bg-sky-950/20 overflow-hidden">
-                {/* Header */}
-                <button
-                  type="button"
-                  onClick={() => setTlPanelOpen(o => !o)}
-                  className="w-full flex items-center justify-between px-3 py-2 bg-sky-950/40 hover:bg-sky-900/40 transition-colors text-sm font-semibold text-sky-300"
-                >
-                  <span className="flex items-center gap-2">
-                    <Satellite className="w-4 h-4 text-sky-400" />
-                    Timelapse Imagery
-                    {timelapseTileUrl && (
-                      <Badge className="text-[10px] bg-sky-600/50 text-sky-200 px-1.5 py-0 h-4 font-mono">
-                        {tlSourceCfg.label.split(" ")[0]} · {tlYear}
-                      </Badge>
-                    )}
-                  </span>
-                  <ChevronDown className={`w-4 h-4 text-sky-400 transition-transform ${tlPanelOpen ? "" : "-rotate-90"}`} />
-                </button>
-
-                {tlPanelOpen && (
-                  <div className="p-3 space-y-3">
-                    {/* Source selector */}
-                    <div className="space-y-1">
-                      <Label className="text-xs text-muted-foreground">Imagery Source</Label>
-                      <div className="flex gap-1 flex-wrap">
-                        {TL_SOURCES.map(src => (
-                          <button
-                            key={src.id}
-                            type="button"
-                            onClick={() => setTlSource(src.id)}
-                            className={`text-[11px] px-2 py-1 rounded-md font-medium flex items-center gap-1 transition-colors ${
-                              tlSource === src.id
-                                ? "bg-sky-600 text-white shadow-sm"
-                                : "bg-muted/60 text-muted-foreground hover:bg-muted"
-                            }`}
-                          >
-                            {src.icon} {src.label.split(" ")[0]}
-                          </button>
-                        ))}
-                      </div>
-                      <p className="text-[10px] text-muted-foreground">{tlSourceCfg.label}</p>
-                    </div>
-
-                    {/* Year slider + controls */}
-                    <div className="space-y-1.5">
-                      <div className="flex items-center justify-between">
-                        <Label className="text-xs text-muted-foreground">Year</Label>
-                        <span className="text-base font-bold text-sky-300 tabular-nums">{tlYear}</span>
-                      </div>
-                      <input
-                        type="range"
-                        min={0}
-                        max={tlSourceCfg.years.length - 1}
-                        value={tlYearIdx}
-                        onChange={e => { setIsPlaying(false); setTlYearIdx(Number(e.target.value)); }}
-                        className="w-full h-1.5 accent-sky-500 cursor-pointer"
-                      />
-                      <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-                        <span>{tlSourceCfg.years[0]}</span>
-                        <span>{tlSourceCfg.years[tlSourceCfg.years.length - 1]}</span>
-                      </div>
-                    </div>
-
-                    {/* Playback controls */}
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        title="First year"
-                        onClick={() => { setIsPlaying(false); setTlYearIdx(0); }}
-                        className="p-1 rounded hover:bg-sky-900/40 text-sky-400 disabled:opacity-40"
-                      ><SkipBack className="w-3.5 h-3.5" /></button>
-                      <button
-                        type="button"
-                        title="Previous year"
-                        onClick={() => { setIsPlaying(false); setTlYearIdx(i => Math.max(0, i - 1)); }}
-                        disabled={tlYearIdx === 0}
-                        className="p-1 rounded hover:bg-sky-900/40 text-sky-400 disabled:opacity-40"
-                      ><ChevronLeft className="w-3.5 h-3.5" /></button>
-                      <button
-                        type="button"
-                        onClick={() => setIsPlaying(p => !p)}
-                        className={`flex-1 flex items-center justify-center gap-1.5 py-1 rounded-md font-semibold text-xs transition-colors ${
-                          isPlaying ? "bg-amber-600/80 text-white" : "bg-sky-700/60 text-sky-100 hover:bg-sky-600/80"
-                        }`}
-                      >
-                        {isPlaying ? <><Pause className="w-3 h-3" /> Pause</> : <><Play className="w-3 h-3 fill-current" /> Play Timelapse</>}
-                      </button>
-                      <button
-                        type="button"
-                        title="Next year"
-                        onClick={() => { setIsPlaying(false); setTlYearIdx(i => Math.min(tlSourceCfg.years.length - 1, i + 1)); }}
-                        disabled={tlYearIdx === tlSourceCfg.years.length - 1}
-                        className="p-1 rounded hover:bg-sky-900/40 text-sky-400 disabled:opacity-40"
-                      ><ChevronRight className="w-3.5 h-3.5" /></button>
-                      <button
-                        type="button"
-                        title="Last year"
-                        onClick={() => { setIsPlaying(false); setTlYearIdx(tlSourceCfg.years.length - 1); }}
-                        className="p-1 rounded hover:bg-sky-900/40 text-sky-400 disabled:opacity-40"
-                      ><SkipForward className="w-3.5 h-3.5" /></button>
-                    </div>
-
-                    {/* GEDI controls */}
-                    {tlSource === "gedi" && (
-                      <div className="bg-violet-950/30 border border-violet-500/30 rounded-md p-2.5 space-y-2">
-                        <Label className="text-xs text-violet-300 font-semibold flex items-center gap-1">
-                          <TreePine className="w-3 h-3" /> GEDI Temporal Mode
-                        </Label>
-                        <div className="flex gap-1 flex-wrap">
-                          {(["single", "rolling", "cumulative"] as const).map(mode => (
-                            <button
-                              key={mode}
-                              type="button"
-                              onClick={() => setGediMode(mode)}
-                              className={`text-[11px] px-2 py-0.5 rounded font-medium capitalize transition-colors ${
-                                gediMode === mode ? "bg-violet-600 text-white" : "bg-muted/60 text-muted-foreground hover:bg-muted"
-                              }`}
-                            >{mode}</button>
-                          ))}
-                        </div>
-                        {gediMode === "rolling" && (
-                          <div className="flex items-center gap-2">
-                            <Label className="text-[11px] text-muted-foreground whitespace-nowrap">Window:</Label>
-                            <input
-                              type="range" min={1} max={6} value={gediWindow}
-                              onChange={e => setGediWindow(Number(e.target.value))}
-                              className="flex-1 h-1.5 accent-violet-500"
-                            />
-                            <span className="text-[11px] font-bold text-violet-300 w-8">{gediWindow}yr</span>
-                          </div>
-                        )}
-                        <p className="text-[10px] text-muted-foreground">
-                          {gediMode === "single" && "Only that year's data (may be very sparse)."}
-                          {gediMode === "rolling" && `${gediWindow}-year window up to selected year (recommended).`}
-                          {gediMode === "cumulative" && "All GEDI data from 2019 to selected year (densest)."}
-                        </p>
-                      </div>
-                    )}
-
-                    {/* Load / status */}
-                    <div className="space-y-1.5">
-                      <Button
-                        onClick={() => loadTimelapseTile()}
-                        disabled={tlLoading}
-                        size="sm"
-                        className="w-full gap-2 bg-sky-700 hover:bg-sky-600 text-white font-semibold"
-                      >
-                        {tlLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Layers className="w-3.5 h-3.5" />}
-                        {tlLoading ? "Loading GEE tile…" : "Load Imagery Tile"}
-                      </Button>
-                      {timelapseTileUrl && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="w-full text-xs text-muted-foreground h-7"
-                          onClick={() => { setTimelapseTileUrl(null); setTlStatus(""); }}
-                        >
-                          <X className="w-3 h-3 mr-1" /> Clear Timelapse Layer
-                        </Button>
-                      )}
-                      {tlStatus && (
-                        <p className={`text-[11px] px-2 py-1 rounded ${tlStatus.startsWith("⚠") ? "text-amber-400 bg-amber-950/30" : "text-emerald-400 bg-emerald-950/20"}`}>
-                          {tlStatus}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* ──────────────────────────────────────────────────────────────
-                   TRAINING SAMPLE EXTRACTION PANEL
-              ────────────────────────────────────────────────────────────── */}
-              <div className="border border-emerald-500/25 rounded-lg bg-emerald-950/10 overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => setExtractPanelOpen(o => !o)}
-                  className="w-full flex items-center justify-between px-3 py-2 bg-emerald-950/30 hover:bg-emerald-900/30 transition-colors text-sm font-semibold text-emerald-300"
-                >
-                  <span className="flex items-center gap-2">
-                    <BarChart3 className="w-4 h-4 text-emerald-400" />
-                    Extract Training Pixels
-                    {extractResult && (
-                      <Badge className="text-[10px] bg-emerald-700/50 text-emerald-200 px-1.5 py-0 h-4 font-mono">
-                        {extractResult.n_samples} px
-                      </Badge>
-                    )}
-                  </span>
-                  <ChevronDown className={`w-4 h-4 text-emerald-400 transition-transform ${extractPanelOpen ? "" : "-rotate-90"}`} />
-                </button>
-
-                {extractPanelOpen && (
-                  <div className="p-3 space-y-3">
-                    <p className="text-[11px] text-muted-foreground">
-                      Samples pixel values from the current timelapse source &amp; year using your digitized features.
-                      Uses the same source/year/AOI/GEDI settings as the Timelapse panel above.
-                    </p>
-
-                    {/* Scale */}
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between">
-                        <Label className="text-xs text-muted-foreground">Scale (metres)</Label>
-                        <span className="text-sm font-bold text-emerald-300">{extractScale} m</span>
-                      </div>
-                      <input
-                        type="range" min={5} max={500} step={5} value={extractScale}
-                        onChange={e => setExtractScale(Number(e.target.value))}
-                        className="w-full h-1.5 accent-emerald-500"
-                      />
-                      <p className="text-[10px] text-muted-foreground">
-                        S-2 default: 10m · Landsat: 30m · GEDI: 25m
-                      </p>
-                    </div>
-
-                    <Button
-                      onClick={() => extractMut.mutate()}
-                      disabled={extractMut.isPending || allCombinedSamples.length === 0}
-                      size="sm"
-                      className="w-full gap-2 bg-emerald-700 hover:bg-emerald-600 text-white font-semibold"
-                    >
-                      {extractMut.isPending
-                        ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Extracting pixels…</>
-                        : <><BarChart3 className="w-3.5 h-3.5" /> Extract {allCombinedSamples.length} sample(s)</>}
-                    </Button>
-
-                    {extractResult && (
-                      <div className="bg-emerald-950/40 border border-emerald-500/30 rounded-md p-2.5 space-y-2">
-                        <p className="text-[11px] text-emerald-300 font-semibold">
-                          ✓ {extractResult.n_samples} pixels extracted · {(extractResult.source ?? tlSource).toUpperCase()} {extractResult.year ?? tlYear}
-                        </p>
-                        <p className="text-[11px] text-muted-foreground font-mono">
-                          Bands: {extractResult.band_names.join(", ")}
-                        </p>
-                        <Button
-                          onClick={downloadCsv}
-                          size="sm"
-                          variant="outline"
-                          className="w-full gap-1.5 text-xs border-emerald-500/40 text-emerald-300 hover:bg-emerald-900/40 h-7"
-                        >
-                          <Download className="w-3.5 h-3.5" />
-                          Download training_samples.csv
-                        </Button>
-                        <Button
-                          onClick={() => setExtractResult(null)}
-                          size="sm"
-                          variant="ghost"
-                          className="w-full text-xs text-muted-foreground h-6"
-                        >
-                          Clear result
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-
-                      </div>
-                    </>
-                  )}
-                </div>
-            </div>
-<div className="h-full w-full absolute inset-0 z-0 bg-muted/10">
+              {/* Map Container: Fills 100% of remaining flex space unobstructed */}
+              <div className="flex-1 relative w-full h-full bg-muted/10">
 
                 <MapContainer center={[-1.94, 29.87]} zoom={9} style={{ height: "100%", width: "100%" }} scrollWheelZoom>
                   <MapBoundsController bbox={activeBbox} />
+                  <MapInstanceCapturer onMapInstance={(m) => { mapInstanceRef.current = m; }} />
 
                   <FeatureGroup ref={studyAreaGroupRef}>
                     {isDrawingStudyArea && (
@@ -1973,15 +3150,32 @@ export function SampleDigitizationPage() {
                         position="topright"
                         onCreated={(e: any) => {
                           const geojson = e.layer.toGeoJSON();
-                          setStudyArea(geojson);
+                          if (studyAreaGroupRef.current) {
+                            try {
+                              studyAreaGroupRef.current.clearLayers();
+                            } catch {}
+                          }
+                          if (e.layer && e.layer.remove) {
+                            try {
+                              e.layer.remove();
+                            } catch {}
+                          }
+                          const normalized = normalizeToFeatureCollection(geojson);
+                          setStudyArea(normalized);
                           setIsDrawingStudyArea(false);
-                          toast({ title: "Study Area Defined", description: "You can now start an edit session." });
+                          try {
+                            const bbox = turf.bbox(normalized);
+                            if (bbox && bbox.length === 4) {
+                              setActiveBbox(bbox);
+                            }
+                          } catch {}
+                          toast({ title: "Study Area Defined", description: "Spatial boundary locked. Ready to digitize samples." });
                         }}
                         draw={{
                           marker: false,
                           polyline: false,
-                          polygon: { shapeOptions: { color: "#ff0000", fillOpacity: 0.1 } },
-                          rectangle: { shapeOptions: { color: "#ff0000", fillOpacity: 0.1 } },
+                          polygon: aoiDrawShape === "polygon" ? { showArea: false, shapeOptions: { color: "#38bdf8", weight: 2, fillOpacity: 0.08, dashArray: "4,4" } } : false,
+                          rectangle: aoiDrawShape === "rectangle" ? { showArea: false, shapeOptions: { color: "#38bdf8", weight: 2, fillOpacity: 0.08, dashArray: "4,4" } } : false,
                           circle: false,
                           circlemarker: false,
                         }}
@@ -1993,7 +3187,7 @@ export function SampleDigitizationPage() {
                     <GeoJSON
                       key={`studyarea-${JSON.stringify(studyArea)}`}
                       data={studyArea}
-                      style={{ color: "#ff0000", weight: 3, fillOpacity: 0.05, dashArray: "5,5" }}
+                      style={{ color: "#38bdf8", weight: 1.5, fillOpacity: 0.04, dashArray: "4,4" }}
                     />
                   )}
 
@@ -2024,14 +3218,13 @@ export function SampleDigitizationPage() {
                   {imageryTileUrl && (
                     <TileLayer url={imageryTileUrl} />
                   )}
-                  {/* MapClickHandler replaced by EditControl */}
                   {/* Timelapse GEE imagery layer – sits between basemap and samples */}
                   {timelapseTileUrl && (
                     <TileLayer
                       key={timelapseTileUrl}
                       url={timelapseTileUrl}
                       attribution={`GEE ${tlSourceCfg.label} ${tlYear}`}
-                      opacity={0.85}
+                      opacity={tlOpacity}
                     />
                   )}
 
@@ -2043,11 +3236,11 @@ export function SampleDigitizationPage() {
                       key={previewDatasetName + JSON.stringify(previewGeoJSON)}
                       data={previewGeoJSON}
                       style={() => ({
-                        color: "#00E5FF",
-                        fillColor: "#00E5FF",
-                        fillOpacity: 0.35,
-                        weight: 3,
-                        dashArray: "4,4",
+                        color: "#38bdf8",
+                        fillColor: "#38bdf8",
+                        fillOpacity: 0.15,
+                        weight: 1.5,
+                        dashArray: "3,3",
                       })}
                     />
                   )}
@@ -2055,6 +3248,7 @@ export function SampleDigitizationPage() {
                     Object.entries(groupedSamples).map(([cName, group]) => {
                       if (hiddenClasses[cName]) return null;
 
+                      const refinedGroupColor = getRefinedColor(group.color);
                       const featureCollection = {
                         type: "FeatureCollection",
                         features: group.items
@@ -2062,7 +3256,7 @@ export function SampleDigitizationPage() {
                           .map((s) => ({
                             type: "Feature",
                             geometry: s.geometry,
-                            properties: { color: s.color || group.color, class_label: cName, creator: s.creator },
+                            properties: { color: getRefinedColor(s.color || group.color), class_label: cName, creator: s.creator },
                           })),
                       };
 
@@ -2074,20 +3268,23 @@ export function SampleDigitizationPage() {
                           data={featureCollection as any}
                           pointToLayer={(feat, latlng) =>
                             L.circleMarker(latlng, {
-                              radius: 8,
+                              radius: 6,
                               fillColor: feat.properties.color,
                               color: "#FFFFFF",
-                              weight: 2.5,
-                              opacity: 1,
-                              fillOpacity: 0.85,
+                              weight: 1.5,
+                              opacity: 0.95,
+                              fillOpacity: 0.9,
                             })
                           }
-                          style={(feat: any) => ({
-                            color: feat?.properties?.color || group.color,
-                            fillColor: feat?.properties?.color || group.color,
-                            fillOpacity: 0.55,
-                            weight: 2.5,
-                          })}
+                          style={(feat: any) => {
+                            const c = feat?.properties?.color || refinedGroupColor;
+                            return {
+                              color: c,
+                              fillColor: c,
+                              fillOpacity: 0.35,
+                              weight: 1.5,
+                            };
+                          }}
                         />
                       );
                     })}
@@ -2103,6 +3300,7 @@ export function SampleDigitizationPage() {
                       if (!coords || coords.length < 2) return null;
                       const [lng, lat] = coords;
                       const delta = 0.009 * bufferRadiusKm;
+                      const ringColor = getRefinedColor(s.color || "#64748b");
                       return (
                         <LeafletPolygon
                           key={"buf_" + s.id}
@@ -2112,38 +3310,39 @@ export function SampleDigitizationPage() {
                             [lat + delta, lng + delta],
                             [lat - delta, lng + delta],
                           ]}
-                          color={s.color || "#0F6E4F"}
-                          fillColor={s.color || "#0F6E4F"}
-                          fillOpacity={0.15}
-                          weight={1.5}
+                          color={ringColor}
+                          fillColor={ringColor}
+                          fillOpacity={0.06}
+                          weight={1}
                           pathOptions={{ dashArray: "3,3" }}
                         />
                       );
                     })}
 
                   {activePoints.length >= 2 && (drawMode === "polyline" || drawMode === "polygon") && (
-                    <LeafletPolyline positions={activePoints} color="#00E5FF" weight={3} pathOptions={{ dashArray: "4,4" }} />
+                    <LeafletPolyline positions={activePoints} color="#38bdf8" weight={2} pathOptions={{ dashArray: "4,4" }} />
                   )}
                   {activePoints.length >= 3 && drawMode === "polygon" && (
-                    <LeafletPolygon positions={activePoints} color="#00E5FF" fillColor="#00E5FF" fillOpacity={0.35} />
+                    <LeafletPolygon positions={activePoints} color="#38bdf8" fillColor="#38bdf8" fillOpacity={0.15} weight={2} />
                   )}
                 </MapContainer>
+              </div>
             </div>
-          </div>
-          </div>
         </TabsContent>
 
         {/* 1b. SAMPLES DIRECTORY TAB */}
         <TabsContent value="samples" className="h-full overflow-y-auto p-4 space-y-4">
           {/* GROUPED & SORTED TRAINING SAMPLES DIRECTORY */}
           <div className="space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-card p-3.5 rounded-lg border">
-              <div className="flex items-center gap-2">
-                <Layers className="w-5 h-5 text-emerald-500" />
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-card p-3.5 rounded-lg border border-border/60">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-md bg-muted/60 border border-border/60 flex items-center justify-center text-foreground">
+                  <Layers className="w-4 h-4" />
+                </div>
                 <div>
-                  <h3 className="font-semibold text-base leading-tight">Training Samples Directory</h3>
+                  <h3 className="font-semibold text-sm leading-tight text-foreground">Training Samples Directory</h3>
                   <p className="text-xs text-muted-foreground">
-                    Grouped &amp; sorted by Class Label ({Object.keys(groupedSamples).length} class(es), {samples.length} total feature(s))
+                    Grouped by class label ({Object.keys(groupedSamples).length} classes, {samples.length} total features)
                   </p>
                 </div>
               </div>
@@ -2154,45 +3353,82 @@ export function SampleDigitizationPage() {
                   <input
                     value={classFilter}
                     onChange={(e) => setClassFilter(e.target.value)}
-                    placeholder="Filter by class name..."
-                    className="pl-8 pr-3 py-1 text-xs rounded-md border border-input bg-background w-44 focus:outline-none focus:ring-2 focus:ring-ring"
+                    placeholder="Filter classes..."
+                    className="pl-8 pr-3 py-1 text-xs rounded-md border border-input bg-background w-44 focus:outline-none focus:ring-1 focus:ring-ring"
                   />
                 </div>
 
-                <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8" onClick={downloadGeoJSON} disabled={samples.length === 0} title="Export as GeoJSON file">
+                <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8 border-border/60 text-foreground hover:bg-muted" onClick={downloadGeoJSON} disabled={samples.length === 0} title="Export as GeoJSON file">
                   <Download className="w-3.5 h-3.5" /> GeoJSON
                 </Button>
 
-                <Button variant="outline" size="sm" className="gap-1.5 text-xs h-8 border-amber-500/40 text-amber-400 hover:bg-amber-950/40 font-medium" onClick={downloadShapefile} disabled={samples.length === 0} title="Export as ESRI Shapefile (.zip)">
-                  <Download className="w-3.5 h-3.5" /> Shapefile (.zip)
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 text-xs h-8 border-border/60 text-foreground hover:bg-muted font-medium disabled:opacity-35 disabled:cursor-not-allowed disabled:pointer-events-none"
+                  onClick={downloadShapefile}
+                  disabled={samples.length === 0}
+                  title="Export as ESRI Shapefile (.zip)"
+                >
+                  <Download className="w-3.5 h-3.5" /> Shapefile
+                </Button>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 text-xs h-8 border-border/60 text-foreground hover:bg-muted font-medium disabled:opacity-35 disabled:cursor-not-allowed disabled:pointer-events-none"
+                  onClick={() => spectralProfilesMut.mutate()}
+                  disabled={spectralProfilesMut.isPending || allCombinedSamples.length === 0}
+                  title="Extract multi-spectral reflectance profiles across Sentinel-2 bands"
+                >
+                  {spectralProfilesMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Activity className="w-3.5 h-3.5" />}
+                  Spectral Curves
                 </Button>
 
                 <Button
                   size="sm"
-                  className="gap-1.5 text-xs h-8 bg-emerald-600 hover:bg-emerald-500 text-white font-bold shadow-sm"
+                  className="gap-1.5 text-xs h-8 bg-foreground text-background hover:bg-foreground/90 font-medium shadow-2xs disabled:opacity-35 disabled:cursor-not-allowed disabled:bg-muted/30 disabled:text-muted-foreground/40 disabled:border-border/30 disabled:shadow-none disabled:pointer-events-none"
                   onClick={trainSupervisedClassifierDirectly}
                   disabled={classifyMut.isPending || allCombinedSamples.length === 0}
                   title="Train Supervised Random Forest Classifier directly on digitized samples"
                 >
                   {classifyMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Cpu className="w-3.5 h-3.5" />}
-                  Train Supervised ML
+                  Train Classifier
                 </Button>
               </div>
             </div>
 
+            {/* Class Balance & Dataset Health Indicator */}
+            {allCombinedSamples.length > 0 && (
+              <div className="p-3 rounded-lg border border-border/60 bg-muted/20 text-xs flex items-center justify-between text-foreground">
+                <div className="flex items-center gap-2.5">
+                  <span className={`w-2 h-2 rounded-full ${
+                    classBalanceMetrics.status === "healthy" ? "bg-emerald-400" : "bg-amber-400"
+                  }`} />
+                  <span>
+                    <strong className="font-medium text-foreground">Dataset Health:</strong> <span className="text-muted-foreground">{classBalanceMetrics.message}</span>
+                  </span>
+                </div>
+                <Badge variant="outline" className="font-mono text-[10px] shrink-0 uppercase tracking-wider bg-background/80 border-border/60 text-muted-foreground">
+                  {classBalanceMetrics.status.replace("_", " ")}
+                </Badge>
+              </div>
+            )}
+
             {isLoadingSamples ? (
-              <div className="flex items-center gap-2 text-muted-foreground py-6 justify-center">
+              <div className="flex items-center gap-2 text-muted-foreground py-6 justify-center text-xs">
                 <Loader2 className="w-4 h-4 animate-spin" /> Loading digitized samples…
               </div>
             ) : Object.keys(groupedSamples).length === 0 ? (
-              <div className="rounded-lg border p-8 text-center text-muted-foreground text-sm">
-                No training samples digitized yet. Select a class on the left and click/draw on the map to add samples.
+              <div className="rounded-lg border border-border/60 p-8 text-center text-muted-foreground text-xs">
+                No training samples digitized yet. Select a class in the digitizer to begin collecting features.
               </div>
             ) : (
               <div className="space-y-4">
                 {Object.entries(groupedSamples)
                   .filter(([cName]) => !classFilter || cName.toLowerCase().includes(classFilter.toLowerCase()))
                   .map(([cName, group]) => {
+                    const refinedColor = getRefinedColor(group.color);
                     const typeCounts = group.items.reduce(
                       (acc, curr) => {
                         const t = curr.geometry?.type ?? "Unknown";
@@ -2208,19 +3444,32 @@ export function SampleDigitizationPage() {
                     const isHidden = hiddenClasses[cName];
 
                     return (
-                      <div key={cName} className={`rounded-lg border overflow-hidden bg-card shadow-sm transition-opacity ${isHidden ? "opacity-60" : ""}`}>
+                      <div key={cName} className={`rounded-lg border border-border/60 overflow-hidden bg-card shadow-2xs transition-opacity ${isHidden ? "opacity-60" : ""}`}>
                         {/* Class Sub-header */}
-                        <div className="bg-muted/70 px-4 py-2.5 flex items-center justify-between border-b">
+                        <div className="bg-muted/40 px-4 py-2.5 flex items-center justify-between border-b border-border/60">
                           <div className="flex items-center gap-2.5">
-                            <span className="w-3.5 h-3.5 rounded-full inline-block shrink-0 shadow-sm" style={{ backgroundColor: group.color }} />
-                            <span className="font-bold text-sm tracking-wide text-foreground">{cName}</span>
-                            <Badge variant="outline" className="text-xs bg-background font-mono px-2 py-0.5">
-                              {group.items.length} feature(s)
+                            <span className="w-3 h-3 rounded-full inline-block shrink-0 shadow-2xs border border-white/20" style={{ backgroundColor: refinedColor }} />
+                            <span className="font-medium text-xs tracking-wide text-foreground">{cName}</span>
+                            <Badge variant="outline" className="text-[11px] bg-background font-mono px-2 py-0.5 border-border/60 text-muted-foreground">
+                              {group.items.length} features
                             </Badge>
+                            {group.items.length < 5 ? (
+                              <Badge variant="outline" className="text-[10px] bg-muted/40 text-muted-foreground border-border/60">
+                                Low count (&lt;5)
+                              </Badge>
+                            ) : group.items.length < 10 ? (
+                              <Badge variant="outline" className="text-[10px] bg-muted/40 text-foreground border-border/60">
+                                Adequate ({group.items.length})
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-[10px] bg-muted/40 text-foreground border-border/60">
+                                Robust ({group.items.length})
+                              </Badge>
+                            )}
                             <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground ml-2">
-                              {typeCounts.polygons > 0 && <span className="bg-background border px-2 py-0.5 rounded font-mono">⬡ {typeCounts.polygons} Polygon</span>}
-                              {typeCounts.points > 0 && <span className="bg-background border px-2 py-0.5 rounded font-mono">📍 {typeCounts.points} Point</span>}
-                              {typeCounts.lines > 0 && <span className="bg-background border px-2 py-0.5 rounded font-mono">📈 {typeCounts.lines} Line</span>}
+                              {typeCounts.polygons > 0 && <span className="bg-background border border-border/50 px-2 py-0.5 rounded font-mono text-[10px]">{typeCounts.polygons} Polygon</span>}
+                              {typeCounts.points > 0 && <span className="bg-background border border-border/50 px-2 py-0.5 rounded font-mono text-[10px]">{typeCounts.points} Point</span>}
+                              {typeCounts.lines > 0 && <span className="bg-background border border-border/50 px-2 py-0.5 rounded font-mono text-[10px]">{typeCounts.lines} Line</span>}
                             </div>
                           </div>
 
@@ -2228,21 +3477,21 @@ export function SampleDigitizationPage() {
                             <button
                               type="button"
                               onClick={() => toggleClassVisibility(cName)}
-                              className={`text-xs px-2.5 py-1 rounded font-semibold transition-colors flex items-center gap-1.5 border shadow-sm ${
+                              className={`text-xs px-2.5 py-1 rounded font-medium transition-colors flex items-center gap-1.5 border shadow-2xs ${
                                 !isHidden
-                                  ? "bg-emerald-950/60 text-emerald-300 border-emerald-500/40 hover:bg-emerald-900/60"
-                                  : "bg-muted text-muted-foreground border-input hover:bg-accent"
+                                  ? "bg-muted/60 text-foreground border-border/60 hover:bg-muted"
+                                  : "bg-background text-muted-foreground border-border/40 hover:bg-muted/40"
                               }`}
                               title={!isHidden ? `Hide class '${cName}' on map` : `Show class '${cName}' on map`}
                             >
-                              {!isHidden ? <Eye className="w-3.5 h-3.5 text-emerald-400" /> : <EyeOff className="w-3.5 h-3.5 text-destructive" />}
-                              {!isHidden ? "Visible on Map" : "Hidden on Map"}
+                              {!isHidden ? <Eye className="w-3.5 h-3.5 text-foreground" /> : <EyeOff className="w-3.5 h-3.5 text-muted-foreground" />}
+                              {!isHidden ? "Visible" : "Hidden"}
                             </button>
 
                             <Button
                               size="sm"
-                              variant="destructive"
-                              className="h-7 text-xs gap-1.5 px-2.5 font-medium"
+                              variant="ghost"
+                              className="h-7 text-xs gap-1.5 px-2.5 font-medium text-muted-foreground hover:text-destructive"
                               title={`Delete all samples for class '${cName}'`}
                               disabled={deleteClassMut.isPending}
                               onClick={() => {
@@ -2251,18 +3500,18 @@ export function SampleDigitizationPage() {
                                 }
                               }}
                             >
-                              <Trash2 className="w-3.5 h-3.5" /> Delete Class ({cName})
+                              <Trash2 className="w-3.5 h-3.5" /> Delete Class
                             </Button>
                           </div>
                         </div>
 
                         {/* Class Sub-items Attribute Table */}
-                        <table className="w-full text-sm">
-                          <thead className="bg-muted/40 text-[11px] uppercase tracking-wider text-muted-foreground font-bold border-b">
+                        <table className="w-full text-xs">
+                          <thead className="bg-muted/20 text-[11px] uppercase tracking-wider text-muted-foreground font-medium border-b border-border/60">
                             <tr>
                               <th className="text-left px-4 py-2 w-16">FID</th>
-                              <th className="text-left px-4 py-2 w-36">Class Name</th>
-                              <th className="text-left px-4 py-2">Geometry &amp; Point Coordinates</th>
+                              <th className="text-left px-4 py-2 w-36">Class</th>
+                              <th className="text-left px-4 py-2">Geometry Coordinates</th>
                               <th className="text-right px-4 py-2 w-24">Actions</th>
                             </tr>
                           </thead>
@@ -2271,31 +3520,31 @@ export function SampleDigitizationPage() {
                               const gType = s.geometry?.type ?? "Point";
                               const fidNumber = idx + 1;
                               return (
-                                <tr key={s.id} className={idx % 2 === 0 ? "bg-background" : "bg-muted/20"}>
+                                <tr key={s.id} className={idx % 2 === 0 ? "bg-background" : "bg-muted/10"}>
                                   {/* Column 1: FID */}
-                                  <td className="px-4 py-2 font-mono text-xs font-bold text-emerald-500">
+                                  <td className="px-4 py-2 font-mono text-xs text-muted-foreground">
                                     #{fidNumber}
                                   </td>
                                   {/* Column 2: Class Name */}
-                                  <td className="px-4 py-2 font-semibold text-xs flex items-center gap-2">
-                                    <span className="w-2.5 h-2.5 rounded-full inline-block shrink-0" style={{ backgroundColor: group.color }} />
+                                  <td className="px-4 py-2 font-medium text-xs flex items-center gap-2">
+                                    <span className="w-2.5 h-2.5 rounded-full inline-block shrink-0 border border-white/20" style={{ backgroundColor: refinedColor }} />
                                     <span>{cName}</span>
                                   </td>
                                   {/* Column 3: Geometry & Point Coordinates */}
                                   <td className="px-4 py-2 font-mono text-xs text-foreground">
                                     {gType === "Point" ? (
-                                      <span className="flex items-center gap-1.5 text-cyan-400 font-semibold">
-                                        <span>📍 Point</span>
-                                        <span className="text-muted-foreground bg-muted px-2 py-0.5 rounded border text-[11px]">
+                                      <span className="flex items-center gap-1.5">
+                                        <span className="text-foreground font-medium">Point</span>
+                                        <span className="text-muted-foreground bg-muted/50 px-2 py-0.5 rounded border border-border/40 text-[11px]">
                                           [{s.geometry?.coordinates?.[0]}, {s.geometry?.coordinates?.[1]}]
                                         </span>
                                       </span>
                                     ) : (
                                       <span className="flex items-center gap-1.5">
-                                        <span className="text-amber-400 font-semibold">
-                                          {gType === "Polygon" ? "⬡ Polygon" : "📈 Line"}
+                                        <span className="text-foreground font-medium">
+                                          {gType}
                                         </span>
-                                        <span className="text-muted-foreground bg-muted px-2 py-0.5 rounded border text-[11px] truncate max-w-xs inline-block">
+                                        <span className="text-muted-foreground bg-muted/50 px-2 py-0.5 rounded border border-border/40 text-[11px] truncate max-w-xs inline-block">
                                           {JSON.stringify(s.geometry?.coordinates)}
                                         </span>
                                       </span>
@@ -2306,7 +3555,7 @@ export function SampleDigitizationPage() {
                                     <Button
                                       variant="ghost"
                                       size="icon"
-                                      className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                      className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                                       title="Delete feature"
                                       onClick={() => deleteMut.mutate(s.id)}
                                     >
@@ -2328,45 +3577,45 @@ export function SampleDigitizationPage() {
 
         {/* 2. SUPERVISED CLASSIFICATION TAB */}
         <TabsContent value="classify" className="h-full overflow-y-auto p-4 space-y-6">
-          <div className="border rounded-lg p-5 bg-card space-y-4">
+          <div className="border border-border/60 rounded-lg p-5 bg-card space-y-4">
             <div className="flex items-center justify-between">
               <div className="space-y-1">
-                <h3 className="font-semibold text-lg flex items-center gap-2">
-                  <Sparkles className="w-5 h-5 text-emerald-500" />
+                <h3 className="font-semibold text-base flex items-center gap-2 text-foreground">
+                  <Sparkles className="w-4 h-4 text-foreground" />
                   Random Forest Supervised Classification
                 </h3>
-                <p className="text-sm text-muted-foreground">
+                <p className="text-xs text-muted-foreground">
                   Trains a Random Forest classifier (50 decision trees) using your {samples.length} digitized training sample(s).
                 </p>
               </div>
             </div>
 
             {previewDatasetName && (
-              <div className="bg-cyan-950/50 border border-cyan-500/40 p-3 rounded-lg text-xs text-cyan-300 flex items-center justify-between animate-in fade-in">
+              <div className="bg-muted/30 border border-border/60 p-3 rounded-lg text-xs text-foreground flex items-center justify-between animate-in fade-in">
                 <span className="flex items-center gap-2 font-medium">
-                  <Database className="w-4 h-4 text-cyan-400" />
-                  Linked Imagery Source from RARE DATA: <strong>{previewDatasetName}</strong>
+                  <Database className="w-4 h-4 text-muted-foreground" />
+                  Linked Imagery Source from RARE DATA: <strong className="text-foreground">{previewDatasetName}</strong>
                 </span>
-                <Badge variant="outline" className="border-cyan-500/50 text-cyan-300 bg-cyan-950 font-mono text-[10px]">
-                  Directly Compatible ⚡
+                <Badge variant="outline" className="border-border/60 text-muted-foreground bg-muted/40 font-mono text-[10px]">
+                  Directly Compatible
                 </Badge>
               </div>
             )}
 
-            <div className="space-y-3 bg-muted/30 p-4 rounded-lg border">
+            <div className="space-y-3 bg-muted/20 p-4 rounded-lg border border-border/60">
               <div className="space-y-1">
-                <Label className="text-xs font-semibold">Imagery Source for ML Training</Label>
+                <Label className="text-xs font-medium">Imagery Source for ML Training</Label>
                 <select
                   value={classificationSource}
                   onChange={(e) => setClassificationSource(e.target.value as any)}
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:ring-2 focus:ring-ring font-medium"
+                  className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs focus:ring-1 focus:ring-ring font-medium"
                 >
-                  <option value="sentinel2">🛰️ Sentinel-2 SR (10m Multi-spectral - Default)</option>
-                  <option value="landsat8">🛰️ Landsat 8 SR (30m Multi-spectral)</option>
+                  <option value="sentinel2">Sentinel-2 SR (10m Multi-spectral - Default)</option>
+                  <option value="landsat8">Landsat 8 SR (30m Multi-spectral)</option>
                   <option value="custom">
-                    📁 {previewDatasetName ? `Imported RARE DATA: ${previewDatasetName}` : "Custom GEE Asset / Imported Imagery"}
+                    {previewDatasetName ? `Imported RARE DATA: ${previewDatasetName}` : "Custom GEE Asset / Imported Imagery"}
                   </option>
-                  <option value="native_cog">💻 Native COG (Local scikit-learn Classification)</option>
+                  <option value="native_cog">Native COG (Local scikit-learn Classification)</option>
                 </select>
               </div>
 
@@ -2386,13 +3635,48 @@ export function SampleDigitizationPage() {
                   </p>
                 </div>
               )}
+
+              {/* 3x3 Majority Sieve (MMU Noise Filter) Switch */}
+              <div className="flex items-center justify-between p-3 rounded-lg border bg-background/50">
+                <div className="space-y-0.5">
+                  <Label htmlFor="apply-sieve" className="text-xs font-semibold cursor-pointer flex items-center gap-1.5">
+                    <Filter className="w-3.5 h-3.5 text-primary" />
+                    3×3 Majority Sieve (MMU Noise Filter)
+                  </Label>
+                  <p className="text-[11px] text-muted-foreground">
+                    Eliminates isolated speckle pixels ("salt-and-pepper" noise) using focal mode majority filtering for clean cartographic parcel boundaries.
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  id="apply-sieve"
+                  checked={applySieve}
+                  onChange={(e) => setApplySieve(e.target.checked)}
+                  className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary cursor-pointer ml-3"
+                />
+              </div>
             </div>
 
-            <div className="flex justify-end pt-2">
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+              <Button
+                variant="outline"
+                type="button"
+                onClick={() => spectralProfilesMut.mutate()}
+                disabled={spectralProfilesMut.isPending || allCombinedSamples.length === 0}
+                className="gap-2 border-border/60 text-foreground hover:bg-muted font-medium"
+              >
+                {spectralProfilesMut.isPending ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Activity className="w-4 h-4 text-muted-foreground" />
+                )}
+                Analyze Spectral Curves
+              </Button>
+
               <Button
                 onClick={() => classifyMut.mutate()}
                 disabled={classifyMut.isPending || samples.length === 0 || ((classificationSource === "custom" || classificationSource === "native_cog") && !customAssetId)}
-                className="gap-2 bg-emerald-600 hover:bg-emerald-500 text-white w-full sm:w-auto"
+                className="gap-2 bg-foreground text-background hover:bg-foreground/90 font-medium w-full sm:w-auto shadow-2xs"
               >
                 {classifyMut.isPending ? (
                   <>
@@ -2407,16 +3691,16 @@ export function SampleDigitizationPage() {
             </div>
 
             {samples.length === 0 && (
-              <p className="text-sm text-amber-500 bg-amber-500/10 p-3 rounded-md border border-amber-500/20">
-                ⚠️ Please digitize at least 2 samples with different class labels before running classification.
+              <p className="text-xs text-muted-foreground bg-muted/40 p-3 rounded-md border border-border/50">
+                Please digitize at least 2 samples with different class labels before running classification.
               </p>
             )}
 
             {classifyResult && (
-              <div className="space-y-4 pt-4 border-t">
+              <div className="space-y-4 pt-4 border-t border-border/60">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-green-600 font-medium text-sm">
-                    <CheckCircle className="w-4 h-4" /> Classification map generated &amp; rendered on Leaflet!
+                  <div className="flex items-center gap-2 text-foreground font-medium text-xs">
+                    <CheckCircle className="w-4 h-4 text-emerald-400" /> Classification map rendered
                     
                     <div className="ml-4 flex items-center gap-2 text-foreground">
                       <input
@@ -2424,9 +3708,9 @@ export function SampleDigitizationPage() {
                         id="show-classify"
                         checked={showClassifyResult}
                         onChange={(e) => setShowClassifyResult(e.target.checked)}
-                        className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                        className="h-3.5 w-3.5 rounded border-border text-foreground focus:ring-1 focus:ring-ring"
                       />
-                      <Label htmlFor="show-classify" className="text-xs cursor-pointer">
+                      <Label htmlFor="show-classify" className="text-xs cursor-pointer text-muted-foreground hover:text-foreground">
                         Show on Map
                       </Label>
                     </div>
@@ -2434,14 +3718,24 @@ export function SampleDigitizationPage() {
 
                   <div className="flex flex-wrap items-center justify-end gap-3">
                     {classifyResult.accuracy && (
-                      <div className="flex items-center gap-3 text-xs">
-                        <span className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 px-2.5 py-1 rounded-md font-medium">
-                          Overall Accuracy: {((classifyResult.accuracy.overall_accuracy || 0.945) * 100).toFixed(1)}%
-                        </span>
-                        <span className="bg-blue-500/10 border border-blue-500/30 text-blue-600 px-2.5 py-1 rounded-md font-medium">
-                          Kappa Coefficient: {(classifyResult.accuracy.kappa || 0.912).toFixed(3)}
-                        </span>
-                      </div>
+                      classifyResult.accuracy.is_evaluated && typeof classifyResult.accuracy.overall_accuracy === "number" ? (
+                        <div className="flex items-center gap-2.5 text-xs font-mono">
+                          <span className="bg-muted/40 border border-border/60 text-foreground px-2.5 py-1 rounded-md">
+                            Accuracy: {(classifyResult.accuracy.overall_accuracy * 100).toFixed(1)}%
+                          </span>
+                          {typeof classifyResult.accuracy.kappa === "number" && (
+                            <span className="bg-muted/40 border border-border/60 text-muted-foreground px-2.5 py-1 rounded-md">
+                              Kappa: {classifyResult.accuracy.kappa.toFixed(3)}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="flex items-center text-xs">
+                          <span className="bg-muted/40 border border-border/60 text-muted-foreground px-2.5 py-1 rounded-md">
+                            Holdout validation unverified (small sample count)
+                          </span>
+                        </div>
+                      )
                     )}
                     {classifyResult.download_url && (
                       <>
@@ -2652,18 +3946,45 @@ export function SampleDigitizationPage() {
                     </div>
                   </div>
                 )}
+
+                {classifyResult.accuracy && !classifyResult.accuracy.is_evaluated && (
+                  <div className="border border-amber-500/30 rounded-lg p-4 bg-amber-500/5 space-y-2 mt-4 text-xs text-amber-700 dark:text-amber-300">
+                    <div className="flex items-center gap-2 font-semibold">
+                      <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
+                      Holdout Validation Assessment Notice
+                    </div>
+                    <p>
+                      {classifyResult.accuracy.evaluation_note ||
+                        "Insufficient test split samples: When working with few samples per class (< 10), withholding samples for an independent test error matrix deprives the classifier of essential training patterns. Digitize more training features per class (15–20+) to generate a statistically robust Confusion Matrix & Kappa statistic."}
+                    </p>
+                  </div>
+                )}
+
+                {classifyResult.samples_metadata && (
+                  <div className="bg-muted/40 p-3 rounded-lg border text-xs flex flex-wrap items-center justify-between gap-3 text-muted-foreground mt-3">
+                    <div className="flex flex-wrap items-center gap-4">
+                      <span><strong>Samples Submitted:</strong> {classifyResult.samples_metadata.total_submitted}</span>
+                      <span><strong>Samples Processed:</strong> {classifyResult.samples_metadata.total_used}</span>
+                      <span><strong>Balancing Cap:</strong> {classifyResult.samples_metadata.stratified_cap_per_class}/class max</span>
+                    </div>
+                    <Badge variant="outline" className="font-mono text-[10px] bg-background">
+                      Stratified Balancing Active
+                    </Badge>
+                  </div>
+                )}
               </div>
             )}
           </div>
         </TabsContent>
 
         {/* 3. IMPORT RARE DATA & HARVESTER TAB */}
-        <TabsContent value="import" className="h-full overflow-y-auto p-4 space-y-6">
+        {isAdmin && (
+          <TabsContent value="import" className="h-full overflow-y-auto p-4 space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Import from RARE DATA */}
-            <div className="border rounded-lg p-5 bg-card space-y-4">
-              <div className="flex items-center gap-2 font-semibold">
-                <Database className="w-5 h-5 text-blue-500" />
+            <div className="border border-border/60 rounded-lg p-5 bg-card space-y-4">
+              <div className="flex items-center gap-2 font-medium text-sm text-foreground">
+                <Database className="w-4 h-4 text-foreground" />
                 Import from RARE DATA Repository
               </div>
               <p className="text-xs text-muted-foreground">
@@ -2792,15 +4113,17 @@ export function SampleDigitizationPage() {
               />
             </div>
           </div>
-        </TabsContent>
+          </TabsContent>
+        )}
 
         {/* 4. GEE ASSET UPLOAD TAB */}
-        <TabsContent value="gee" className="h-full overflow-y-auto p-4 space-y-6">
+        {isAdmin && (
+          <TabsContent value="gee" className="h-full overflow-y-auto p-4 space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-5xl">
             {/* Card 1: Account & Project Config */}
-            <div className="border rounded-lg p-5 bg-card space-y-4 md:col-span-2">
-              <div className="flex items-center gap-2 font-semibold text-base">
-                <Cloud className="w-5 h-5 text-emerald-500" />
+            <div className="border border-border/60 rounded-lg p-5 bg-card space-y-4 md:col-span-2">
+              <div className="flex items-center gap-2 font-medium text-sm text-foreground">
+                <Cloud className="w-4 h-4 text-foreground" />
                 Google Earth Engine Account &amp; Project Authorization
               </div>
               <p className="text-xs text-muted-foreground">
@@ -2809,7 +4132,7 @@ export function SampleDigitizationPage() {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
-                  <Label className="text-xs font-semibold">GEE Cloud Project ID</Label>
+                  <Label className="text-xs font-medium">GEE Cloud Project ID</Label>
                   <input
                     value={targetGeeProjectId}
                     onChange={(e) => {
@@ -2818,10 +4141,10 @@ export function SampleDigitizationPage() {
                       setDestinationAssetId(`projects/${val || "YOUR_PROJECT"}/assets/rwanda_training_samples`);
                     }}
                     placeholder="e.g. ee-yourusername or your-gcp-project"
-                    className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring font-mono"
+                    className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring font-mono"
                   />
                   <p className="text-[11px] text-muted-foreground">
-                    Target path: <code className="text-xs font-mono">projects/{targetGeeProjectId || "YOUR_PROJECT"}/assets/...</code>
+                    Target path: <code className="text-[11px] font-mono text-foreground">projects/{targetGeeProjectId || "YOUR_PROJECT"}/assets/...</code>
                   </p>
                 </div>
 
@@ -2831,14 +4154,14 @@ export function SampleDigitizationPage() {
                     variant="outline"
                     onClick={async () => {
                       try {
-                        const r = await fetch(`https://geoportal-api-ygzi.onrender.com/api/gee/config`, {
+                        const r = await fetch(`${BASE}/gee/config`, {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
                           body: JSON.stringify({ project_id: targetGeeProjectId.trim() }),
                         });
                         const res = await r.json();
                         if (r.ok && res.ok) {
-                          toast({ title: "GEE Authenticated ✅", description: `Active Project: ${res.status.project_id}` });
+                          toast({ title: "GEE Authenticated", description: `Active Project: ${res.status.project_id}` });
                         } else {
                           throw new Error(res.detail || "Authentication failed");
                         }
@@ -2846,18 +4169,18 @@ export function SampleDigitizationPage() {
                         toast({ variant: "destructive", title: "Auth Error", description: e.message });
                       }
                     }}
-                    className="gap-2 border-emerald-500/40 text-emerald-400 hover:bg-emerald-950/30"
+                    className="gap-2 border-border/60 text-foreground hover:bg-muted font-medium text-xs h-9"
                   >
-                    <CheckCircle className="w-4 h-4" /> Save &amp; Authenticate GEE Project
+                    <CheckCircle className="w-4 h-4 text-emerald-400" /> Save &amp; Authenticate GEE Project
                   </Button>
                 </div>
               </div>
             </div>
 
             {/* Card 2: Push Digitized Samples */}
-            <div className="border rounded-lg p-5 bg-card space-y-4">
-              <div className="flex items-center gap-2 font-semibold">
-                <Database className="w-5 h-5 text-blue-500" />
+            <div className="border border-border/60 rounded-lg p-5 bg-card space-y-4">
+              <div className="flex items-center gap-2 font-medium text-sm text-foreground">
+                <Database className="w-4 h-4 text-foreground" />
                 Push Digitized Samples to GEE Asset
               </div>
               <p className="text-xs text-muted-foreground">
@@ -2870,14 +4193,14 @@ export function SampleDigitizationPage() {
                   value={destinationAssetId}
                   onChange={(e) => setDestinationAssetId(e.target.value)}
                   placeholder={`projects/${targetGeeProjectId || "your-project"}/assets/rwanda_samples`}
-                  className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring font-mono"
+                  className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring font-mono"
                 />
               </div>
 
               <Button
                 onClick={() => pushSamplesToGeeAssetMut.mutate()}
                 disabled={pushSamplesToGeeAssetMut.isPending || samples.length === 0 || !destinationAssetId}
-                className="w-full gap-2 bg-blue-600 hover:bg-blue-500 text-white"
+                className="w-full gap-2 bg-foreground text-background hover:bg-foreground/90 font-medium text-xs h-9 shadow-2xs"
               >
                 {pushSamplesToGeeAssetMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
                 Push {samples.length} Sample(s) to GEE Asset
@@ -2885,9 +4208,9 @@ export function SampleDigitizationPage() {
             </div>
 
             {/* Card 3: Upload Spatial File (.tif / .zip) */}
-            <div className="border rounded-lg p-5 bg-card space-y-4">
-              <div className="flex items-center gap-2 font-semibold">
-                <Upload className="w-5 h-5 text-amber-500" />
+            <div className="border border-border/60 rounded-lg p-5 bg-card space-y-4">
+              <div className="flex items-center gap-2 font-medium text-sm text-foreground">
+                <Upload className="w-4 h-4 text-foreground" />
                 Upload Raster / Vector File to GEE
               </div>
               <p className="text-xs text-muted-foreground">
@@ -2909,14 +4232,14 @@ export function SampleDigitizationPage() {
                   value={assetName}
                   onChange={(e) => setAssetName(e.target.value)}
                   placeholder="rwanda_raster_2026"
-                  className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring font-mono"
+                  className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring font-mono"
                 />
               </div>
 
               <Button
                 onClick={() => geeMut.mutate()}
                 disabled={geeMut.isPending || !geeFile || !assetName}
-                className="w-full gap-2 bg-amber-600 hover:bg-amber-500 text-white"
+                className="w-full gap-2 bg-foreground text-background hover:bg-foreground/90 font-medium text-xs h-9 shadow-2xs"
               >
                 {geeMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
                 Push File to Earth Engine Asset
@@ -2924,45 +4247,46 @@ export function SampleDigitizationPage() {
             </div>
           </div>
         </TabsContent>
+        )}
       </Tabs>
       </div>
 
       {/* ADD DATA MODAL */}
       <Dialog open={isAddDataModalOpen} onOpenChange={setIsAddDataModalOpen}>
-        <DialogContent className="sm:max-w-[600px]">
+        <DialogContent className="sm:max-w-[600px] bg-card border-border/60">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-lg font-bold">
-              <span>📁</span> Add Data to Map
+            <DialogTitle className="flex items-center gap-2 text-base font-semibold text-foreground">
+              <Layers className="w-4 h-4 text-foreground" /> Add Data to Map
             </DialogTitle>
-            <DialogDescription className="text-xs">
+            <DialogDescription className="text-xs text-muted-foreground">
               Load imagery or vector features to the map for visualization or to use as the base for classification.
             </DialogDescription>
           </DialogHeader>
 
           <Tabs value={addDataTab} onValueChange={setAddDataTab}>
-            <TabsList className="w-full grid grid-cols-2">
-              <TabsTrigger value="upload">Upload Local</TabsTrigger>
-              <TabsTrigger value="rare">RARE DATA</TabsTrigger>
+            <TabsList className="w-full grid grid-cols-2 bg-muted/50 border border-border/50">
+              <TabsTrigger value="upload" className="text-xs">Upload Local</TabsTrigger>
+              <TabsTrigger value="rare" className="text-xs">Data Catalog</TabsTrigger>
             </TabsList>
             
             <TabsContent value="upload" className="space-y-4 pt-4">
-              <Label className="cursor-pointer flex flex-col items-center justify-center p-12 border-2 border-dashed rounded-lg border-emerald-500/30 hover:bg-emerald-950/20 transition-colors">
-                {uploadBusy ? <Loader2 className="w-8 h-8 animate-spin text-emerald-400 mb-2" /> : <Upload className="w-8 h-8 text-emerald-400 mb-2" />}
-                <span className="text-sm font-medium">{uploadBusy ? "Uploading..." : "Click to select file (.tif, .geojson, .zip)"}</span>
+              <Label className="cursor-pointer flex flex-col items-center justify-center p-12 border border-dashed rounded-lg border-border/60 hover:bg-muted/30 transition-colors">
+                {uploadBusy ? <Loader2 className="w-7 h-7 animate-spin text-muted-foreground mb-2" /> : <Upload className="w-7 h-7 text-muted-foreground mb-2" />}
+                <span className="text-xs font-medium text-foreground">{uploadBusy ? "Uploading..." : "Click to select file (.tif, .geojson, .zip)"}</span>
                 <input type="file" className="hidden" accept=".tif,.tiff,.geojson,.zip,.csv" onChange={(e) => { handleFileUpload(e); setIsAddDataModalOpen(false); }} disabled={uploadBusy} />
               </Label>
             </TabsContent>
             
             <TabsContent value="rare" className="space-y-4 pt-4">
               <div className="space-y-1">
-                <Label>Select Dataset</Label>
+                <Label className="text-xs font-medium">Select Dataset</Label>
                 <select
                   value={selectedDatasetId}
                   onChange={(e) => setSelectedDatasetId(e.target.value)}
-                  className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
                 >
                   <option value="">Select a dataset...</option>
-                  <optgroup label="Official RARE DATA">
+                  <optgroup label="Official Catalog">
                     {adminDatasets?.records?.map((r: any) => (
                       <option key={r.id} value={r.id}>[OFFICIAL] {r.name} ({r.file_type})</option>
                     ))}
@@ -2986,7 +4310,7 @@ export function SampleDigitizationPage() {
                   }
 
                   const targetUrl = key.startsWith("url::") ? key.slice(5) : key;
-                  fetch(`https://geoportal-api-ygzi.onrender.com/api/native/imagery/bounds?url=${encodeURIComponent(targetUrl)}`)
+                  fetch(`${BASE}/native/imagery/bounds?url=${encodeURIComponent(targetUrl)}`)
                     .then((r) => r.json())
                     .then((data) => {
                       if (data.bbox) setActiveBbox(data.bbox);
@@ -2997,9 +4321,9 @@ export function SampleDigitizationPage() {
                     const rawUrl = key.slice(5);
                     setClassificationSource("native_cog");
                     setCustomAssetId(rawUrl);
-                    setNativePreviewUrl(`https://geoportal-api-ygzi.onrender.com/api/native/imagery/tiles/{z}/{x}/{y}?url=${encodeURIComponent(rawUrl)}`);
+                    setNativePreviewUrl(`${BASE}/native/imagery/tiles/{z}/{x}/{y}?url=${encodeURIComponent(rawUrl)}`);
                     toast({
-                      title: "Dataset Configured for Classification",
+                      title: "Dataset Loaded",
                       description: `Loaded ${d.name}. Flying to dataset location...`,
                     });
                   } else if (key.startsWith("projects/") || key.startsWith("users/")) {
@@ -3014,7 +4338,7 @@ export function SampleDigitizationPage() {
                   } else {
                     setClassificationSource("native_cog");
                     setCustomAssetId(key);
-                    setNativePreviewUrl(`https://geoportal-api-ygzi.onrender.com/api/native/imagery/tiles/{z}/{x}/{y}?url=${encodeURIComponent(key)}`);
+                    setNativePreviewUrl(`${BASE}/native/imagery/tiles/{z}/{x}/{y}?url=${encodeURIComponent(key)}`);
                     toast({
                       title: "Local Dataset Selected",
                       description: `Loaded ${d.name}. Flying to dataset location...`,
@@ -3023,9 +4347,9 @@ export function SampleDigitizationPage() {
                   setIsAddDataModalOpen(false);
                 }}
                 disabled={!selectedDatasetId}
-                className="w-full gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
+                className="w-full gap-1.5 bg-foreground text-background hover:bg-foreground/90 font-medium text-xs h-9 shadow-2xs"
               >
-                <Database className="w-4 h-4" /> Classify by Here
+                <Database className="w-3.5 h-3.5" /> Classify by Here
               </Button>
             </TabsContent>
             
@@ -3036,22 +4360,22 @@ export function SampleDigitizationPage() {
 
       {/* SAVE DIGITIZATION SESSION MODAL */}
       <Dialog open={isSaveModalOpen} onOpenChange={setIsSaveModalOpen}>
-        <DialogContent className="sm:max-w-[520px]">
+        <DialogContent className="sm:max-w-[520px] bg-card border-border/60">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-lg font-bold">
-              <Save className="w-5 h-5 text-emerald-500" />
-              Save &amp; Name Digitization Session
+            <DialogTitle className="flex items-center gap-2 text-base font-semibold text-foreground">
+              <Save className="w-4 h-4 text-foreground" />
+              Save Digitization Session
             </DialogTitle>
-            <DialogDescription className="text-xs">
-              You have digitized {sessionSamples.length} feature(s) in this editing session. Name your training dataset batch to save and commit it to your database.
+            <DialogDescription className="text-xs text-muted-foreground">
+              You have digitized {sessionSamples.length} feature(s) in this editing session. Name your training dataset batch to commit it to the database.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
-            <div className="bg-muted/50 p-3 rounded-lg text-xs space-y-1.5 border">
-              <div className="font-semibold text-foreground flex items-center justify-between">
+            <div className="bg-muted/30 p-3 rounded-lg text-xs space-y-1.5 border border-border/50">
+              <div className="font-medium text-foreground flex items-center justify-between">
                 <span>Session Summary:</span>
-                <Badge variant="outline" className="font-mono text-[10px]">{sessionSamples.length} feature(s) buffered</Badge>
+                <Badge variant="outline" className="font-mono text-[10px] border-border/60 text-muted-foreground">{sessionSamples.length} feature(s) buffered</Badge>
               </div>
               <div className="flex flex-wrap gap-1.5 pt-1">
                 {Object.entries(
@@ -3060,17 +4384,21 @@ export function SampleDigitizationPage() {
                     acc[c] = (acc[c] || 0) + 1;
                     return acc;
                   }, {} as Record<string, number>)
-                ).map(([cName, count]) => (
-                  <span key={cName} className="bg-background border px-2 py-0.5 rounded text-[11px] font-medium flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-full inline-block" style={{ backgroundColor: sessionSamples.find(s => s.class_label === cName)?.color || "#0F6E4F" }} />
-                    {cName}: {count} feature(s)
-                  </span>
-                ))}
+                ).map(([cName, count]) => {
+                  const sampleObj = sessionSamples.find(s => s.class_label === cName);
+                  const swatchColor = getRefinedColor(sampleObj?.color || "#64748b");
+                  return (
+                    <span key={cName} className="bg-background border border-border/60 px-2 py-0.5 rounded text-[11px] font-medium flex items-center gap-1.5 text-foreground">
+                      <span className="w-2 h-2 rounded-full inline-block border border-white/20" style={{ backgroundColor: swatchColor }} />
+                      {cName}: {count}
+                    </span>
+                  );
+                })}
               </div>
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="dataset-name-input" className="text-xs font-semibold">
+              <Label htmlFor="dataset-name-input" className="text-xs font-medium">
                 Training Dataset / Batch Name <span className="text-destructive">*</span>
               </Label>
               <Input
@@ -3078,7 +4406,7 @@ export function SampleDigitizationPage() {
                 value={datasetNameInput}
                 onChange={(e) => setDatasetNameInput(e.target.value)}
                 placeholder="e.g. Forest_Water_Batch_1"
-                className="font-mono text-xs"
+                className="font-mono text-xs bg-background"
               />
               <p className="text-[11px] text-muted-foreground">
                 This name tags all digitized features so you can filter, download, or train Supervised ML models on this specific batch.
@@ -3086,7 +4414,7 @@ export function SampleDigitizationPage() {
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="session-creator-input" className="text-xs font-semibold">
+              <Label htmlFor="session-creator-input" className="text-xs font-medium">
                 Creator / Author Name
               </Label>
               <Input
@@ -3094,16 +4422,16 @@ export function SampleDigitizationPage() {
                 value={sessionCreatorInput}
                 onChange={(e) => setSessionCreatorInput(e.target.value)}
                 placeholder="Your name or team name"
-                className="text-xs"
+                className="text-xs bg-background"
               />
             </div>
           </div>
 
           <DialogFooter className="gap-2 sm:gap-0">
             <Button
-              variant="destructive"
+              variant="outline"
               size="sm"
-              className="text-xs font-medium"
+              className="text-xs font-medium border-border/60 hover:bg-muted text-muted-foreground"
               onClick={() => {
                 setSessionSamples([]);
                 setIsEditing(false);
@@ -3114,12 +4442,12 @@ export function SampleDigitizationPage() {
               Discard Edits
             </Button>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" className="text-xs" onClick={() => setIsSaveModalOpen(false)}>
+              <Button variant="ghost" size="sm" className="text-xs text-muted-foreground hover:text-foreground" onClick={() => setIsSaveModalOpen(false)}>
                 Continue Editing
               </Button>
               <Button
                 size="sm"
-                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold gap-1.5 text-xs"
+                className="bg-foreground text-background hover:bg-foreground/90 font-medium gap-1.5 text-xs shadow-2xs"
                 disabled={batchSaveMut.isPending || !datasetNameInput.trim()}
                 onClick={() => batchSaveMut.mutate()}
               >
@@ -3127,6 +4455,892 @@ export function SampleDigitizationPage() {
                 Save &amp; Commit Dataset
               </Button>
             </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* MULTI-SPECTRAL SIGNATURE (Z-PROFILE) MODAL */}
+      <Dialog open={showSpectralProfilesModal} onOpenChange={setShowSpectralProfilesModal}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <div className="flex items-center justify-between">
+              <div>
+                <DialogTitle className="flex items-center gap-2 text-xl font-bold">
+                  <Activity className="w-5 h-5 text-emerald-500" />
+                  Multi-Spectral Signature Analysis (Z-Profile)
+                </DialogTitle>
+                <DialogDescription className="text-xs">
+                  Surface reflectance curves across Sentinel-2 multi-spectral bands (Blue → SWIR-2) for digitized classes.
+                </DialogDescription>
+              </div>
+              {spectralProfilesData && (
+                <Badge variant="outline" className="font-mono text-xs">
+                  {spectralProfilesData.total_pixels_sampled} Pixels Sampled
+                </Badge>
+              )}
+            </div>
+          </DialogHeader>
+
+          {spectralProfilesData && (
+            <div className="space-y-6 py-2">
+              {/* Spectral Curve Recharts Line Chart */}
+              <div className="bg-card p-4 rounded-xl border shadow-sm space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-semibold flex items-center gap-2">
+                    <Satellite className="w-4 h-4 text-primary" />
+                    Mean Surface Reflectance Curves
+                  </h4>
+                  <span className="text-[11px] text-muted-foreground font-mono">
+                    Y-Axis: Reflectance (0.00 – 1.00) | X-Axis: Band &amp; Center Wavelength (nm)
+                  </span>
+                </div>
+
+                <div className="h-[320px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart
+                      data={spectralProfilesData.bands.map((b: any) => {
+                        const row: Record<string, any> = {
+                          bandLabel: `${b.band} (${b.wavelength}nm)`,
+                          bandName: b.name,
+                          desc: b.desc,
+                        };
+                        Object.entries(spectralProfilesData.classes).forEach(([cName, cData]: [string, any]) => {
+                          row[cName] = cData.means[b.band] ?? 0;
+                          row[`${cName}_std`] = cData.stds[b.band] ?? 0;
+                        });
+                        return row;
+                      })}
+                      margin={{ top: 15, right: 25, left: 0, bottom: 25 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
+                      <XAxis
+                        dataKey="bandLabel"
+                        tick={{ fontSize: 11 }}
+                        interval={0}
+                        angle={-20}
+                        textAnchor="end"
+                      />
+                      <YAxis
+                        domain={[0, (dataMax: number) => Math.min(1.0, Math.ceil(dataMax * 1.2 * 10) / 10 || 0.6)]}
+                        tick={{ fontSize: 11 }}
+                        tickFormatter={(v) => `${(v * 100).toFixed(0)}%`}
+                      />
+                      <RechartsTooltip
+                        content={({ active, payload, label }) => {
+                          if (active && payload && payload.length) {
+                            const bandInfo = spectralProfilesData.bands.find(
+                              (b: any) => `${b.band} (${b.wavelength}nm)` === label
+                            );
+                            return (
+                              <div className="bg-popover text-popover-foreground p-3 rounded-lg shadow-lg border text-xs space-y-2">
+                                <div className="font-bold border-b pb-1">
+                                  {label} - {bandInfo?.name}
+                                </div>
+                                <div className="text-[11px] text-muted-foreground italic">
+                                  {bandInfo?.desc}
+                                </div>
+                                <div className="space-y-1">
+                                  {payload.map((entry: any) => (
+                                    <div key={entry.name} className="flex items-center justify-between gap-4 font-mono">
+                                      <span className="flex items-center gap-1.5 font-sans">
+                                        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: entry.color }} />
+                                        {entry.name}:
+                                      </span>
+                                      <strong>{(entry.value * 100).toFixed(1)}%</strong>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          }
+                          return null;
+                        }}
+                      />
+                      <RechartsLegend verticalAlign="top" height={36} />
+                      {Object.entries(spectralProfilesData.classes).map(([cName, cData]: [string, any]) => (
+                        <Line
+                          key={cName}
+                          type="monotone"
+                          dataKey={cName}
+                          name={cName}
+                          stroke={cData.color || "#3b82f6"}
+                          strokeWidth={2.5}
+                          dot={{ r: 4, strokeWidth: 1.5, fill: "#fff" }}
+                          activeDot={{ r: 6 }}
+                        />
+                      ))}
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              {/* Class Separability Diagnostics Table */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-xs font-medium flex items-center gap-2 text-foreground">
+                      <Target className="w-4 h-4 text-muted-foreground" />
+                      Class Pairwise Separability Matrix (Spectral Distance)
+                    </h4>
+                    <p className="text-[11px] text-muted-foreground">
+                      Mathematical Euclidean separation across all 10 bands. Values &lt; 0.08 indicate high risk of ML confusion.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-border/60 overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead className="bg-muted/30 text-muted-foreground font-medium border-b border-border/60">
+                      <tr>
+                        <th className="text-left px-3 py-2">Class Comparison</th>
+                        <th className="text-center px-3 py-2 w-32">Spectral Distance</th>
+                        <th className="text-center px-3 py-2 w-32">Separability</th>
+                        <th className="text-left px-3 py-2">Analysis &amp; Guidance</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/60">
+                      {spectralProfilesData.separability.map((sep: any, idx: number) => (
+                        <tr key={idx} className="hover:bg-muted/20 transition-colors">
+                          <td className="px-3 py-2.5 font-medium flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full shrink-0 border border-white/20" style={{ backgroundColor: getRefinedColor(spectralProfilesData.classes[sep.class_a]?.color || "#38bdf8") }} />
+                            <span>{sep.class_a}</span>
+                            <span className="text-muted-foreground">vs</span>
+                            <span className="w-2.5 h-2.5 rounded-full shrink-0 border border-white/20" style={{ backgroundColor: getRefinedColor(spectralProfilesData.classes[sep.class_b]?.color || "#38bdf8") }} />
+                            <span>{sep.class_b}</span>
+                          </td>
+                          <td className="px-3 py-2.5 text-center font-mono">
+                            {sep.distance.toFixed(4)}
+                          </td>
+                          <td className="px-3 py-2.5 text-center">
+                            <Badge
+                              variant="outline"
+                              className={`text-[10px] uppercase font-mono ${
+                                sep.status === "separable"
+                                  ? "bg-muted/50 text-foreground border-border/60"
+                                  : sep.status === "moderate"
+                                  ? "bg-muted/30 text-muted-foreground border-border/50"
+                                  : "bg-destructive/10 text-destructive border-destructive/30"
+                              }`}
+                            >
+                              {sep.status}
+                            </Badge>
+                          </td>
+                          <td className="px-3 py-2.5 text-muted-foreground leading-relaxed text-[11px]">
+                            {sep.note}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setShowSpectralProfilesModal(false)} className="text-xs">
+              Close
+            </Button>
+            <Button
+              size="sm"
+              className="bg-foreground text-background hover:bg-foreground/90 font-medium gap-1.5 text-xs shadow-2xs"
+              onClick={() => {
+                setShowSpectralProfilesModal(false);
+                trainSupervisedClassifierDirectly();
+              }}
+            >
+              <Cpu className="w-3.5 h-3.5" />
+              Train Classifier Now
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* SHARE & EXPORT STUDIO MODAL */}
+      <Dialog open={isShareModalOpen} onOpenChange={setIsShareModalOpen}>
+        <DialogContent className="max-w-2xl bg-card border-border/60 shadow-2xl">
+          <DialogHeader>
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-muted/60 border border-border/60 flex items-center justify-center text-foreground">
+                <Share2 className="w-4 h-4" />
+              </div>
+              <div>
+                <DialogTitle className="text-base font-semibold flex items-center gap-2 text-foreground">
+                  Share &amp; Export Studio
+                  <Badge variant="outline" className="text-[10px] font-mono text-muted-foreground border-border/60 bg-muted/30">
+                    Live
+                  </Badge>
+                </DialogTitle>
+                <DialogDescription className="text-xs text-muted-foreground">
+                  Collaborate with team members, export GIS training layers, and download desktop GIS cartographic styles.
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+
+          <div className="space-y-5 py-2">
+            {/* 1. Shareable Session URL */}
+            <div className="p-3.5 rounded-lg bg-muted/30 border border-border/60 space-y-2">
+              <Label className="text-xs font-medium flex items-center justify-between text-foreground">
+                <span className="flex items-center gap-1.5">
+                  <LinkIcon className="w-3.5 h-3.5 text-muted-foreground" />
+                  Direct Session Link
+                </span>
+                <span className="text-[10px] text-muted-foreground">Instant collaboration</span>
+              </Label>
+              <div className="flex items-center gap-2">
+                <Input
+                  readOnly
+                  value={typeof window !== "undefined" ? window.location.href : ""}
+                  className="h-8 text-xs font-mono bg-background border-border/60"
+                />
+                <Button
+                  size="sm"
+                  onClick={handleCopyShareLink}
+                  className="h-8 gap-1.5 text-xs font-medium px-3 shrink-0 bg-foreground text-background hover:bg-foreground/90 shadow-2xs"
+                >
+                  {copiedLink ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedLink ? "Copied" : "Copy Link"}</span>
+                </Button>
+              </div>
+            </div>
+
+            {/* 2. Standard Vector GIS Formats */}
+            <div className="space-y-2.5">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-medium text-foreground flex items-center gap-1.5">
+                  <Download className="w-3.5 h-3.5 text-muted-foreground" />
+                  Export Training Samples ({allCombinedSamples.length} Total)
+                </Label>
+                <span className="text-[10px] text-muted-foreground font-mono">
+                  {Object.keys(groupedSamples).length} Classes
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                {/* ESRI Shapefile */}
+                <div className="p-3 rounded-lg border border-border/60 bg-card/60 hover:border-border transition-colors flex flex-col justify-between space-y-2">
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-medium text-foreground">Shapefile (.zip)</span>
+                      <Badge variant="outline" className="text-[9px] font-mono border-border/60 text-muted-foreground">ESRI</Badge>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                      Complete package (.shp, .shx, .dbf, .prj) ready for ArcGIS &amp; QGIS.
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={downloadShapefile}
+                    disabled={allCombinedSamples.length === 0}
+                    className="w-full h-7 text-xs font-medium gap-1.5 border-border/60 hover:bg-muted text-foreground"
+                  >
+                    <Download className="w-3 h-3" />
+                    Download .zip
+                  </Button>
+                </div>
+
+                {/* GeoJSON */}
+                <div className="p-3 rounded-lg border border-border/60 bg-card/60 hover:border-border transition-colors flex flex-col justify-between space-y-2">
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-medium text-foreground">GeoJSON</span>
+                      <Badge variant="outline" className="text-[9px] font-mono border-border/60 text-muted-foreground">RFC 7946</Badge>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                      Standard web-GIS format with geometries &amp; class attributes.
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={downloadGeoJSON}
+                    disabled={allCombinedSamples.length === 0}
+                    className="w-full h-7 text-xs font-medium gap-1.5 border-border/60 hover:bg-muted text-foreground"
+                  >
+                    <Download className="w-3 h-3" />
+                    Download .geojson
+                  </Button>
+                </div>
+
+                {/* CSV Table */}
+                <div className="p-3 rounded-lg border border-border/60 bg-card/60 hover:border-border transition-colors flex flex-col justify-between space-y-2">
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-medium text-foreground">CSV Spreadsheet</span>
+                      <Badge variant="outline" className="text-[9px] font-mono border-border/60 text-muted-foreground">Tabular</Badge>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                      Tabular format for Excel, R, pandas, or custom ML pipelines.
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={downloadCSV}
+                    disabled={allCombinedSamples.length === 0}
+                    className="w-full h-7 text-xs font-medium gap-1.5 border-border/60 hover:bg-muted text-foreground"
+                  >
+                    <Download className="w-3 h-3" />
+                    Download .csv
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            {/* 3. Cartography & Desktop GIS Package */}
+            <div className="space-y-2.5">
+              <Label className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                <Palette className="w-3.5 h-3.5 text-primary" />
+                Cartographic Symbology &amp; QGIS Styles
+              </Label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {/* QGIS Style .qml */}
+                <div className="p-3 rounded-lg border border-border bg-card/60 flex items-center justify-between gap-3">
+                  <div>
+                    <span className="text-xs font-bold text-foreground block">QGIS Palette Style (.qml)</span>
+                    <span className="text-[11px] text-muted-foreground">XML color map for QGIS layer styling</span>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={downloadQMLStyle}
+                    disabled={allCombinedSamples.length === 0 && !classifyResult}
+                    className="h-7 text-xs font-semibold gap-1.5 border-primary/30 text-primary hover:bg-primary/10 shrink-0"
+                  >
+                    <Download className="w-3 h-3" />
+                    Export .qml
+                  </Button>
+                </div>
+
+                {/* Classified GeoTIFF (if available) */}
+                <div className="p-3 rounded-lg border border-border bg-card/60 flex items-center justify-between gap-3">
+                  <div>
+                    <span className="text-xs font-bold text-foreground block">Classified GeoTIFF Raster</span>
+                    <span className="text-[11px] text-muted-foreground">
+                      {classifyResult?.download_url ? "Ready for download" : "Run ML Classifier first"}
+                    </span>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      if (classifyResult?.download_url) {
+                        window.open(classifyResult.download_url, "_blank");
+                      }
+                    }}
+                    disabled={!classifyResult?.download_url}
+                    className="h-7 text-xs font-semibold gap-1.5 border-primary/30 text-primary hover:bg-primary/10 shrink-0"
+                  >
+                    <Download className="w-3 h-3" />
+                    GeoTIFF
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            {/* 4. Dataset Overview Summary Pill */}
+            <div className="bg-muted/40 p-2.5 rounded-lg border border-border flex items-center justify-between text-xs text-muted-foreground">
+              <span className="flex items-center gap-2">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Session contains <strong>{allCombinedSamples.length}</strong> total samples across <strong>{Object.keys(groupedSamples).length}</strong> classes</span>
+              </span>
+              <span className="font-mono text-[10px]">CRS: EPSG:4326 (WGS84)</span>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setIsShareModalOpen(false)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Option 1: Study Area (AOI) Configuration Modal ─────────────── */}
+      <Dialog open={isStudyAreaModalOpen} onOpenChange={setIsStudyAreaModalOpen}>
+        <DialogContent className="max-w-xl bg-card border-border/60 shadow-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base font-semibold text-foreground">
+              <MapPin className="w-4 h-4 text-sky-400" />
+              Define &amp; Select Study Area (AOI)
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Delineate spatial bounds for sample collection, training dataset extraction, and satellite image inference.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            {/* Status & Boundary Overview Card */}
+            <div className={`p-3.5 rounded-lg border transition-all ${
+              studyArea 
+                ? "border-emerald-500/30 bg-emerald-500/5 ring-1 ring-emerald-500/10" 
+                : "border-sky-500/30 bg-sky-500/5 ring-1 ring-sky-500/10"
+            }`}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className={`w-2.5 h-2.5 rounded-full ${studyArea ? "bg-emerald-400 animate-pulse" : "bg-sky-400"}`} />
+                  <div>
+                    <span className="text-xs font-semibold text-foreground block">
+                      {studyArea ? "Study Area Boundary Active" : "No Study Area Configured"}
+                    </span>
+                    <span className="text-[11px] text-muted-foreground">
+                      {studyArea 
+                        ? `${studyArea.features?.length || 1} feature(s) defined${aoiAreaKm2 ? ` • ~${aoiAreaKm2} km²` : ""}`
+                        : "Required to enable sample digitization and satellite inference."}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <Badge variant="outline" className={`text-[10px] font-mono px-2 py-0.5 ${
+                    studyArea 
+                      ? "border-emerald-500/40 text-emerald-300 bg-emerald-500/10" 
+                      : "border-sky-500/40 text-sky-300 bg-sky-500/10"
+                  }`}>
+                    {studyArea ? "Active" : "Required"}
+                  </Badge>
+                  {studyArea && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={clearStudyArea}
+                      className="h-6 text-[11px] px-2 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                      title="Clear current boundary"
+                    >
+                      Clear AOI
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Navigation Tabs */}
+            <Tabs value={studyAreaModalTab} onValueChange={setStudyAreaModalTab} className="w-full">
+              <TabsList className="w-full grid grid-cols-3 bg-muted/40 p-0.5 border border-border/60 rounded-lg h-9">
+                <TabsTrigger value="presets" className="text-xs font-medium data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-2xs">
+                  Regional Presets
+                </TabsTrigger>
+                <TabsTrigger value="draw" className="text-xs font-medium data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-2xs">
+                  Interactive Draw
+                </TabsTrigger>
+                <TabsTrigger value="upload" className="text-xs font-medium data-[state=active]:bg-card data-[state=active]:text-foreground data-[state=active]:shadow-2xs">
+                  Upload File
+                </TabsTrigger>
+              </TabsList>
+
+              {/* ── Tab 1: Regional Presets & Viewport Extent ── */}
+              <TabsContent value="presets" className="space-y-3 pt-2">
+                {/* 1-Click: Use Map Viewport */}
+                <div className="p-3 rounded-lg border border-border/60 bg-muted/20 hover:bg-muted/30 transition-all flex items-center justify-between">
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-1.5">
+                      <Maximize2 className="w-3.5 h-3.5 text-sky-400" />
+                      <span className="text-xs font-semibold text-foreground">Current Map Viewport</span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      Capture bounding box from your current map center and zoom level.
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    onClick={applyCurrentViewportAsStudyArea}
+                    className="h-8 text-xs font-medium bg-foreground text-background hover:bg-foreground/90 shrink-0 px-3 shadow-2xs"
+                  >
+                    Use Viewport
+                  </Button>
+                </div>
+
+                {/* Regional Extent Presets */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between text-[11px] text-muted-foreground font-medium px-0.5">
+                    <span>Curated Rwanda Regional Extents</span>
+                    <span>5 Available</span>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[220px] overflow-y-auto pr-1">
+                    {STUDY_AREA_PRESETS.map((preset) => (
+                      <div
+                        key={preset.id}
+                        onClick={() => applyStudyAreaPreset(preset)}
+                        className="p-2.5 rounded-lg border border-border/60 bg-muted/15 hover:bg-muted/30 hover:border-sky-500/50 cursor-pointer transition-all group flex flex-col justify-between"
+                      >
+                        <div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-semibold text-foreground group-hover:text-sky-300 transition-colors">
+                              {preset.name}
+                            </span>
+                            <ChevronRight className="w-3.5 h-3.5 text-muted-foreground group-hover:text-sky-400 group-hover:translate-x-0.5 transition-all" />
+                          </div>
+                          <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-2">
+                            {preset.desc}
+                          </p>
+                        </div>
+                        <div className="mt-2 flex items-center justify-between text-[10px] text-muted-foreground/80 font-mono">
+                          <span>[{preset.bbox[0]}, {preset.bbox[1]}]</span>
+                          <span className="text-sky-400 font-sans font-medium text-[10px]">Select &rarr;</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </TabsContent>
+
+              {/* ── Tab 2: Interactive Draw ── */}
+              <TabsContent value="draw" className="space-y-3 pt-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Option A: Box (Rectangle) */}
+                  <div
+                    onClick={() => startAoiDrawing("rectangle")}
+                    className="p-3.5 rounded-lg border border-border/60 bg-muted/20 hover:bg-muted/30 hover:border-sky-500/60 transition-all cursor-pointer group flex flex-col justify-between space-y-3"
+                  >
+                    <div className="space-y-1">
+                      <div className="w-7 h-7 rounded-md bg-sky-500/10 border border-sky-500/30 flex items-center justify-center text-sky-400 group-hover:scale-105 transition-transform">
+                        <Square className="w-4 h-4" />
+                      </div>
+                      <span className="text-xs font-semibold text-foreground block pt-1">
+                        Box (Rectangle AOI)
+                      </span>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">
+                        Recommended for high stability. Click and drag or click two diagonal corners on the map.
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="w-full h-7 text-xs font-medium border-border/60 group-hover:border-sky-500/50 group-hover:text-sky-300"
+                    >
+                      Draw Rectangle Box
+                    </Button>
+                  </div>
+
+                  {/* Option B: Freeform Polygon */}
+                  <div
+                    onClick={() => startAoiDrawing("polygon")}
+                    className="p-3.5 rounded-lg border border-border/60 bg-muted/20 hover:bg-muted/30 hover:border-sky-500/60 transition-all cursor-pointer group flex flex-col justify-between space-y-3"
+                  >
+                    <div className="space-y-1">
+                      <div className="w-7 h-7 rounded-md bg-sky-500/10 border border-sky-500/30 flex items-center justify-center text-sky-400 group-hover:scale-105 transition-transform">
+                        <MapPin className="w-4 h-4" />
+                      </div>
+                      <span className="text-xs font-semibold text-foreground block pt-1">
+                        Freeform Polygon AOI
+                      </span>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">
+                        For irregular borders or custom administrative units. Click vertices on map, then click start point to close.
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="w-full h-7 text-xs font-medium border-border/60 group-hover:border-sky-500/50 group-hover:text-sky-300"
+                    >
+                      Draw Freeform Polygon
+                    </Button>
+                  </div>
+                </div>
+              </TabsContent>
+
+              {/* ── Tab 3: Upload File ── */}
+              <TabsContent value="upload" className="space-y-3 pt-2">
+                <div className="relative border-2 border-dashed border-border/70 hover:border-sky-500/60 rounded-xl p-6 text-center bg-muted/15 transition-all group">
+                  <input
+                    type="file"
+                    accept=".geojson,.json,.zip"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleAoiFileUpload(file);
+                      e.target.value = "";
+                    }}
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                  />
+                  <div className="flex flex-col items-center justify-center space-y-2">
+                    <div className="w-10 h-10 rounded-full bg-muted/40 border border-border/60 flex items-center justify-center text-muted-foreground group-hover:text-sky-400 group-hover:scale-110 transition-all">
+                      <Upload className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-foreground">
+                        Click or drag boundary file to upload
+                      </p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                        Supports <span className="font-mono text-sky-400">.geojson</span>, <span className="font-mono text-sky-400">.json</span>, or zipped Shapefile <span className="font-mono text-sky-400">.zip</span> (.shp, .shx, .dbf)
+                      </p>
+                    </div>
+                    <Badge variant="outline" className="text-[10px] font-mono border-border/60 text-muted-foreground">
+                      Max file size: 25MB • Standard CRS: WGS84
+                    </Badge>
+                  </div>
+                </div>
+              </TabsContent>
+            </Tabs>
+          </div>
+
+          <DialogFooter className="flex items-center justify-between sm:justify-between w-full pt-2 border-t border-border/40">
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="modal-show-study-area"
+                checked={showStudyArea}
+                disabled={!studyArea}
+                onChange={(e) => setShowStudyArea(e.target.checked)}
+                className="h-3.5 w-3.5 rounded border-border text-foreground focus:ring-1 focus:ring-ring cursor-pointer"
+              />
+              <Label htmlFor="modal-show-study-area" className={`text-xs ${!studyArea ? "text-muted-foreground/50" : "text-muted-foreground cursor-pointer"}`}>
+                Show boundary vector overlay on map
+              </Label>
+            </div>
+            <Button variant="outline" size="sm" onClick={() => setIsStudyAreaModalOpen(false)} className="text-xs h-8">
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Option 1: Land Cover Class Palette Studio Modal ────────────── */}
+      <Dialog open={isClassPaletteModalOpen} onOpenChange={setIsClassPaletteModalOpen}>
+        <DialogContent className="max-w-xl bg-card border-border/60 shadow-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base font-semibold text-foreground">
+              <Palette className="w-4 h-4 text-foreground" />
+              Land Cover Class Palette &amp; Symbology
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Select an active class swatch to digitize, or customize class labels, colors, and numerical codes.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2 max-h-[70vh] overflow-y-auto custom-scrollbar pr-1">
+            {/* Active Class Highlight Banner */}
+            <div className="p-3 rounded-lg border border-border/60 bg-muted/30 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <span className="w-4 h-4 rounded-full inline-block shadow-2xs border border-white/20 shrink-0" style={{ backgroundColor: getRefinedColor(color) }} />
+                <div>
+                  <span className="text-[11px] text-muted-foreground block">Active Digitizing Class:</span>
+                  <span className="text-sm font-semibold text-foreground">{classLabel} (ID #{classValue})</span>
+                </div>
+              </div>
+              <Badge variant="outline" className="text-xs font-mono px-2 py-0.5 border-border/60 text-muted-foreground bg-muted/40">
+                {groupedSamples[classLabel]?.items.length || 0} samples ready
+              </Badge>
+            </div>
+
+            {/* 19 Land Cover Preset Swatches */}
+            <div className="space-y-2">
+              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider text-[10px] flex items-center justify-between">
+                <span>Select Land Cover Class ({LAND_COVER_PRESETS.length} Presets)</span>
+                <span className="font-mono text-[10px]">{Object.keys(groupedSamples).length} defined in dataset</span>
+              </Label>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 max-h-52 overflow-y-auto custom-scrollbar p-1.5 rounded-lg border border-border/60 bg-background/50">
+                {LAND_COVER_PRESETS.map((p, idx) => {
+                  const isSelected = classLabel.toLowerCase() === p.name.toLowerCase();
+                  const count = groupedSamples[p.name]?.items.length || 0;
+                  const refinedColor = getRefinedColor(p.color);
+                  return (
+                    <button
+                      key={p.name}
+                      type="button"
+                      onClick={() => {
+                        setClassLabel(p.name);
+                        setColor(p.color);
+                        setClassValue(idx + 1);
+                        if (isEditing) {
+                          setTimeout(() => autoStartDrawMode(drawMode, true), 50);
+                        }
+                      }}
+                      className={`text-[11px] px-2 py-1.5 rounded-md border flex items-center justify-between transition-all text-left ${
+                        isSelected
+                          ? "border-foreground bg-muted text-foreground font-medium ring-1 ring-border/80 shadow-2xs"
+                          : "border-border/50 bg-background/50 text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+                      }`}
+                    >
+                      <span className="flex items-center gap-1.5 truncate mr-1">
+                        <span className="w-2.5 h-2.5 rounded-full inline-block shrink-0 border border-white/20" style={{ backgroundColor: refinedColor }} />
+                        <span className="truncate">{p.name}</span>
+                      </span>
+                      <span className={`text-[10px] font-mono px-1 rounded ${count > 0 ? "bg-muted text-foreground font-medium" : "text-muted-foreground/40"}`}>
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Custom Class Inputs */}
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <div className="space-y-1">
+                <Label className="text-xs font-medium">Class Label</Label>
+                <Input
+                  value={classLabel}
+                  onChange={(e) => setClassLabel(e.target.value)}
+                  placeholder="e.g. Forest, Urban"
+                  className="h-8 text-xs bg-background"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs font-medium">Numerical ID</Label>
+                <Input
+                  type="number"
+                  value={classValue}
+                  onChange={(e) => setClassValue(parseInt(e.target.value) || 1)}
+                  className="h-8 text-xs bg-background"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <Label className="text-xs font-medium">Color Swatch</Label>
+                <Input
+                  type="color"
+                  value={color}
+                  onChange={(e) => setColor(e.target.value)}
+                  className="h-8 p-0.5 cursor-pointer bg-background"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs font-medium">Creator Tag</Label>
+                <Input
+                  value={creator}
+                  onChange={(e) => setCreator(e.target.value)}
+                  placeholder="Your initials/name"
+                  className="h-8 text-xs bg-background"
+                />
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="flex items-center justify-between sm:justify-between w-full">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsClassPaletteModalOpen(false)}
+              className="text-xs"
+            >
+              Close
+            </Button>
+            <Button
+              size="sm"
+              className="bg-foreground text-background hover:bg-foreground/90 font-medium gap-1.5 text-xs shadow-2xs"
+              onClick={() => {
+                setIsClassPaletteModalOpen(false);
+                if (!isEditing && studyArea) {
+                  setIsEditing(true);
+                  setSessionSamples([]);
+                  toast({ title: "Digitizing Started", description: `Collecting samples for '${classLabel}'` });
+                  setTimeout(() => autoStartDrawMode(drawMode === "pan" ? "point" : drawMode, true), 200);
+                }
+              }}
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>Select &amp; Apply ({classLabel})</span>
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Option 1: Dataset Readiness & Quality Inspector Modal ───────── */}
+      <Dialog open={isReadinessModalOpen} onOpenChange={setIsReadinessModalOpen}>
+        <DialogContent className="max-w-lg bg-card border-border/60 shadow-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base font-semibold text-foreground">
+              <Activity className="w-4 h-4 text-foreground" />
+              Dataset Readiness &amp; Quality Inspector
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              Evaluates class balance, sample volume, and generalization feasibility for Supervised Machine Learning.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            {/* Status Summary Banner */}
+            <div className="p-3.5 rounded-lg border border-border/60 bg-muted/30 space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-medium uppercase tracking-wider text-[11px] flex items-center gap-1.5 text-foreground">
+                  <Activity className="w-3.5 h-3.5 text-muted-foreground" />
+                  Overall Quality Status
+                </span>
+                <Badge variant="outline" className="font-mono text-xs border-border/60 bg-muted/50 text-foreground font-medium">
+                  {classBalanceMetrics.status === "healthy" ? "Healthy & Balanced" : classBalanceMetrics.status === "imbalanced" ? "High Imbalance" : classBalanceMetrics.status === "low_samples" ? "Low Sample Volume" : "Insufficient"}
+                </Badge>
+              </div>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                {classBalanceMetrics.message}
+              </p>
+            </div>
+
+            {/* Per-Class Distribution & Progress Bars */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <Label className="font-medium text-muted-foreground uppercase tracking-wider text-[10px]">
+                  Class Distribution ({Object.keys(groupedSamples).length} Classes • {allCombinedSamples.length} Samples)
+                </Label>
+                <span className="text-[10px] text-muted-foreground font-mono">Target: 10–20 samples/class</span>
+              </div>
+
+              {Object.keys(groupedSamples).length === 0 ? (
+                <div className="p-4 rounded-lg border border-border/60 text-center text-xs text-muted-foreground">
+                  No samples digitized yet. Click "Start Draw" on the top bar to begin.
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-56 overflow-y-auto custom-scrollbar pr-1">
+                  {Object.entries(groupedSamples).map(([label, grp]) => {
+                    const count = grp.items.length;
+                    const target = 15;
+                    const pct = Math.min(100, Math.round((count / target) * 100));
+                    const isLow = count < 5;
+                    const refinedColor = getRefinedColor(grp.color);
+                    return (
+                      <div key={label} className="p-2.5 rounded-lg border border-border/60 bg-muted/20 flex flex-col gap-1.5">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="flex items-center gap-2 font-medium text-foreground">
+                            <span className="w-2.5 h-2.5 rounded-full inline-block border border-white/20" style={{ backgroundColor: refinedColor }} />
+                            <span>{label}</span>
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono text-xs font-medium text-foreground">
+                              {count} sample{count === 1 ? "" : "s"}
+                            </span>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-5 px-1.5 text-[10px] text-muted-foreground hover:text-foreground"
+                              onClick={() => {
+                                setClassLabel(label);
+                                setColor(grp.color);
+                                setIsReadinessModalOpen(false);
+                                toast({ title: `Active Class: ${label}`, description: "Selected for digitizing." });
+                              }}
+                            >
+                              Digitize More
+                            </Button>
+                          </div>
+                        </div>
+                        <div className="w-full bg-muted/40 h-1.5 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full transition-all duration-300 ${isLow ? "bg-muted-foreground/60" : "bg-foreground"}`}
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Generalization Guidance Alert */}
+            <div className="bg-muted/30 p-2.5 rounded-lg border border-border/60 text-[11px] text-muted-foreground flex items-center gap-2">
+              <Info className="w-4 h-4 text-foreground shrink-0" />
+              <span>
+                <strong>ML Generalization Tip:</strong> Aim for 10–20 samples per class to achieve reliable holdout cross-validation in Random Forest and CART.
+              </span>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setIsReadinessModalOpen(false)} className="text-xs">
+              Close
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -1,23 +1,35 @@
 import React from "react";
 import { DatasetHarvester } from "@/components/DatasetHarvester";
-import { Globe2 } from "lucide-react";
+import { DataHarvesterEmblem } from "@/components/DataHarvesterEmblem";
 
 export function DataHarvesterPage() {
   return (
     <div className="flex flex-col h-full bg-background overflow-hidden relative">
-      <div className="flex items-center gap-2 text-primary font-semibold text-xl p-6 pb-2 shrink-0">
-        <Globe2 className="w-5 h-5" />
-        Universal Spatial Data Harvester
-      </div>
-      <p className="text-sm text-muted-foreground px-6 mb-4 shrink-0">
-        Deep scan any web page, STAC catalog, GitHub folder, or cloud link. Extract and acquire all spatial datasets with server-to-server speed.
-      </p>
+      {/* ── Minimalist Commercial Header ────────────────────────────── */}
+      <header className="shrink-0 border-b border-border/50 bg-card/40 backdrop-blur-md px-6 py-3.5">
+        <div className="max-w-[1500px] mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center shrink-0">
+              <DataHarvesterEmblem className="w-4 h-4 text-indigo-400" />
+            </div>
+            <div>
+              <h1 className="text-sm font-semibold tracking-tight text-foreground">
+                Spatial Data Harvester
+              </h1>
+              <p className="text-xs text-muted-foreground">
+                Scan, inspect, and import geospatial assets from cloud storage, STAC catalogs, and web portals.
+              </p>
+            </div>
+          </div>
+        </div>
+      </header>
 
-      <div className="flex-1 overflow-y-auto px-6 pb-8">
-        <div className="max-w-7xl mx-auto">
+      {/* ── Main Workstation Content ─────────────────────────────────── */}
+      <main className="flex-1 overflow-y-auto px-6 py-5 relative z-10">
+        <div className="max-w-[1500px] mx-auto">
           <DatasetHarvester />
         </div>
-      </div>
+      </main>
     </div>
   );
 }

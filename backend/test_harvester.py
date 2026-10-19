@@ -87,6 +87,97 @@ class TestHarvester(unittest.TestCase):
         self.assertEqual(t.progress, 100)
         self.assertEqual(t.result_data["asset_id"], "projects/my-proj/assets/test_asset")
 
+    def test_ssrf_safety_validation(self):
+        from harvester import is_safe_url, assert_safe_url
+        self.assertFalse(is_safe_url("http://localhost:8000/api"))
+        self.assertFalse(is_safe_url("http://127.0.0.1:8000/"))
+        self.assertFalse(is_safe_url("http://169.254.169.254/computeMetadata/v1/"))
+        self.assertFalse(is_safe_url("http://metadata.google.internal/"))
+        self.assertFalse(is_safe_url("http://10.0.0.5/secret"))
+        self.assertFalse(is_safe_url("http://192.168.1.100/admin"))
+        self.assertTrue(is_safe_url("https://waterportal.rwb.rw/"))
+        self.assertTrue(is_safe_url("https://earth-search.aws.element84.com/v1"))
+
+        with self.assertRaises(ValueError):
+            assert_safe_url("http://169.254.169.254/secret")
+
+    def test_sqlite_task_persistence(self):
+        from harvester import HarvesterTaskStore, create_task, get_task
+        task = create_task(action="save_to_portal", source_url="https://example.com/raster.tif", target_name="persistent_test")
+        
+        # Clear in-memory cache to force a reload from the SQLite DB
+        HarvesterTaskStore._cache.clear()
+        
+        loaded = get_task(task.task_id)
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded.task_id, task.task_id)
+        self.assertEqual(loaded.action, "save_to_portal")
+        self.assertEqual(loaded.target_name, "persistent_test")
+
+    def test_harvester_tasks_proxy(self):
+        from harvester import HARVESTER_TASKS, create_task
+        task = create_task(action="download", source_url="https://example.com/data.zip", target_name="proxy_test")
+        self.assertIn(task.task_id, HARVESTER_TASKS)
+        self.assertEqual(HARVESTER_TASKS.get(task.task_id).target_name, "proxy_test")
+
+    def test_direct_file_protocol_mode(self):
+        res = HarvesterScanner.scan_url("https://example.com/custom_layer?query=true", source_type="file")
+        self.assertEqual(res["source_type"], "direct_file")
+        self.assertEqual(res["count"], 1)
+        self.assertEqual(res["datasets"][0]["category"], "raster")
+
+    def test_shapefile_package_manifest_inspection(self):
+        import io, zipfile
+        from unittest.mock import MagicMock
+        
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr("districts.shp", b"dummy shp")
+            z.writestr("districts.shx", b"dummy shx")
+            z.writestr("districts.dbf", b"dummy dbf")
+            z.writestr("districts.prj", b"GEOGCS[\"GCS_WGS_1984\"...]")
+            z.writestr("elevation.tif", b"dummy tiff")
+            z.writestr("readme.txt", b"notes")
+        buf.seek(0)
+
+        mock_resp = MagicMock()
+        mock_resp.headers = {}
+        mock_resp.content = buf.getvalue()
+
+        res = HarvesterScanner._parse_zip_source("https://example.com/dataset.zip", mock_resp)
+        self.assertEqual(res["count"], 2)  # 1 shapefile package + 1 elevation.tif
+        
+        shp_pkg = next(d for d in res["datasets"] if d["format"] == "shp")
+        self.assertEqual(shp_pkg["name"], "districts (Shapefile Package)")
+        self.assertEqual(shp_pkg["internal_path"], "districts.shp")
+        self.assertTrue(shp_pkg["has_prj"])
+        self.assertIn("Projection (.prj) included", shp_pkg["description"])
+
+        tif_ds = next(d for d in res["datasets"] if d["format"] == "tif")
+        self.assertEqual(tif_ds["name"], "elevation.tif")
+
+    def test_shapefile_missing_prj_warning(self):
+        import io, zipfile
+        from unittest.mock import MagicMock
+        
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr("rivers.shp", b"dummy shp")
+            z.writestr("rivers.shx", b"dummy shx")
+            z.writestr("rivers.dbf", b"dummy dbf")
+        buf.seek(0)
+
+        mock_resp = MagicMock()
+        mock_resp.headers = {}
+        mock_resp.content = buf.getvalue()
+
+        res = HarvesterScanner._parse_zip_source("https://example.com/rivers.zip", mock_resp)
+        self.assertEqual(res["count"], 1)
+        shp_pkg = res["datasets"][0]
+        self.assertFalse(shp_pkg["has_prj"])
+        self.assertIn("missing", shp_pkg["description"].lower())
+
 
 if __name__ == "__main__":
     unittest.main()
+

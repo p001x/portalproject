@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Badge } from "@/components/ui/badge";
 import { Cloud, Key, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { BASE } from "@/lib/api";
 
 interface GEEStatus {
   initialized: boolean;
@@ -26,7 +27,7 @@ export function GEEProjectConfig() {
   const fetchStatus = async () => {
     try {
       setLoading(true);
-      const res = await fetch("https://geoportal-api-ygzi.onrender.com/api/gee/config");
+      const res = await fetch(`${BASE}/gee/config`);
       if (res.ok) {
         const data: GEEStatus = await res.json();
         setStatus(data);
@@ -55,7 +56,7 @@ export function GEEProjectConfig() {
 
     try {
       setSaving(true);
-      const res = await fetch("https://geoportal-api-ygzi.onrender.com/api/gee/config", {
+      const res = await fetch(`${BASE}/gee/config`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

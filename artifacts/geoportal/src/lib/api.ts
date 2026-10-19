@@ -4,7 +4,10 @@
  * so the same code works in production behind the reverse proxy.
  */
 
-export const BASE = import.meta.env.PROD ? "https://geoportal-api-ygzi.onrender.com/api" : "/api";
+// Support Cloudflare reverse proxy (/api) or direct Google Cloud Run URL via VITE_API_URL
+export const BASE = (import.meta.env.VITE_API_URL 
+  ? `${import.meta.env.VITE_API_URL.replace(/\/$/, "").replace(/\/api$/, "")}/api` 
+  : "/api");
 
 // ── GEE Individual Auth Token Management ────────────────────────────────────
 const GEE_TOKEN_KEY = "gee_individual_token";
@@ -682,11 +685,44 @@ export interface StaticMapPayload {
 
 export const api = {
   analytics: {
-    getSummary: (days?: string) => get<any>(`/analytics/summary${days && days !== 'all' ? '?days=' + days : ''}`),
-    getTimeseries: (days?: string) => get<any[]>(`/analytics/timeseries${days && days !== 'all' ? '?days=' + days : ''}`),
-    getModules: (days?: string) => get<any[]>(`/analytics/modules${days && days !== 'all' ? '?days=' + days : ''}`),
-    getLocations: (days?: string) => get<any[]>(`/analytics/locations${days && days !== 'all' ? '?days=' + days : ''}`),
-    getRawEvents: (limit: number = 50) => get<any[]>(`/analytics/raw?limit=${limit}`)
+    getSummary: (days?: string, excludeBots?: boolean) => {
+      const p = new URLSearchParams();
+      if (days && days !== 'all') p.append("days", days);
+      if (excludeBots) p.append("exclude_bots", "true");
+      const qs = p.toString() ? `?${p.toString()}` : "";
+      return get<any>(`/analytics/summary${qs}`);
+    },
+    getTimeseries: (days?: string, excludeBots?: boolean) => {
+      const p = new URLSearchParams();
+      if (days && days !== 'all') p.append("days", days);
+      if (excludeBots) p.append("exclude_bots", "true");
+      const qs = p.toString() ? `?${p.toString()}` : "";
+      return get<any[]>(`/analytics/timeseries${qs}`);
+    },
+    getModules: (days?: string, excludeBots?: boolean) => {
+      const p = new URLSearchParams();
+      if (days && days !== 'all') p.append("days", days);
+      if (excludeBots) p.append("exclude_bots", "true");
+      const qs = p.toString() ? `?${p.toString()}` : "";
+      return get<any[]>(`/analytics/modules${qs}`);
+    },
+    getLocations: (days?: string, excludeBots?: boolean) => {
+      const p = new URLSearchParams();
+      if (days && days !== 'all') p.append("days", days);
+      if (excludeBots) p.append("exclude_bots", "true");
+      const qs = p.toString() ? `?${p.toString()}` : "";
+      return get<any[]>(`/analytics/locations${qs}`);
+    },
+    getDevices: (days?: string, excludeBots?: boolean) => {
+      const p = new URLSearchParams();
+      if (days && days !== 'all') p.append("days", days);
+      if (excludeBots) p.append("exclude_bots", "true");
+      const qs = p.toString() ? `?${p.toString()}` : "";
+      return get<{ devices: any[]; browsers: any[]; os: any[] }>(`/analytics/devices${qs}`);
+    },
+    getRealtime: () => get<{ active_visitors: number; recent_events: number; top_modules: any[] }>(`/analytics/realtime`),
+    getRawEvents: (limit: number = 50, excludeBots?: boolean) => 
+      get<any[]>(`/analytics/raw?limit=${limit}${excludeBots ? '&exclude_bots=true' : ''}`)
   },
 
   async getRegions(country?: string, level1?: string): Promise<{regions: string[]}> {
@@ -1052,11 +1088,33 @@ export const api = {
       return r.json() as Promise<{ ok: boolean }>;
     },
     classify: (body?: any) =>
-      post<{ tile_url: string; download_url?: string; visualized_download_url?: string; classes: string[]; colors: Record<string, string>; class_values?: Record<string, number>; areas: Record<string, number>; accuracy?: any; feature_importance?: Record<string, number> }>(
+      post<{ tile_url: string; download_url?: string; visualized_download_url?: string; classes: string[]; colors: Record<string, string>; class_values?: Record<string, number>; areas: Record<string, number>; accuracy?: any; feature_importance?: Record<string, number>; samples_metadata?: any }>(
         "/classify/supervised",
         body ?? {},
         { withGeeAuth: true }
       ),
+    spectralProfiles: (body: { samples: any[]; year?: number; aoi?: any; data_source?: string }) =>
+      post<{
+        bands: Array<{ band: string; name: string; wavelength: number; desc: string }>;
+        classes: Record<string, {
+          class_name: string;
+          color: string;
+          pixel_count: number;
+          means: Record<string, number>;
+          stds: Record<string, number>;
+          mins: Record<string, number>;
+          maxs: Record<string, number>;
+        }>;
+        separability: Array<{
+          class_a: string;
+          class_b: string;
+          distance: number;
+          status: "confused" | "moderate" | "separable";
+          note: string;
+        }>;
+        year: number;
+        total_pixels_sampled: number;
+      }>("/samples/spectral_profiles", body, { withGeeAuth: true }),
     ingestUrl: (body: { url: string; class_label?: string; creator?: string }) =>
       post<{ imported_count: number; info: any; kind?: string; asset_id?: string }>("/samples/ingest-url", body, { withGeeAuth: true }),
     importDataset: (body: { dataset_id: string; source: string; class_label?: string; creator?: string }) =>
@@ -1075,7 +1133,7 @@ export const api = {
       gedi_window?: number;
     }) =>
       post<{ tile_url: string; shot_count?: number; date_range?: [string, string] }>(
-        "/gee/timelapse-tile", body
+        "/gee/timelapse-tile", body, { withGeeAuth: true }
       ),
     extractSamples: (body: {
       source: "sentinel2" | "landsat" | "gedi";
@@ -1093,10 +1151,17 @@ export const api = {
         csv_b64: string;
         source: string;
         year: number;
-      }>("/gee/extract-samples", body),
+      }>("/gee/extract-samples", body, { withGeeAuth: true }),
   },
   harvester: {
-    scan: (url: string) =>
+    scan: (
+      url: string,
+      options?: {
+        sourceType?: string;
+        authToken?: string;
+        allowInsecureSsl?: boolean;
+      }
+    ) =>
       post<{
         url: string;
         title: string;
@@ -1114,8 +1179,14 @@ export const api = {
           stac_asset_key?: string;
           feature_count?: number;
           description?: string;
+          has_prj?: boolean;
         }>;
-      }>("/harvester/scan", { url }),
+      }>("/harvester/scan", {
+        url,
+        source_type: options?.sourceType || "auto",
+        auth_token: options?.authToken || undefined,
+        allow_insecure_ssl: options?.allowInsecureSsl || false,
+      }),
     getDownloadUrl: (remoteUrl: string, filename?: string) =>
       `${BASE}/harvester/download?url=${encodeURIComponent(remoteUrl)}${filename ? `&filename=${encodeURIComponent(filename)}` : ""}`,
     saveToPortal: (body: { url: string; name: string; class_label?: string; category?: string; internal_path?: string }) =>
@@ -1309,5 +1380,86 @@ export const api = {
   },
   admin: {
     notifyNewCourse: (title: string, description: string) => post<{ ok: boolean }>("/admin/notify-new-course", { title, description }),
+    getUsers: () => get<{ ok: boolean, users: AdminUserSummary[] }>("/admin/users"),
+    getUserDetail: (email: string) => get<{ ok: boolean, user: AdminUserDetail }>(`/admin/users/${encodeURIComponent(email)}/detail`),
+    blockUser: (email: string, reason: string) => post<{ ok: boolean, message: string }>(`/admin/users/${encodeURIComponent(email)}/block`, { reason }),
+    unblockUser: (email: string) => post<{ ok: boolean, message: string }>(`/admin/users/${encodeURIComponent(email)}/unblock`, {}),
+    getActivities: (limit = 100) => get<{ ok: boolean, activities: UserActivityLog[] }>(`/admin/activities?limit=${limit}`),
+    getAppeals: (status = "all") => get<{ ok: boolean, appeals: UserAppealItem[] }>(`/admin/appeals?status=${status}`),
+    reviewAppeal: (appealId: number, action: "approve" | "reject", adminNote?: string) => post<{ ok: boolean, result: any }>(`/admin/appeals/${appealId}/review`, { action, admin_note: adminNote }),
+    updateUserRole: (email: string, role: "admin" | "user") => post<{ ok: boolean, message: string }>(`/admin/users/${encodeURIComponent(email)}/role`, { role }),
+    sendPasswordReset: (email: string) => post<{ ok: boolean, token: string, reset_url: string, message: string }>(`/admin/users/${encodeURIComponent(email)}/send-reset`, {}),
+    getSystemHealth: () => get<{ ok: boolean, gee: any, python_version: string, database: any, status: string, timestamp: string }>("/admin/system-health"),
+  },
+  activity: {
+    log: (action: string, module?: string, details?: string, email?: string) => 
+      post<{ ok: boolean }>("/activity/log", { action, module, details, email }),
+  },
+  appeals: {
+    submit: (email: string, appeal_message: string) => 
+      post<{ ok: boolean, appeal: any }>("/auth/appeal", { email, appeal_message }),
   }
 };
+
+export interface AdminUserSummary {
+  id: number;
+  name: string;
+  email: string;
+  role: string;
+  created_at: string;
+  last_active: string;
+  is_verified: boolean;
+  is_blocked: boolean;
+  blocked_reason?: string | null;
+  blocked_at?: string | null;
+  profile_picture?: string | null;
+  total_activities: number;
+  favorite_tool: string;
+  comments_count: number;
+}
+
+export interface UserActivityLog {
+  id: number;
+  email: string;
+  user_name: string;
+  action: string;
+  module: string;
+  details?: string | null;
+  timestamp: string;
+  ip_address?: string | null;
+}
+
+export interface UserAppealItem {
+  id: number;
+  email: string;
+  user_name: string;
+  blocked_reason?: string | null;
+  appeal_message: string;
+  status: "pending" | "approved" | "rejected";
+  admin_note?: string | null;
+  created_at: string;
+  reviewed_at?: string | null;
+  reviewed_by?: string | null;
+}
+
+export interface AdminUserDetail extends AdminUserSummary {
+  tool_breakdown: Record<string, number>;
+  activities: Array<{
+    id: number;
+    action: string;
+    module: string;
+    details: string | null;
+    timestamp: string;
+  }>;
+  comments: Array<{
+    id: number;
+    author: string;
+    content: string;
+    tag: string;
+    timestamp: string;
+    parent_id: number | null;
+    category: string;
+    upvotes: number;
+  }>;
+  appeals: UserAppealItem[];
+}
