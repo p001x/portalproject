@@ -28,24 +28,25 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
-          cache-dependency-path: 'artifacts/geoportal/package.json'
+          cache: 'pnpm'
 
-      - name: Install Frontend Dependencies
-        working-directory: artifacts/geoportal
-        run: npm install --legacy-peer-deps
+      - name: Install Dependencies
+        run: pnpm install
 
       - name: Build Production Frontend
         working-directory: artifacts/geoportal
         env:
-          # Optional: If you want to bypass Cloudflare and hit Cloud Run directly during testing,
-          # set VITE_API_URL in GitHub Secrets. Otherwise, it defaults to /api (Cloudflare proxy).
           VITE_API_URL: ${{ secrets.VITE_API_URL }}
-        run: npm run build
+        run: npx vite build
 
       - name: Setup GitHub Pages
         uses: actions/configure-pages@v4
