@@ -1,7 +1,0 @@
-# Cloudflare Pages Edge Routing Rules
-# Proxy /api calls to Google Cloud Run container with zero CORS (200 = transparent proxy)
-# When you have your Cloud Run URL, replace the destination below:
-/api/*  https://geoportal-backend-REPLACE_WITH_YOUR_ID.a.run.app/api/:splat  200
-
-# Single Page Application (SPA) fallback: all client routes load index.html
-/*  /index.html  200
