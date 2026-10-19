@@ -448,17 +448,22 @@ function Layout({ children }: { children: React.ReactNode }) {
   const [loc, setLocation] = useLocation();
   const { isAuthenticated, isLoading, user } = useAuth();
 
+  // Normalize location: strip any leading wouter tilde '~', query strings, and trailing slashes
+  const cleanLoc = (loc || "").replace(/^~/, "").split("?")[0].replace(/\/+$/, "") || "/";
+  const publicRoutes = ["/", "/platform", "/analysis-hub", "/about", "/contact", "/auth", "/blog", "/export-editor"];
+  const isPublic = publicRoutes.includes(cleanLoc) || cleanLoc.startsWith("/reset-password");
+
   useEffect(() => {
-    if (!isLoading && !isAuthenticated && loc !== "/" && loc !== "/platform" && loc !== "/analysis-hub" && loc !== "/about" && loc !== "/contact" && loc !== "/auth" && loc !== "/blog" && !loc.startsWith("/reset-password") && loc !== "/export-editor" && loc !== "/rare-data") {
+    if (!isLoading && !isAuthenticated && !isPublic && cleanLoc !== "/rare-data") {
       setLocation("/auth");
     }
-  }, [isAuthenticated, isLoading, loc, setLocation]);
+  }, [isAuthenticated, isLoading, cleanLoc, isPublic, setLocation]);
 
-  if (loc === "/" || loc === "/platform" || loc === "/analysis-hub" || loc === "/about" || loc === "/contact" || loc === "/auth" || loc === "/blog" || loc.startsWith("/reset-password") || loc === "/export-editor") {
+  if (isPublic) {
     return <>{children}</>;
   }
 
-  if (isLoading || (!isAuthenticated && loc !== "/rare-data")) {
+  if (isLoading || (!isAuthenticated && cleanLoc !== "/rare-data")) {
     return (
       <div className="flex h-screen items-center justify-center bg-background text-muted-foreground">
         Loading...
@@ -466,13 +471,13 @@ function Layout({ children }: { children: React.ReactNode }) {
     );
   }
 
-  const isFocusedMode = [...analysisModules, ...rareDataModules, ...digitizationModules, ...infrastructureModules, ...educationModules].some(m => m.path === loc) || loc === "/community" || loc === "/dashboard" || loc === "/settings" || loc === "/admin/users";
-  const isAnalysisFocused = analysisModules.some(m => m.path === loc);
+  const isFocusedMode = [...analysisModules, ...rareDataModules, ...digitizationModules, ...infrastructureModules, ...educationModules].some(m => m.path === cleanLoc) || cleanLoc === "/community" || cleanLoc === "/dashboard" || cleanLoc === "/settings" || cleanLoc === "/admin/users";
+  const isAnalysisFocused = analysisModules.some(m => m.path === cleanLoc);
 
   return (
     <div className="flex h-screen bg-background">
       {/* Desktop Sidebar (Hidden in focused mode) */}
-      {!isFocusedMode && <Sidebar loc={loc} className="hidden md:flex" />}
+      {!isFocusedMode && <Sidebar loc={cleanLoc} className="hidden md:flex" />}
 
       {/* Main content */}
       <div className="flex-1 flex flex-col overflow-hidden">
@@ -595,11 +600,14 @@ function Router() {
 
 
 export default function App() {
+  const rawBase = import.meta.env.BASE_URL || "/";
+  const routerBase = (rawBase === "./" || rawBase === "." || rawBase === "/") ? undefined : rawBase.replace(/\/$/, "");
+
   return (
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
-          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+          <WouterRouter base={routerBase}>
             <AuthProvider>
               <NotificationProvider>
                 <AnalyticsTracker />

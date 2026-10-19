@@ -99,7 +99,12 @@ __pycache__/
 backend/data/files/*
 !backend/data/files/*.json
 gee_key.json
+*gee_key*.json
+backend/*key*.json
 spatis/
 secrets.toml
 dataset vector/*.gdb
 dataset vector/CROM_Vector.gdb
+.gee_cache/
+backend/.gee_cache/
+scratch/
