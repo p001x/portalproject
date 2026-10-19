@@ -47,12 +47,12 @@ def compute_ndvi(
 
     from gee.aoi_utils import get_aoi_geometry, get_bounds_and_center
     aoi = get_aoi_geometry(aoi_config)
-    bounds, center = get_bounds_and_center(aoi)
+    bounds, center = get_bounds_and_center(aoi, aoi_config)
     ee_bounds = ee.Geometry.Polygon(bounds, "EPSG:4326", False)
     
     # Calculate dynamic scale based on geometry size (sq km)
     from gee.aoi_utils import get_dynamic_scale
-    dynamic_scale = get_dynamic_scale(aoi)    # Sector or small polygon
+    dynamic_scale = get_dynamic_scale(aoi, aoi_config)
 
     from gee.aoi_utils import get_historical_ndvi
     year = int(start_date[:4])
@@ -115,16 +115,6 @@ def compute_ndvi(
             lambda: median.getThumbURL({**vis_params, "region": ee_bounds, "dimensions": 512, "crs": "EPSG:4326", "format": "png"})
         )
 
-        f_download = executor.submit(
-            lambda: median.getDownloadURL({
-                "name": "NDVI", 
-                "region": ee_bounds, 
-                "scale": dynamic_scale, 
-                "format": "GEO_TIFF", 
-                "crs": "EPSG:4326"
-            }) if area_sqkm < 50000 else None
-        )
-
         stats = f_stats.result()
         area_dict = f_area.result()
         classify = f_classify.result()
@@ -132,10 +122,7 @@ def compute_ndvi(
             thumb_url = f_thumb.result()
         except Exception:
             thumb_url = None
-        try:
-            download_url = f_download.result()
-        except Exception:
-            download_url = None
+        download_url = None
 
     class_areas = {
         lbl: round((area_dict.get(f"c{i}", 0) or 0) / 1e6, 2)

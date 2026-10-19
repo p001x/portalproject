@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text
+from sqlalchemy import Column, Integer, String, Text, Boolean
 from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
@@ -8,12 +8,52 @@ class User(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String, nullable=False)
     email = Column(String, unique=True, nullable=False)
-    password_hash = Column(String, nullable=False)
+    password_hash = Column(String, nullable=True)
     reset_token = Column(String, nullable=True)
     reset_token_expiry = Column(String, nullable=True)
     role = Column(String, default='user')
     created_at = Column(String, nullable=False)
     api_key = Column(String, nullable=True)
+    google_id = Column(String, nullable=True)
+    is_verified = Column(Boolean, default=False)
+    profile_picture = Column(String, nullable=True)
+    preferences = Column(Text, nullable=True) # JSON string of user preferences
+    is_blocked = Column(Boolean, default=False)
+    blocked_reason = Column(String, nullable=True)
+    blocked_at = Column(String, nullable=True)
+    last_active = Column(String, nullable=True)
+
+class UserActivity(Base):
+    __tablename__ = 'user_activities'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    email = Column(String, nullable=False, index=True)
+    user_name = Column(String, nullable=True)
+    action = Column(String, nullable=False) # e.g. "view_page", "compute_ndvi", "download_dataset", "comment", "login"
+    module = Column(String, nullable=True) # e.g. "NDVI", "Slope Analysis", "Rare Data", "Community", etc.
+    details = Column(Text, nullable=True)
+    timestamp = Column(String, nullable=False)
+    ip_address = Column(String, nullable=True)
+
+class UserAppeal(Base):
+    __tablename__ = 'user_appeals'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    email = Column(String, nullable=False, index=True)
+    user_name = Column(String, nullable=True)
+    blocked_reason = Column(String, nullable=True)
+    appeal_message = Column(Text, nullable=False)
+    status = Column(String, default="pending") # "pending", "approved", "rejected"
+    admin_note = Column(Text, nullable=True)
+    created_at = Column(String, nullable=False)
+    reviewed_at = Column(String, nullable=True)
+    reviewed_by = Column(String, nullable=True)
+
+class OTP(Base):
+    __tablename__ = 'otps'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    email = Column(String, nullable=False)
+    code = Column(String, nullable=False)
+    expires_at = Column(String, nullable=False)
+    used = Column(Boolean, default=False)
 
 class GeeUsage(Base):
     __tablename__ = 'gee_usage'
@@ -38,3 +78,13 @@ class GeeSession(Base):
     email = Column(String, nullable=False)
     project_name = Column(String, nullable=True)
     authenticated_at = Column(String, nullable=False)
+
+class Notification(Base):
+    __tablename__ = 'notifications'
+    id = Column(String, primary_key=True) # UUID string
+    email = Column(String, nullable=False) # The user who receives it
+    title = Column(String, nullable=False)
+    message = Column(String, nullable=False)
+    type = Column(String, default="info") # "security", "analysis", "community", "system"
+    read = Column(Boolean, default=False)
+    timestamp = Column(String, nullable=False)

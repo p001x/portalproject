@@ -27,7 +27,12 @@ def send_reset_email(to_email: str, reset_link: str, user_name: str = "Valued Us
     smtp_password = os.environ.get("SMTP_PASSWORD")
 
     if not all([smtp_server, smtp_port, smtp_user, smtp_password]):
-        logger.warning(f"SMTP not fully configured. Mocking email to {to_email}. Link: {reset_link}")
+        logger.warning(f"SMTP not fully configured. Mocking email to {to_email}.")
+        print(f"\n=========================================\n"
+              f"🔐 MOCK EMAIL SYSTEM (PASSWORD RESET)\n"
+              f"Sending Reset Link to: {to_email}\n"
+              f"LINK: {reset_link}\n"
+              f"=========================================\n")
         return
 
     try:
@@ -105,3 +110,102 @@ def send_reset_email(to_email: str, reset_link: str, user_name: str = "Valued Us
                 f.write(f"SMTP Error for {to_email}: {str(e)}\n")
         except Exception:
             pass
+
+def send_otp_email(to_email: str, code: str):
+    """
+    Sends a 4-digit OTP verification email via SMTP.
+    """
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(_ENV_FILE, override=True)
+    except ImportError:
+        pass
+
+    smtp_server = os.environ.get("SMTP_SERVER")
+    smtp_port = os.environ.get("SMTP_PORT")
+    smtp_user = os.environ.get("SMTP_USER")
+    smtp_password = os.environ.get("SMTP_PASSWORD")
+
+    if not all([smtp_server, smtp_port, smtp_user, smtp_password]):
+        logger.warning(f"SMTP not fully configured. Mocking OTP to {to_email}. CODE: {code}")
+        # Print clearly to terminal for mock mode
+        print(f"\n=========================================\n"
+              f"🔐 MOCK SMS/EMAIL SYSTEM\n"
+              f"Sending OTP Code to: {to_email}\n"
+              f"CODE: {code}\n"
+              f"=========================================\n")
+        return
+
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = f"Your Verification Code: {code}"
+        msg["From"] = smtp_user
+        msg["To"] = to_email
+
+        text = f"Hello,\n\nYour SPETRO verification code is {code}. It is valid for 10 minutes.\n\nIf you did not request this code, you can safely ignore this email.\n\nBest regards,\nThe SPETRO Team"
+        html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            body {{ font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f4f4f5; margin: 0; padding: 40px 0; }}
+            .container {{ max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }}
+            .header {{ background-color: #0f172a; padding: 30px; text-align: center; border-bottom: 4px solid #3b82f6; }}
+            .logo {{ font-size: 32px; font-weight: 800; color: #ffffff; margin: 0; letter-spacing: 2px; }}
+            .logo-sub {{ font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: 1px; margin-top: 5px; }}
+            .content {{ padding: 40px 30px; color: #334155; line-height: 1.6; text-align: center; }}
+            .greeting {{ font-size: 20px; font-weight: 600; color: #0f172a; margin-top: 0; }}
+            .code-box {{ background-color: #eff6ff; border: 2px dashed #93c5fd; border-radius: 8px; padding: 20px; margin: 30px auto; max-width: 300px; }}
+            .code {{ font-size: 42px; font-weight: 800; letter-spacing: 12px; color: #2563eb; margin: 0; margin-left: 12px; }}
+            .footer {{ background-color: #f8fafc; padding: 25px 30px; text-align: center; border-top: 1px solid #e2e8f0; }}
+            .footer p {{ margin: 0; font-size: 13px; color: #64748b; }}
+            .reason-box {{ background-color: #f1f5f9; padding: 15px; border-radius: 8px; font-size: 13px; margin-top: 25px; color: #475569; text-align: left; }}
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1 class="logo">SPETRO</h1>
+              <div class="logo-sub">Geo Analysis & Integrated Portal Solutions</div>
+            </div>
+            <div class="content">
+              <h2 class="greeting">Authentication Required</h2>
+              <p>You have requested to verify your email address (<strong>{to_email}</strong>) for access to the SPETRO platform.</p>
+              <p>Please enter the following 4-digit secure verification code to complete your request:</p>
+              
+              <div class="code-box">
+                <div class="code">{code}</div>
+              </div>
+              
+              <p>For security purposes, this code will expire in <strong>10 minutes</strong>.</p>
+              
+              <div class="reason-box">
+                <strong>Didn't request this code?</strong><br>
+                If you did not attempt to sign in or register for a SPETRO account, someone else may have entered your email by mistake. You can safely delete this email, and your account will remain secure.
+              </div>
+            </div>
+            <div class="footer">
+              <p>&copy; 2026 SPETRO Systems. All rights reserved.</p>
+              <p>Advanced Spatial Intelligence & Environmental Modeling</p>
+            </div>
+          </div>
+        </body>
+        </html>
+        """
+
+        part1 = MIMEText(text, "plain")
+        part2 = MIMEText(html, "html")
+        msg.attach(part1)
+        msg.attach(part2)
+
+        server = smtplib.SMTP(smtp_server, int(smtp_port))
+        server.starttls()
+        server.login(smtp_user, smtp_password)
+        server.sendmail(smtp_user, to_email, msg.as_string())
+        server.quit()
+        logger.info(f"OTP email successfully sent to {to_email}")
+
+    except Exception as e:
+        logger.error(f"Failed to send OTP to {to_email}: {e}")
+

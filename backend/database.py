@@ -35,6 +35,23 @@ def init_db():
         # Ensure directory exists for SQLite
         Path(DATABASE_URL.replace("sqlite:///", "")).parent.mkdir(parents=True, exist_ok=True)
     Base.metadata.create_all(bind=engine)
+    # Safe migration for existing SQLite databases to add new columns if missing
+    try:
+        from sqlalchemy import text
+        with engine.connect() as conn:
+            for col_name, col_type in [
+                ("is_blocked", "BOOLEAN DEFAULT 0"),
+                ("blocked_reason", "TEXT"),
+                ("blocked_at", "TEXT"),
+                ("last_active", "TEXT")
+            ]:
+                try:
+                    conn.execute(text(f"ALTER TABLE users ADD COLUMN {col_name} {col_type}"))
+                    conn.commit()
+                except Exception:
+                    pass # Column already exists
+    except Exception as ex:
+        pass
 
 def get_db():
     db = SessionLocal()

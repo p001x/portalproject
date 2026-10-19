@@ -369,17 +369,8 @@ def quantile_classify(layers: list, aoi, scale: int, n_classes: int, reverse_pal
                     "region": _panel_region, "dimensions": 512, "crs": "EPSG:4326", "format": "png",
                 }))
         print(f"[{nm}] getMapId and getThumbURL done")
-        try:
-            if is_global or area_sqkm > 50000:
-                download_url = None
-            else:
-                print(f"[{nm}] getDownloadURL start")
-                with gee_semaphore:
-                    download_url = _safe_gee_call(lambda: cls.getDownloadURL({"scale": scale, "region": calc_geom, "format": "GEO_TIFF", "crs": "EPSG:4326"})) if hasattr(cls, "getDownloadURL") else None
-                print(f"[{nm}] getDownloadURL done")
-        except Exception as e:
-            print(f"[{nm}] getDownloadURL error:", e)
-            download_url = None
+        # Do not block initial map rendering on heavy synchronous GeoTIFF exports (causes 30-70s timeout)
+        download_url = None
             
         # Add legend to the downloaded static map only if requested and thumb_url exists
         if add_legend and thumb_url:

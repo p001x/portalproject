@@ -1850,7 +1850,15 @@ def flask_harvester_scan():
     if not url:
         return jsonify({"detail": "URL is required"}), 400
     try:
-        res = HarvesterScanner.scan_url(url)
+        source_type = data.get("source_type", "auto")
+        auth_token = data.get("auth_token")
+        allow_insecure_ssl = bool(data.get("allow_insecure_ssl", False))
+        res = HarvesterScanner.scan_url(
+            target_url=url,
+            source_type=source_type,
+            auth_token=auth_token,
+            allow_insecure_ssl=allow_insecure_ssl,
+        )
         return jsonify(res)
     except Exception as exc:
         logger.error("Harvester scan error: %s", exc)
@@ -1864,6 +1872,8 @@ def flask_harvester_download():
     if not url:
         return jsonify({"detail": "URL is required"}), 400
     try:
+        from harvester import assert_safe_url
+        assert_safe_url(url)
         import requests
         req_stream = requests.get(url, stream=True, timeout=120, verify=False)
         req_stream.raise_for_status()

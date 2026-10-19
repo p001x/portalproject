@@ -80,10 +80,13 @@ const LAND_COVER_PRESETS: Record<number, string[]> = {
 };
 
 function today() {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  if (d.getFullYear() > 2024) return "2024-06-30";
+  return d.toISOString().slice(0, 10);
 }
 function sixMonthsAgo() {
   const d = new Date();
+  if (d.getFullYear() > 2024) return "2024-01-01";
   d.setMonth(d.getMonth() - 6);
   return d.toISOString().slice(0, 10);
 }

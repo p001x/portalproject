@@ -102,6 +102,8 @@ def verify_user(email: str, password: str) -> Optional[dict]:
             "name": user.get("name") or email.split("@")[0],
             "email": user["email"],
             "role": role,
+            "is_blocked": bool(user.get("is_blocked", False)),
+            "blocked_reason": user.get("blocked_reason"),
         }
     except Exception as exc:
         logger.error("verify_user error: %s", exc)
@@ -114,16 +116,21 @@ def create_new_user(name: str, email: str, password: str) -> dict:
         raise ValueError("Password must be at least 6 characters.")
 
     existing = auth_db.get_user_by_email(email)
-    if existing:
-        raise ValueError("Email already registered.")
-
     password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-
     role = "user"
     if email.lower() in ["petersonyang8@gmail.com", "pierrendorimana16@gmail.com"]:
         role = "admin"
 
-    auth_db.create_user(name, email, password_hash, role)
+    if existing:
+        if not existing.get("password_hash"):
+            # Account was created via Google or OTP, allow setting a password
+            auth_db.update_user_password(email, password_hash)
+            # Update name if provided
+            auth_db.update_user_name(email, name)
+        else:
+            raise ValueError("Email already registered.")
+    else:
+        auth_db.create_user(name, email, password_hash, role)
 
     new_user = auth_db.get_user_by_email(email)
     return {
@@ -181,13 +188,27 @@ def get_current_user(request: Request) -> dict:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    # Check database status for suspension/blocked state
+    db_user = auth_db.get_user_by_email(email)
+    if db_user and db_user.get("is_blocked"):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "account_blocked",
+                "is_blocked": True,
+                "message": "Your account has been suspended.",
+                "reason": db_user.get("blocked_reason") or "Suspended by administration.",
+                "email": email
+            }
+        )
+
     role = payload.get("role", "user")
     if email.lower() in ["petersonyang8@gmail.com", "pierrendorimana16@gmail.com"]:
         role = "admin"
 
     return {
         "email": email,
-        "name": payload.get("name", email.split("@")[0]),
+        "name": payload.get("name", (db_user["name"] if db_user else email.split("@")[0])),
         "role": role,
     }
 

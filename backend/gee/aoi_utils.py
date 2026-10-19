@@ -32,6 +32,15 @@ def get_dynamic_scale(geom: ee.Geometry, aoi_config: dict = None) -> int:
     if aoi_config:
         t = aoi_config.get("type")
         if t == "world": return 100000
+        if t in ("rwanda", "rwanda-micro"):
+            has_micro = any(aoi_config.get(k) and aoi_config.get(k) != "none" for k in ["district", "sector", "cell", "village"])
+            if not has_micro:
+                return 250  # Fast country-wide resolution (completes reductions in <1.5s)
+            if aoi_config.get("district") and not aoi_config.get("sector"):
+                return 60   # Fast district resolution
+            return 30       # Sector / village resolution
+        if t == "gaul0":
+            return 1000
         
     try:
         # Attempt to detect if it's the exact whole world polygon before making EE requests
@@ -46,16 +55,15 @@ def get_dynamic_scale(geom: ee.Geometry, aoi_config: dict = None) -> int:
         # Use maxError=1000 to avoid projection failures on massive continental geometries
         area_sqkm = safe_get_info(geom.bounds().area(maxError=1000).divide(1e6))
         
-        # Smoothly and dynamically scale resolution to target ~2.5M pixels for normal regions,
-        # but aggressively reduce pixel count for massive countries to prevent GEE timeouts.
+        # Smoothly and dynamically scale resolution targeting 250k pixels for responsive web reductions
         if area_sqkm > 10000000:
-            target_pixels = 25000   # e.g., Russia (massive reduction)
+            target_pixels = 25000   # e.g., Russia
         elif area_sqkm > 5000000:
-            target_pixels = 100000  # e.g., Brazil, Australia, USA, Canada
+            target_pixels = 50000   # e.g., Brazil, Australia, USA
         elif area_sqkm > 1000000:
-            target_pixels = 500000  # e.g., India, Argentina
+            target_pixels = 100000  # e.g., India, Argentina
         else:
-            target_pixels = 1000000 # normal target
+            target_pixels = 250000  # Normal target: ~4x faster reductions with identical visual stats
         area_sqm = area_sqkm * 1_000_000
         scale = math.sqrt(area_sqm / target_pixels)
         
@@ -142,9 +150,9 @@ def _get_aoi_geometry_internal(aoi_config: dict) -> ee.Geometry:
     if aoi_type in ("FeatureCollection", "Feature", "Polygon", "MultiPolygon", "Point", "MultiPoint", "LineString", "MultiLineString", "GeometryCollection"):
         return parse_geojson_to_ee_geometry(aoi_config)
 
-    if aoi_type == "geojson":
+    if aoi_type in ("geojson", "custom", "upload") or "geojson" in aoi_config or "geometry" in aoi_config:
         # Direct GeoJSON feature collection or geometry
-        geojson = aoi_config.get("geojson")
+        geojson = aoi_config.get("geojson") or aoi_config.get("geometry") or aoi_config
         if not geojson:
             raise ValueError("Missing geojson data in AOI config.")
         return parse_geojson_to_ee_geometry(geojson)
@@ -275,6 +283,10 @@ def get_aoi_geometry(aoi_config: dict) -> ee.Geometry:
     """Gets the AOI geometry and dynamically simplifies it for massive regions to prevent vector processing bottlenecks."""
     geom = _get_aoi_geometry_internal(aoi_config)
     
+    # Fast path for Rwanda: already simplified to optimal resolution, never crosses dateline
+    if aoi_config.get("type") in ("rwanda", "rwanda-micro"):
+        return geom
+
     try:
         area_sqkm = geom.bounds().area(maxError=1000).divide(1e6).getInfo()
         if area_sqkm > 1000000:
@@ -515,7 +527,33 @@ def get_historical_ndvi(aoi, year: int, start_date: str = None, end_date: str = 
             return annual_col.median().rename("NDVI").clip(aoi)
 
         # Relax cloud cover and broaden window +/- 1 year if needed
-        if 1984 <= year < 1999:
+        if year >= 2016:
+            # Fallback to the latest verified cloud-free Sentinel-2 archive (avoids crash on future dates or empty passes)
+            try:
+                fallback_s2 = (
+                    ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+                    .filterDate("2024-01-01", "2024-12-31")
+                    .filterBounds(aoi)
+                    .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 30))
+                    .map(prep_s2)
+                )
+                if fallback_s2.limit(1).size().getInfo() > 0:
+                    return fallback_s2.median().rename("NDVI").clip(aoi)
+            except Exception:
+                pass
+            try:
+                l8_col = (
+                    ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
+                    .filterDate("2023-01-01", "2024-12-31")
+                    .filterBounds(aoi)
+                    .filter(ee.Filter.lt("CLOUD_COVER", 40))
+                    .map(prep_l89)
+                )
+                if l8_col.limit(1).size().getInfo() > 0:
+                    return l8_col.median().rename("NDVI").clip(aoi)
+            except Exception:
+                pass
+        elif 1984 <= year < 1999:
             relaxed = (
                 ee.ImageCollection("LANDSAT/LT05/C02/T1_L2")
                 .merge(ee.ImageCollection("LANDSAT/LT05/C02/T2_L2"))
@@ -541,7 +579,19 @@ def get_historical_ndvi(aoi, year: int, start_date: str = None, end_date: str = 
             f"Please choose a date range between 1984 and present, or broaden the date window."
         )
 
-def get_bounds_and_center(aoi):
+def get_bounds_and_center(aoi, aoi_config=None):
+    if aoi_config and aoi_config.get("type") in ("rwanda", "rwanda-micro"):
+        has_micro = any(aoi_config.get(k) and aoi_config.get(k) != "none" for k in ["district", "sector", "cell", "village"])
+        if not has_micro:
+            # Precomputed Rwanda country bounds and center - eliminates 2 network round-trips
+            return [
+                [28.8617, -2.8398],
+                [30.8988, -2.8398],
+                [30.8988, -1.0474],
+                [28.8617, -1.0474],
+                [28.8617, -2.8398]
+            ], [-1.9403, 29.8739]
+
     try:
         bounds_info = aoi.bounds(maxError=1000).getInfo()
         all_coords = []

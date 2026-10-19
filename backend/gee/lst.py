@@ -10,8 +10,7 @@ from threading import Lock
 import concurrent.futures
 from gee.classify_utils import quantile_classify
 
-_cache = PersistentCache(ttl=3600)
-_cache.clear()
+_cache = PersistentCache()
 _lock = Lock()
 
 
@@ -130,39 +129,33 @@ def compute_lst(aoi_config: dict, start_date: str, end_date: str, n_classes: int
         [classes[lbl].multiply(ee.Image.pixelArea()).rename(f"c{i}") for i, lbl in enumerate(labels)]
     )
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+    from gee.aoi_utils import get_dynamic_scale, get_bounds_and_center
+    dyn_scale = get_dynamic_scale(aoi, aoi_config)
+    bounds, center = get_bounds_and_center(aoi, aoi_config)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
         f_stats = executor.submit(
             lambda: lst_land_only.reduceRegion(
                 reducer=ee.Reducer.mean()
                 .combine(ee.Reducer.min(), sharedInputs=True)
                 .combine(ee.Reducer.max(), sharedInputs=True)
                 .combine(ee.Reducer.stdDev(), sharedInputs=True),
-                geometry=aoi.bounds(maxError=1000), scale=get_dynamic_scale(aoi), maxPixels=1e10,
+                geometry=aoi.bounds(maxError=1000), scale=dyn_scale, maxPixels=1e10,
             ).getInfo()
         )
 
         f_area = executor.submit(
             lambda: area_img.reduceRegion(
-                reducer=ee.Reducer.sum(), geometry=aoi.bounds(maxError=1000), scale=get_dynamic_scale(aoi), maxPixels=1e10
+                reducer=ee.Reducer.sum(), geometry=aoi.bounds(maxError=1000), scale=dyn_scale, maxPixels=1e10
             ).getInfo()
         )
 
         f_classify = executor.submit(
             lambda: quantile_classify(
                 layers=[{"name": "LST", "image": lst_land_only, "title": "Land Surface Temperature (°C)"}],
-                aoi=aoi, scale=get_dynamic_scale(aoi), n_classes=n_classes,
+                aoi=aoi, scale=dyn_scale, n_classes=n_classes,
                 method=method, custom_labels=custom_labels, water_mask=water
             )
-        )
-
-        f_download = executor.submit(
-            lambda: lst_median.getDownloadURL({
-                "name": "LST", 
-                "region": aoi.bounds(), 
-                "scale": max(30, get_dynamic_scale(aoi)), 
-                "format": "GEO_TIFF", 
-                "maxPixels": 1e10
-            })
         )
 
         try:
@@ -180,22 +173,9 @@ def compute_lst(aoi_config: dict, start_date: str, end_date: str, n_classes: int
         except Exception:
             classify = {}
             
-        try:
-            bounds = aoi.bounds().getInfo().get("coordinates", [[[0,0]]])[0]
-        except Exception:
-            bounds = [[0, 0], [0, 0], [0, 0], [0, 0]]
-            
-        try:
-            download_url = f_download.result()
-        except Exception:
-            download_url = None
+        download_url = None
 
     class_areas = {lbl: round((area_dict.get(f"c{i}", 0) or 0) / 1e6, 2) for i, lbl in enumerate(labels)}
-
-    try:
-        center = [(bounds[0][1] + bounds[2][1]) / 2, (bounds[0][0] + bounds[2][0]) / 2]
-    except Exception:
-        center = [0, 0]
 
     # Dynamic Visualization Parameters based on land statistics
     mean_val = stats.get("LST_mean") or 25

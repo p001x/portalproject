@@ -75,63 +75,96 @@ def get_regions(country: Optional[str] = None, level1: Optional[str] = None):
         raise HTTPException(status_code=500, detail=f"Error fetching regions: {str(e)}")
 
 @router.post("/upload")
-async def upload_shapefile(file: UploadFile = File(...)):
+async def upload_study_area(file: UploadFile = File(...)):
     """
-    Accepts a .zip shapefile, extracts it, reads it with geopandas,
-    reprojects to EPSG:4326, and returns a GeoJSON FeatureCollection.
+    Accepts GeoJSON (.geojson, .json), KML (.kml), or Shapefile (.zip),
+    extracts/reprojects to EPSG:4326, and returns a GeoJSON FeatureCollection.
     """
-    if not file.filename.endswith(".zip"):
-        raise HTTPException(status_code=400, detail="Only .zip shapefiles are supported.")
-        
-    tmp_dir = tempfile.mkdtemp()
-    zip_path = os.path.join(tmp_dir, "upload.zip")
-    
-    try:
-        # Save zip
-        with open(zip_path, "wb") as f:
-            f.write(await file.read())
+    filename_lower = (file.filename or "").lower()
+    allowed_exts = (".zip", ".geojson", ".json", ".kml")
+    if not any(filename_lower.endswith(ext) for ext in allowed_exts):
+        raise HTTPException(status_code=400, detail="Supported formats: .geojson, .json, .kml, or .zip (Shapefile).")
+
+    content = await file.read()
+    if len(content) > 50 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large. Maximum size is 50MB.")
+
+    # 1. Direct GeoJSON / JSON processing
+    if filename_lower.endswith((".geojson", ".json")):
+        try:
+            raw_text = content.decode("utf-8")
+            geojson_dict = json.loads(raw_text)
             
-        # Extract zip
+            # Normalize to FeatureCollection if geometry or single feature
+            gtype = geojson_dict.get("type")
+            if gtype in ("Polygon", "MultiPolygon", "Point", "LineString"):
+                geojson_dict = {
+                    "type": "FeatureCollection",
+                    "features": [{"type": "Feature", "geometry": geojson_dict, "properties": {}}]
+                }
+            elif gtype == "Feature":
+                geojson_dict = {
+                    "type": "FeatureCollection",
+                    "features": [geojson_dict]
+                }
+            return {"geojson": geojson_dict}
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid GeoJSON content: {str(e)}")
+
+    tmp_dir = tempfile.mkdtemp()
+    try:
+        # 2. KML Processing
+        if filename_lower.endswith(".kml"):
+            kml_path = os.path.join(tmp_dir, "input.kml")
+            with open(kml_path, "wb") as f:
+                f.write(content)
+            try:
+                import fiona
+                fiona.drvsupport.supported_drivers['KML'] = 'rw'
+            except Exception:
+                pass
+            gdf = gpd.read_file(kml_path)
+            if gdf.crs is None or gdf.crs.to_string() != "EPSG:4326":
+                gdf = gdf.to_crs("EPSG:4326")
+            return {"geojson": json.loads(gdf.to_json())}
+
+        # 3. Zipped Shapefile Processing
+        zip_path = os.path.join(tmp_dir, "upload.zip")
+        with open(zip_path, "wb") as f:
+            f.write(content)
+
         extract_dir = os.path.join(tmp_dir, "extracted")
         os.makedirs(extract_dir)
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            # Check for zip bombs and nested zips
             total_size = 0
             for info in zip_ref.infolist():
                 if info.filename.lower().endswith('.zip'):
-                    raise HTTPException(status_code=400, detail="Nested zip files are not allowed (anti zip-bomb).")
+                    raise HTTPException(status_code=400, detail="Nested zip files are not allowed.")
                 total_size += info.file_size
-                if total_size > 1024 * 1024 * 500: # 500MB max uncompressed
-                    raise HTTPException(status_code=400, detail="Zip file too large (anti zip-bomb).")
-                    
+                if total_size > 1024 * 1024 * 500:
+                    raise HTTPException(status_code=400, detail="Zip file uncompressed size too large.")
             zip_ref.extractall(extract_dir)
-            
-        # Find .shp file
+
         shp_file = None
         for root, dirs, files in os.walk(extract_dir):
-            for filename in files:
-                if filename.endswith(".shp"):
-                    shp_file = os.path.join(root, filename)
+            for fname in files:
+                if fname.lower().endswith(".shp"):
+                    shp_file = os.path.join(root, fname)
                     break
-        
+
         if not shp_file:
-            raise HTTPException(status_code=400, detail="No .shp file found inside the zip.")
-            
-        # Read with geopandas
+            raise HTTPException(status_code=400, detail="No .shp file found inside the zip archive.")
+
         gdf = gpd.read_file(shp_file)
-        
-        # Reproject to WGS84
         if gdf.crs is None or gdf.crs.to_string() != "EPSG:4326":
             gdf = gdf.to_crs("EPSG:4326")
-            
-        # Convert to GeoJSON
-        geojson_str = gdf.to_json()
-        geojson_dict = json.loads(geojson_str)
-        
-        return {"geojson": geojson_dict}
-        
+
+        return {"geojson": json.loads(gdf.to_json())}
+
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error processing shapefile: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error processing spatial file: {str(e)}")
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 

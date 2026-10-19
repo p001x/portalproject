@@ -270,6 +270,42 @@ def get_blocked_users() -> List[str]:
     conn.close()
     return [row[0] for row in rows]
 
+def get_user_comments(author: str) -> List[Dict]:
+    """Fetch all comments posted by a specific user (by author name or email)."""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute(
+        """
+        SELECT c.id, c.author, c.content, c.tag, c.timestamp, c.parent_id, c.category, 
+               (SELECT COUNT(*) FROM comment_upvotes u WHERE u.comment_id = c.id) as upvotes
+        FROM comments c
+        WHERE LOWER(c.author) = LOWER(?)
+        ORDER BY c.id DESC
+        """,
+        (author,)
+    )
+    rows = c.fetchall()
+    conn.close()
+    return [{
+        "id": r[0],
+        "author": r[1],
+        "content": r[2],
+        "tag": r[3],
+        "timestamp": r[4],
+        "parent_id": r[5],
+        "category": r[6],
+        "upvotes": r[7]
+    } for r in rows]
+
+def get_user_comment_count(author: str) -> int:
+    """Return total number of comments posted by a user."""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM comments WHERE LOWER(author) = LOWER(?)", (author,))
+    row = c.fetchone()
+    conn.close()
+    return row[0] if row else 0
+
 # --- User Profiles ---
 def get_user_profile(author: str) -> Dict:
     conn = sqlite3.connect(DB_PATH)

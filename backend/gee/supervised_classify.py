@@ -106,7 +106,7 @@ def get_training_imagery_tile(aoi_bounds: list, data_source: str, custom_asset_i
         return ""
 
 
-def train_and_classify(samples: list, aoi=None, data_source="sentinel2", custom_asset_id=None, ml_model="random_forest", train_split=70, use_indices=True, hyperparam_trees=50) -> dict:
+def train_and_classify(samples: list, aoi=None, data_source="sentinel2", custom_asset_id=None, ml_model="random_forest", train_split=70, use_indices=True, hyperparam_trees=50, apply_sieve=False) -> dict:
     if data_source == "native_cog":
         from gee.native_classify import train_and_classify_native
         return train_and_classify_native(samples, custom_asset_id, aoi=aoi)
@@ -130,36 +130,53 @@ def train_and_classify(samples: list, aoi=None, data_source="sentinel2", custom_
             "Please digitize samples for a 2nd class (e.g. Water or Built-up) to train the Random Forest classifier."
         )
 
-    # Build the feature collection
-    features = []
+    # Build the feature collection with stratified per-class balancing
+    features_by_class = {}
+    total_submitted = 0
+
     for s in samples:
         geom = s.get("geometry")
-        if not geom: continue
+        if not geom:
+            continue
         
         cls = s.get("class_label")
+        if not cls:
+            continue
         cls_id = class_values.get(cls, 1)
 
         if geom["type"] == "Point":
             coords = geom["coordinates"]
-            # Buffer points by 30m so a single masked pixel (e.g. cloud) doesn't eliminate the class
-            ee_geom = ee.Geometry.Point(coords).buffer(30)
+            # Buffer points by 15m (30m diameter, 1-2 Sentinel-2 pixels) to reduce edge-mixing contamination
+            ee_geom = ee.Geometry.Point(coords).buffer(15)
         elif geom["type"] == "Polygon":
             coords = geom["coordinates"]
             ee_geom = ee.Geometry.Polygon(coords)
         elif geom["type"] == "LineString":
             coords = geom["coordinates"]
-            ee_geom = ee.Geometry.LineString(coords).buffer(15)
+            ee_geom = ee.Geometry.LineString(coords).buffer(10)
         else:
             continue # unsupported geometry for training right now
 
-        feat = ee.Feature(ee_geom, {"class": cls_id})
-        features.append(feat)
+        feat = ee.Feature(ee_geom, {"class": cls_id, "class_name": cls})
+        features_by_class.setdefault(cls, []).append(feat)
+        total_submitted += 1
 
-    if not features:
+    if not features_by_class:
         raise ValueError("No valid geometries found in training samples")
 
-    # Limit maximum training features to 200 to keep memory footprint light
-    training_fc = ee.FeatureCollection(features).limit(200)
+    # Stratified feature capping: allocate up to max_per_class features per class
+    # to guarantee all classes remain represented without single classes starving others.
+    max_per_class = max(40, 500 // max(1, len(unique_classes)))
+    balanced_features = []
+    class_sample_counts = {}
+
+    for c_name, c_feats in features_by_class.items():
+        selected = c_feats[:max_per_class]
+        balanced_features.extend(selected)
+        class_sample_counts[c_name] = len(selected)
+
+    training_fc = ee.FeatureCollection(balanced_features)
+    total_used = len(balanced_features)
 
     # Resolve AOI
 
@@ -258,6 +275,10 @@ def train_and_classify(samples: list, aoi=None, data_source="sentinel2", custom_
     # (blurring/dimming) the discrete class values at lower zoom levels!
     classified = classified_image.toByte()
 
+    if apply_sieve:
+        # Apply 3x3 majority focal mode filter to eliminate speckle noise (Minimum Mapping Unit)
+        classified = classified.focal_mode(radius=1.5, units='pixels', iterations=1).toByte()
+
     # Remap for visualization to contiguous range 0..N-1
     unique_vals = [class_values[cls] for cls in unique_classes]
     contiguous_vals = list(range(len(unique_classes)))
@@ -301,7 +322,15 @@ def train_and_classify(samples: list, aoi=None, data_source="sentinel2", custom_
         logger.warning(f"Could not get feature importance: {e}")
 
     # Accuracy Assessment (train/test split)
-    accuracy_metrics = {"overall_accuracy": 0.0, "kappa": 0.0}
+    accuracy_metrics = {
+        "overall_accuracy": None,
+        "kappa": None,
+        "is_evaluated": False,
+        "total_samples": total_submitted,
+        "samples_used": total_used,
+        "class_counts": class_sample_counts,
+        "evaluation_note": None
+    }
     try:
         split_ratio = train_split / 100.0
         with_random = training_data.randomColumn()
@@ -344,6 +373,7 @@ def train_and_classify(samples: list, aoi=None, data_source="sentinel2", custom_
 
         if acc_val is not None and not math.isnan(acc_val) and not math.isinf(acc_val):
             accuracy_metrics["overall_accuracy"] = round(float(acc_val), 4)
+            accuracy_metrics["is_evaluated"] = True
         if kappa_val is not None and not math.isnan(kappa_val) and not math.isinf(kappa_val):
             accuracy_metrics["kappa"] = round(float(kappa_val), 4)
         if conf_info is not None:
@@ -388,6 +418,8 @@ def train_and_classify(samples: list, aoi=None, data_source="sentinel2", custom_
 
     except Exception as exc:
         logger.warning("Accuracy evaluation fallback: %s", exc)
+        accuracy_metrics["is_evaluated"] = False
+        accuracy_metrics["evaluation_note"] = f"Evaluation split could not be verified: {exc}"
 
     tile_url = ""
     try:
@@ -501,6 +533,12 @@ def train_and_classify(samples: list, aoi=None, data_source="sentinel2", custom_
         "class_values": class_values,
         "accuracy": accuracy_metrics,
         "areas": class_areas_dict,
-        "feature_importance": importance_dict
+        "feature_importance": importance_dict,
+        "samples_metadata": {
+            "total_submitted": total_submitted,
+            "total_used": total_used,
+            "class_counts": class_sample_counts,
+            "stratified_cap_per_class": max_per_class
+        }
     }
     return _sanitize_json_floats(res)

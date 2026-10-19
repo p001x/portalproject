@@ -364,45 +364,12 @@ def compute_change_detection(
             lambda: diff_final_viz.getThumbURL({"region": aoi.bounds(), "dimensions": 512, "crs": "EPSG:4326", "format": "png"})
         )
 
-        f_download = executor.submit(
-            lambda: diff.getDownloadURL({
-                "name": f"{idx_upper}_Change",
-                "region": aoi.bounds(),
-                "scale": 30,
-                "format": "GEO_TIFF",
-                "maxPixels": 1e9,
-            })
-        )
-
-        try:
-            stats = f_stats.result()
-        except Exception:
-            stats = {}
-
-        try:
-            area_dict = f_area.result()
-        except Exception:
-            area_dict = {}
-            
-        try:
-            classify_res = f_classify.result()
-        except Exception:
-            classify_res = {}
-
-        try:
-            bounds = aoi.bounds().getInfo().get("coordinates", [[[0,0]]])[0]
-        except Exception:
-            bounds = [[0, 0], [0, 0], [0, 0], [0, 0]]
-
         try:
             thumb_url = f_thumb.result()
         except Exception:
             thumb_url = ""
 
-        try:
-            download_url = f_download.result()
-        except Exception:
-            download_url = None
+        download_url = None
 
     if method == "threshold":
         class_areas = {
