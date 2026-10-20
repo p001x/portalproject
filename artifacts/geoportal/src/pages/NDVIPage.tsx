@@ -21,6 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api";
 import type { NDVIResult, AOIConfig } from "@/lib/api";
 import { DistrictMap } from "@/components/DistrictMap";
@@ -92,6 +93,7 @@ function sixMonthsAgo() {
 }
 
 export function NDVIPage() {
+  const { toast } = useToast();
   const [aoi, setAoi] = useState<AOIConfig>({ type: "rwanda", country: "Rwanda", name: "Rwanda" });
   const [startDate, setStartDate] = useState(sixMonthsAgo());
   const [endDate, setEndDate] = useState(today());
@@ -124,6 +126,13 @@ export function NDVIPage() {
       } else {
         setLayerMode("classified");
       }
+    },
+    onError: (err) => {
+      toast({
+        title: "Analysis Failed",
+        description: err.message || "Failed to compute NDVI. Please check parameters and try again.",
+        variant: "destructive",
+      });
     }
   });
 

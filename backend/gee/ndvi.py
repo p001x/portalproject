@@ -65,69 +65,30 @@ def compute_ndvi(
     }
     map_id = median.getMapId(vis_params)
 
-    # Execute GEE requests concurrently
-    classes = {
-        "Water (<0)": median.lt(0),
-        "Bare Land (0–0.1)": median.gte(0).And(median.lt(0.1)),
-        "Very Low (0.1–0.2)": median.gte(0.1).And(median.lt(0.2)),
-        "Low (0.2–0.4)": median.gte(0.2).And(median.lt(0.4)),
-        "Moderate (0.4–0.6)": median.gte(0.4).And(median.lt(0.6)),
-        "High (>0.6)": median.gte(0.6),
-    }
-    labels = list(classes.keys())
-    area_img = ee.Image.cat(
-        [classes[lbl].multiply(ee.Image.pixelArea()).rename(f"c{i}")
-         for i, lbl in enumerate(labels)]
+    # 1. Classification (computes thresholds, classified tile, and class areas)
+    classify = quantile_classify(
+        layers=[{"name": "NDVI", "image": median, "title": "NDVI Vegetation Index"}],
+        aoi=aoi,
+        scale=dynamic_scale,
+        n_classes=n_classes,
+        reverse_palette=True,
+        method=method,
+        custom_labels=custom_labels,
     )
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-        f_stats = executor.submit(
-            lambda: median.reduceRegion(
-                reducer=ee.Reducer.mean()
-                .combine(ee.Reducer.min(), sharedInputs=True)
-                .combine(ee.Reducer.max(), sharedInputs=True)
-                .combine(ee.Reducer.stdDev(), sharedInputs=True),
-                geometry=aoi.bounds(maxError=1000),
-                scale=dynamic_scale,
-                maxPixels=1e10,
-            ).getInfo()
-        )
+    # 2. Regional summary statistics
+    stats = median.reduceRegion(
+        reducer=ee.Reducer.mean()
+        .combine(ee.Reducer.min(), sharedInputs=True)
+        .combine(ee.Reducer.max(), sharedInputs=True)
+        .combine(ee.Reducer.stdDev(), sharedInputs=True),
+        geometry=aoi.bounds(maxError=1000),
+        scale=dynamic_scale,
+        maxPixels=1e10,
+    ).getInfo()
 
-        f_area = executor.submit(
-            lambda: area_img.reduceRegion(
-                reducer=ee.Reducer.sum(), geometry=aoi.bounds(maxError=1000), scale=dynamic_scale, maxPixels=1e10
-            ).getInfo()
-        )
-
-        f_classify = executor.submit(
-            lambda: quantile_classify(
-                layers=[{"name": "NDVI", "image": median, "title": "NDVI Vegetation Index"}],
-                aoi=aoi,
-                scale=dynamic_scale,
-                n_classes=n_classes,
-                reverse_palette=True,
-                method=method,
-                custom_labels=custom_labels,
-            )
-        )
-
-        f_thumb = executor.submit(
-            lambda: median.getThumbURL({**vis_params, "region": ee_bounds, "dimensions": 512, "crs": "EPSG:4326", "format": "png"})
-        )
-
-        stats = f_stats.result()
-        area_dict = f_area.result()
-        classify = f_classify.result()
-        try:
-            thumb_url = f_thumb.result()
-        except Exception:
-            thumb_url = None
-        download_url = None
-
-    class_areas = {
-        lbl: round((area_dict.get(f"c{i}", 0) or 0) / 1e6, 2)
-        for i, lbl in enumerate(labels)
-    }
+    panel_areas = classify.get("panels", [{}])[0].get("areas", {})
+    class_areas = panel_areas if panel_areas else {}
 
     center_lat, center_lon = center[0], center[1]
 

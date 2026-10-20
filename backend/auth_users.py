@@ -166,27 +166,46 @@ def decode_token(token: str) -> Optional[dict]:
 
 
 def get_current_user(request: Request) -> dict:
-    """FastAPI dependency: extract and verify JWT from Authorization header."""
+    """FastAPI dependency: extract and verify JWT from Authorization header.
+    Falls back to a guest user so live map analysis functions for website visitors.
+    """
     auth_header = request.headers.get("Authorization", "")
+    api_key = request.headers.get("X-API-Key")
+    
+    # Check API key if provided
+    if api_key or auth_header.startswith("Bearer sk_"):
+        key = api_key if api_key else auth_header[7:]
+        user_rec = auth_db.get_user_by_api_key(key)
+        if user_rec:
+            return {
+                "id": user_rec.get("id"),
+                "email": user_rec["email"],
+                "name": user_rec.get("name", user_rec["email"].split("@")[0]),
+                "role": user_rec.get("role", "user"),
+                "is_guest": False,
+            }
+
     if not auth_header.startswith("Bearer "):
-        raise Exception(
-            "Authentication required. Please log in."
-        )
+        return {
+            "id": "guest",
+            "email": "guest@spetro.org",
+            "name": "Guest Explorer",
+            "role": "guest",
+            "is_guest": True,
+        }
 
     token = auth_header[7:]
     payload = decode_token(token)
-    if payload is None:
-        raise Exception(
-            "Invalid or expired token. Please log in again."
-        )
+    if payload is None or not payload.get("sub"):
+        return {
+            "id": "guest",
+            "email": "guest@spetro.org",
+            "name": "Guest Explorer",
+            "role": "guest",
+            "is_guest": True,
+        }
 
     email = payload.get("sub")
-    if not email:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid token payload.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
 
     # Check database status for suspension/blocked state
     db_user = auth_db.get_user_by_email(email)
@@ -207,9 +226,11 @@ def get_current_user(request: Request) -> dict:
         role = "admin"
 
     return {
+        "id": db_user.get("id") if db_user else email,
         "email": email,
         "name": payload.get("name", (db_user["name"] if db_user else email.split("@")[0])),
         "role": role,
+        "is_guest": False,
     }
 
 

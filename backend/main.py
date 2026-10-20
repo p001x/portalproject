@@ -244,23 +244,19 @@ async def check_rate_limit_middleware(request: Request, call_next):
         if auth_header.startswith("Bearer sk_"):
             api_key = auth_header[7:]
         
-        email = None
-        role = "user"
+        email = "guest@spetro.org"
+        role = "guest"
         if api_key:
             user_rec = auth_db.get_user_by_api_key(api_key)
-            if not user_rec:
-                return JSONResponse({"detail": "Invalid API Key"}, status_code=401)
-            email = user_rec["email"]
-            role = user_rec["role"]
+            if user_rec:
+                email = user_rec["email"]
+                role = user_rec["role"]
         elif auth_header.startswith("Bearer "):
             token = auth_header[7:]
             payload = decode_token(token)
-            if not payload or not payload.get("sub"):
-                return JSONResponse({"detail": "Invalid or expired token. Please log in again."}, status_code=401, headers={"WWW-Authenticate": "Bearer"})
-            email = payload.get("sub")
-            role = payload.get("role", "user")
-        else:
-            return JSONResponse({"detail": "Authentication required for map processing. Please log in."}, status_code=401, headers={"WWW-Authenticate": "Bearer"})
+            if payload and payload.get("sub"):
+                email = payload.get("sub")
+                role = payload.get("role", "user")
         
         # Retroactive admin check from auth_users logic
         if email.lower() in ["petersonyang8@gmail.com", "pierrendorimana16@gmail.com"]:
@@ -268,12 +264,10 @@ async def check_rate_limit_middleware(request: Request, call_next):
 
         if role != "admin":
             # Usage tracking without blocking (Limits removed for all users)
-            auth_db.increment_and_check_gee_usage(email, max_requests=999999)
-            # if not usage["allowed"]:
-            #     return JSONResponse(
-            #         {"detail": "Daily GEE processing limit exceeded (15/day). Please try again tomorrow."},
-            #         status_code=429
-            #     )
+            try:
+                auth_db.increment_and_check_gee_usage(email, max_requests=999999)
+            except Exception:
+                pass
     
     return await call_next(request)
 
@@ -461,6 +455,8 @@ def reset_password(req: ResetPasswordRequest):
 
 @app.get("/api/auth/me", tags=["auth"])
 def get_me(user: dict = Depends(get_current_user)):
+    if user.get("is_guest"):
+        raise HTTPException(status_code=401, detail="Authentication required")
     return {"ok": True, "user": user}
 
 @app.get("/api/notifications", tags=["notifications"])

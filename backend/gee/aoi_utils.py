@@ -164,15 +164,35 @@ def _get_aoi_geometry_internal(aoi_config: dict) -> ee.Geometry:
         cell = aoi_config.get("cell")
         village = aoi_config.get("village")
 
-        # Use fast GAUL collections only for Country and Province level.
-        # Districts, Sectors, Cells, and Villages use the local shapefile
-        has_micro = any(val and val != "none" for val in [province, district, sector, cell, village])
-        
-        if not has_micro:
-            # Country level only
+        # Fast path 1: Country level only
+        if not any(val and val != "none" for val in [province, district, sector, cell, village]):
             return ee.FeatureCollection("FAO/GAUL/2015/level0").filter(ee.Filter.eq("ADM0_NAME", "Rwanda")).first().geometry().simplify(maxError=500)
 
-        # Fallback to local shapefile for all province and micro-level queries
+        # Fast path 2: District level in GEE (no sector, cell, village)
+        if district and district != "none" and not any(val and val != "none" for val in [sector, cell, village]):
+            dist_title = district.strip().title()
+            fc = ee.FeatureCollection("FAO/GAUL/2015/level2") \
+                .filter(ee.Filter.eq("ADM0_NAME", "Rwanda")) \
+                .filter(ee.Filter.eq("ADM2_NAME", dist_title))
+            try:
+                if fc.size().getInfo() > 0:
+                    return fc.first().geometry().simplify(maxError=200)
+            except Exception:
+                pass
+
+        # Fast path 3: Province level in GEE (no district, sector, cell, village)
+        if province and province != "none" and not any(val and val != "none" for val in [district, sector, cell, village]):
+            prov_clean = province.split("/")[0].strip().title()
+            fc = ee.FeatureCollection("FAO/GAUL/2015/level1") \
+                .filter(ee.Filter.eq("ADM0_NAME", "Rwanda")) \
+                .filter(ee.Filter.stringContains("ADM1_NAME", prov_clean))
+            try:
+                if fc.size().getInfo() > 0:
+                    return fc.first().geometry().simplify(maxError=500)
+            except Exception:
+                pass
+
+        # Fallback to local shapefile for micro-level queries (sector, cell, village)
         import geopandas as gpd
         from shapely.geometry import mapping
         
@@ -194,15 +214,15 @@ def _get_aoi_geometry_internal(aoi_config: dict) -> ee.Geometry:
         
         if province and province != "none":
             local_province = LOCAL_PROVINCE_MAPPING.get(province, province)
-            filtered = filtered[filtered["NAME_1"] == local_province]
+            filtered = filtered[filtered["NAME_1"].astype(str).str.strip().str.lower() == local_province.strip().lower()]
         if district and district != "none":
-            filtered = filtered[filtered["NAME_2"] == district]
+            filtered = filtered[filtered["NAME_2"].astype(str).str.strip().str.lower() == district.strip().lower()]
         if sector and sector != "none":
-            filtered = filtered[filtered["NAME_3"] == sector]
+            filtered = filtered[filtered["NAME_3"].astype(str).str.strip().str.lower() == sector.strip().lower()]
         if cell and cell != "none":
-            filtered = filtered[filtered["NAME_4"] == cell]
+            filtered = filtered[filtered["NAME_4"].astype(str).str.strip().str.lower() == cell.strip().lower()]
         if village and village != "none":
-            filtered = filtered[filtered["NAME_5"] == village]
+            filtered = filtered[filtered["NAME_5"].astype(str).str.strip().str.lower() == village.strip().lower()]
 
         if len(filtered) == 0:
             raise ValueError("No area matched the specified Rwanda hierarchy.")
