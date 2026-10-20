@@ -40,6 +40,10 @@ def init_db():
         from sqlalchemy import text
         with engine.connect() as conn:
             for col_name, col_type in [
+                ("google_id", "TEXT"),
+                ("is_verified", "BOOLEAN DEFAULT 0"),
+                ("profile_picture", "TEXT"),
+                ("preferences", "TEXT"),
                 ("is_blocked", "BOOLEAN DEFAULT 0"),
                 ("blocked_reason", "TEXT"),
                 ("blocked_at", "TEXT"),

@@ -772,7 +772,7 @@ def health():
         return {"status": "initializing", "message": "GEE is starting up, retry in ~30 s"}
     from gee.auth import get_gee_status
     gee_info = get_gee_status()
-    return {"status": "ok", "version": "2.1.1", "gee": gee_info}
+    return {"status": "ok", "version": "2.1.2", "gee": gee_info}
 
 
 @app.get("/api/districts", tags=["meta"])
