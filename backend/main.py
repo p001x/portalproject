@@ -770,7 +770,7 @@ def health():
         raise HTTPException(status_code=503, detail=_gee_error)
     if not _gee_ready:
         return {"status": "initializing", "message": "GEE is starting up, retry in ~30 s"}
-    return {"status": "ok", "version": "2.0.0"}
+    return {"status": "ok", "version": "2.1.0"}
 
 
 @app.get("/api/districts", tags=["meta"])

@@ -4,6 +4,7 @@ services:
     name: geoportal-api
     env: docker
     plan: free
+    autoDeploy: true
     dockerfilePath: ./Dockerfile
     envVars:
       - key: PORT
