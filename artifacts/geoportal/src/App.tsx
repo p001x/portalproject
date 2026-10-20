@@ -450,20 +450,23 @@ function Layout({ children }: { children: React.ReactNode }) {
 
   // Normalize location: strip any leading wouter tilde '~', query strings, and trailing slashes
   const cleanLoc = (loc || "").replace(/^~/, "").split("?")[0].replace(/\/+$/, "") || "/";
-  const publicRoutes = ["/", "/platform", "/analysis-hub", "/about", "/contact", "/auth", "/blog", "/export-editor"];
-  const isPublic = publicRoutes.includes(cleanLoc) || cleanLoc.startsWith("/reset-password");
+  const publicStandaloneRoutes = ["/", "/platform", "/analysis-hub", "/about", "/contact", "/auth", "/blog", "/export-editor"];
+  const isStandalone = publicStandaloneRoutes.includes(cleanLoc) || cleanLoc.startsWith("/reset-password");
+
+  const strictlyProtectedRoutes = ["/settings", "/admin/users", "/cloud-ingest", "/dashboard"];
+  const requiresAuth = strictlyProtectedRoutes.some(p => cleanLoc === p || cleanLoc.startsWith(p + "/"));
 
   useEffect(() => {
-    if (!isLoading && !isAuthenticated && !isPublic && cleanLoc !== "/rare-data") {
+    if (!isLoading && !isAuthenticated && requiresAuth) {
       setLocation("/auth");
     }
-  }, [isAuthenticated, isLoading, cleanLoc, isPublic, setLocation]);
+  }, [isAuthenticated, isLoading, requiresAuth, setLocation]);
 
-  if (isPublic) {
+  if (isStandalone) {
     return <>{children}</>;
   }
 
-  if (isLoading || (!isAuthenticated && cleanLoc !== "/rare-data")) {
+  if (isLoading || (!isAuthenticated && requiresAuth)) {
     return (
       <div className="flex h-screen items-center justify-center bg-background text-muted-foreground">
         Loading...
