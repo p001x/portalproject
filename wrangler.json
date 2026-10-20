@@ -7,6 +7,11 @@
     "not_found_handling": "single-page-application",
     "binding": "ASSETS"
   },
+  "triggers": {
+    "crons": [
+      "*/10 * * * *"
+    ]
+  },
   "vars": {
     "BACKEND_ORIGIN": "https://geoportal-api-ygzi.onrender.com"
   }

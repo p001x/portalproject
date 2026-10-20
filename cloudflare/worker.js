@@ -91,4 +91,23 @@ export default {
 
     return new Response("Not Found", { status: 404 });
   },
+
+  // --- 3. Automated 24/7 Keep-Alive: Pings backend every 10 min to prevent sleep ---
+  async scheduled(controller, env, ctx) {
+    const backendOrigin = (env.BACKEND_ORIGIN || env.CLOUD_RUN_ORIGIN || DEFAULT_BACKEND_ORIGIN).replace(/\/$/, "");
+    const healthUrl = `${backendOrigin}/api/health`;
+
+    ctx.waitUntil(
+      fetch(healthUrl, {
+        method: "GET",
+        headers: { "User-Agent": "Cloudflare-Edge-KeepAlive/2.0" },
+      })
+      .then((res) => {
+        console.log(`[Keep-Alive] Pinged ${healthUrl} -> Status: ${res.status}`);
+      })
+      .catch((err) => {
+        console.error(`[Keep-Alive] Ping failed:`, err);
+      })
+    );
+  },
 };
