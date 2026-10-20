@@ -102,16 +102,19 @@ def initialize_gee(project_id: str | None = None, key_json_override: str | None 
             except Exception:
                 pass
 
-        # Option 1: Guarantee Key 2 (peteryanservice) is PRIMARY (Index 0), Key 1 is BACKUP (Index 1)
+        # Guarantee working service account (ee-petersonyang87 / geoportalservices) is PRIMARY (Index 0)
         def _cred_rank(k_str):
             try:
                 kd = json.loads(k_str)
                 em = kd.get("client_email", "").lower()
+                pk = kd.get("project_id", "").lower()
+                if "ee-petersonyang87" in em or "ee-petersonyang87" in pk or "geoportalservices" in em:
+                    return 0 # Working Primary
                 if "peteryanservice" in em or "project-93a68124" in em:
-                    return 0 # Top priority (Primary - fast & fresh)
+                    return 2 # Deprecated/blocked project
                 return 1 # Standby Backup
             except Exception:
-                return 2
+                return 3
 
         _credentials_list.sort(key=_cred_rank)
 
@@ -132,9 +135,20 @@ def initialize_gee(project_id: str | None = None, key_json_override: str | None 
             except Exception as e:
                 raise RuntimeError(f"No valid service accounts found and explicit auth failed: {e}")
                 
-        # Activate the first credential in the pool
-        _current_cred_idx = 0
-        _activate_credential_unlocked(_current_cred_idx, project_id)
+        # Activate the first working credential in the pool
+        activated = False
+        last_exc = None
+        for i in range(len(_credentials_list)):
+            try:
+                _current_cred_idx = i
+                _activate_credential_unlocked(_current_cred_idx, project_id)
+                activated = True
+                break
+            except Exception as e:
+                last_exc = e
+                logger.warning("Service Account %d failed activation test: %s. Trying next...", i, e)
+        if not activated:
+            raise RuntimeError(f"All configured service accounts failed to activate: {last_exc}")
 
 
 def _activate_credential_unlocked(idx: int, project_id: str | None = None):
@@ -176,8 +190,11 @@ def _activate_credential_unlocked(idx: int, project_id: str | None = None):
         
     try:
         roots = ee.data.getAssetRoots()
-    except Exception:
-        pass
+    except Exception as e:
+        err_msg = str(e).lower()
+        if "refresherror" in err_msg or "policy" in err_msg or "invalid_grant" in err_msg or "unauthorized" in err_msg:
+            logger.warning("Service Account %s failed authorization validation: %s", key_data.get("client_email"), e)
+            raise
     _initialized = True
     _active_project_id = target_project
     _active_sa_email = key_data["client_email"]
@@ -363,7 +380,8 @@ def _is_rotatable_error(e: Exception) -> bool:
         "user limit", "rate limit", "deadline exceeded", 
         "timeout", "timed out", "service unavailable", "503",
         "restricted mode", "permission to use project", "serviceusage",
-        "internal error", "backend error", "connection reset"
+        "internal error", "backend error", "connection reset",
+        "refresherror", "oauth2", "policy", "token", "unauthorized", "invalid_grant"
     ]
     return any(trigger in err_str for trigger in retry_triggers)
 

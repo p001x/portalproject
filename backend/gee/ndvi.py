@@ -87,8 +87,11 @@ def compute_ndvi(
         maxPixels=1e10,
     ).getInfo()
 
-    panel_areas = classify.get("panels", [{}])[0].get("areas", {})
+    panel = classify.get("panels", [{}])[0] if classify and classify.get("panels") else {}
+    panel_areas = panel.get("areas", {})
     class_areas = panel_areas if panel_areas else {}
+    thumb_url = panel.get("thumb_url")
+    download_url = panel.get("download_url")
 
     center_lat, center_lon = center[0], center[1]
 
