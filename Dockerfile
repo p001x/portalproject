@@ -15,7 +15,7 @@ WORKDIR $HOME/app
 
 # Copy the backend code and install dependencies
 COPY --chown=user backend $HOME/app/backend
-RUN pip install --no-cache-dir $HOME/app/backend
+RUN pip install --no-cache-dir python-multipart $HOME/app/backend
 
 
 # Copy the sector shapefiles needed for Rwanda study areas
