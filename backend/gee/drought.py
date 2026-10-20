@@ -165,28 +165,33 @@ def _build_comprehensive(aoi_config, season_start, season_end, season_label, wei
 
 def _build_meteorological(season_start, season_end, s_month, e_month, end_year, season_label, corridor, area_sqkm):
     """Meteorological drought — Precipitation Condition Index (PCI)"""
-    chirps = ee.ImageCollection("UCSB-CHG/CHIRPS/PENTAD").select("precipitation")
-
     duration = (e_month - s_month + 1) if s_month <= e_month else (12 - s_month + 1 + e_month)
-    n_pentads = duration * 6
 
-    # Corridor-aware baseline window
-    if corridor == "global":
-        baseline_start = max(1981, int(end_year) - 10)  # shorter for global
-    elif corridor == "custom" and area_sqkm > 100000:
+    # Use ERA5 for global / large / high-latitude countries (where CHIRPS has no coverage above 50N)
+    use_era5 = (corridor == "global" or (area_sqkm is not None and area_sqkm > 100000))
+    if use_era5:
+        era5 = ee.ImageCollection("ECMWF/ERA5_LAND/MONTHLY_AGGR").select("total_precipitation_sum")
         baseline_start = max(1981, int(end_year) - 15)
+        baseline_col = era5.filter(
+            ee.Filter.calendarRange(s_month, e_month, 'month')
+        ).filter(
+            ee.Filter.calendarRange(baseline_start, int(end_year), 'year')
+        )
+        precip_min = baseline_col.reduce(ee.Reducer.percentile([5])).rename('precipitation').multiply(1000).multiply(duration)
+        precip_max = baseline_col.reduce(ee.Reducer.percentile([95])).rename('precipitation').multiply(1000).multiply(duration)
+        current_precip = era5.filterDate(season_start, season_end).sum().multiply(1000)
     else:
-        baseline_start = 1981  # Rwanda: full baseline
-
-    baseline_col = chirps.filter(
-        ee.Filter.calendarRange(s_month, e_month, 'month')
-    ).filter(
-        ee.Filter.calendarRange(baseline_start, int(end_year), 'year')
-    )
-    precip_min = baseline_col.reduce(ee.Reducer.percentile([5])).rename('precipitation').multiply(n_pentads)
-    precip_max = baseline_col.reduce(ee.Reducer.percentile([95])).rename('precipitation').multiply(n_pentads)
-
-    current_precip = chirps.filterDate(season_start, season_end).sum()
+        chirps = ee.ImageCollection("UCSB-CHG/CHIRPS/PENTAD").select("precipitation")
+        n_pentads = duration * 6
+        baseline_start = 1981
+        baseline_col = chirps.filter(
+            ee.Filter.calendarRange(s_month, e_month, 'month')
+        ).filter(
+            ee.Filter.calendarRange(baseline_start, int(end_year), 'year')
+        )
+        precip_min = baseline_col.reduce(ee.Reducer.percentile([5])).rename('precipitation').multiply(n_pentads)
+        precip_max = baseline_col.reduce(ee.Reducer.percentile([95])).rename('precipitation').multiply(n_pentads)
+        current_precip = chirps.filterDate(season_start, season_end).sum()
 
     precip_denom = precip_max.subtract(precip_min)
     pci = current_precip.subtract(precip_min).divide(
@@ -262,7 +267,7 @@ def _build_water_mask(corridor):
         return gsw.gte(50).unmask(0)
     else:
         # Rwanda + Custom: detailed mask using land cover
-        lc = ee.ImageCollection("ESA/WorldCover/v200").first()
+        lc = ee.Image("ESA/WorldCover/v200/2021").select("Map")
         return gsw.gte(50).unmask(0).Or(lc.eq(80)).Or(lc.eq(90))
 
 
@@ -288,8 +293,11 @@ def _build_drought_image(aoi_config, start_year, end_year, season="season_b", st
     # Note: do NOT simplify again here — get_aoi_geometry already does area-based simplification
 
     # ── Step 3: Compute area once ──
-    if is_global:
-        area_sqkm = 999999999
+    country = aoi_config.get("country", "") if isinstance(aoi_config, dict) else ""
+    from gee.aoi_utils import COUNTRY_PRESETS
+    is_massive = is_global or (country in COUNTRY_PRESETS and COUNTRY_PRESETS[country].get("is_massive"))
+    if is_massive:
+        area_sqkm = 10000000
     else:
         try:
             area_sqkm = geometry.bounds().area(maxError=1000).divide(1e6).getInfo()
@@ -361,7 +369,7 @@ def _build_drought_image(aoi_config, start_year, end_year, season="season_b", st
             layer["image"] = layer["image"].clip(geometry)
 
     # ── Step 9: Background asset cache (non-global only) ──
-    if is_cacheable and asset_id and not is_global:
+    if is_cacheable and asset_id and not is_global and not is_massive:
         try:
             logger.info(f"[*] CACHE MISS: Triggering background export for {asset_id}")
             export_img = ee.Image.cat([drought_img] + [l["image"] for l in layers] + [water_mask.rename("water_mask")])

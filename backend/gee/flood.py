@@ -137,13 +137,13 @@ def _build_flood_image(aoi_config: dict, start_year: int, end_year: int, weights
     corridor, is_global = _classify_aoi(aoi_config)
     is_rwanda = corridor == "rwanda"
     
-    # For global/custom: clamp geometry to Mercator-safe bounds (Ãƒâ€šÃ‚Â±85Ãƒâ€šÃ‚Â° lat)
+    # For global: clamp geometry to Mercator-safe bounds (±85° lat)
     # to prevent "Can't transform" errors near the poles
-    if not is_rwanda:
+    if is_global:
         aoi = _clamp_to_mercator(aoi)
     
     # 1. Elevation & Slope
-    dem = ee.Image("USGS/SRTMGL1_003").select("elevation").unmask(ee.ImageCollection("COPERNICUS/DEM/GLO30").select("DEM").mosaic(), False).clip(aoi)
+    dem = ee.Image("USGS/SRTMGL1_003").select("elevation").unmask(ee.ImageCollection("COPERNICUS/DEM/GLO30_2024_1").select("DEM").mosaic(), False).clip(aoi)
     slope_deg = ee.Terrain.slope(dem)
     
     # Elevation: lower elevation = higher flood risk (5)
@@ -169,7 +169,7 @@ def _build_flood_image(aoi_config: dict, start_year: int, end_year: int, weights
     )
 
     # 2. TWI
-    flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").clip(aoi)
+    flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").unmask(ee.Image("MERIT/Hydro/v1_0_1").select("upa").multiply(100)).unmask(10).clip(aoi)
     slope_rad = slope_deg.multiply(math.pi / 180)
     twi = flow_acc.add(1).log().subtract(slope_rad.tan().add(0.001).log()).rename("TWI")
     # TWI: higher TWI = higher flood risk (5)
@@ -183,12 +183,10 @@ def _build_flood_image(aoi_config: dict, start_year: int, end_year: int, weights
         .clip(aoi)
     )
 
-    try:
-        bounds_coords = aoi.bounds(maxError=1000).coordinates().get(0).getInfo()
-        lats = [pt[1] for pt in bounds_coords]
-        use_era5_precip = max(lats) > 50 or min(lats) < -50
-    except:
-        use_era5_precip = True
+    from gee.aoi_utils import get_bounds_and_center
+    b, _ = get_bounds_and_center(aoi, aoi_config=aoi_config)
+    lats = [pt[1] for pt in b]
+    use_era5_precip = max(lats) > 50 or min(lats) < -50
 
     # 3. Rainfall
     n_years = max(1, end_year - start_year + 1)
@@ -307,7 +305,7 @@ def _build_flood_image(aoi_config: dict, start_year: int, end_year: int, weights
 
     # 8. NDVI
     year = int(start_year)
-    ndvi = (get_historical_ndvi(aoi, year, f"{start_year}-01-01", f"{end_year}-12-31", 20)
+    ndvi = (get_historical_ndvi(aoi, year, f"{start_year}-01-01", f"{end_year}-12-31", 20, aoi_config=aoi_config)
             .reproject(crs="EPSG:4326" if is_rwanda else "EPSG:3857", scale=safe_scale)
             .clip(aoi))
     ndvi_score = (
@@ -384,11 +382,7 @@ def compute_flood_map(aoi_config: dict, start_year: int, end_year: int, weights:
             if "Memory limit" in str(e) or "User memory limit" in str(e):
                 raise ValueError("The selected region is too large or complex for real-time visualization. Please select a smaller area.") from e
             raise
-    bounds, _ = get_bounds_and_center(aoi)
-    
-    x_coords = [p[0] for p in bounds]
-    y_coords = [p[1] for p in bounds]
-    center = [sum(y_coords)/len(y_coords), sum(x_coords)/len(x_coords)]
+    bounds, center = get_bounds_and_center(aoi, aoi_config=aoi_config)
 
     # We also return factor map urls here for fast access in the frontend
     factor_maps = {}
@@ -452,9 +446,11 @@ def compute_flood_stats(aoi_config: dict, start_year: int, end_year: int, weight
         for i, lbl in enumerate(labels)
     ])
 
-    calc_geom = ee.Geometry.Rectangle([-180, -85, 180, 85], "EPSG:4326", False) if is_global else aoi
+    bounds, _ = get_bounds_and_center(aoi, aoi_config=aoi_config)
+    calc_geom = ee.Geometry.Polygon([bounds]) if bounds else (ee.Geometry.Rectangle([-180, -85, 180, 85], "EPSG:4326", False) if is_global else aoi)
+    dyn_scale = get_dynamic_scale(aoi, aoi_config=aoi_config)
     area_dict = area_img.reduceRegion(
-        reducer=ee.Reducer.sum(), geometry=calc_geom, scale=get_dynamic_scale(aoi), maxPixels=1e13, bestEffort=True, tileScale=16
+        reducer=ee.Reducer.sum(), geometry=calc_geom, scale=dyn_scale, maxPixels=1e13, bestEffort=True, tileScale=16
     ).getInfo()
 
     class_areas_km2 = {lbl: (area_dict.get(f"c{i}") or 0) / 1e6 for i, lbl in enumerate(labels)}
@@ -503,7 +499,7 @@ def compute_flood_classify(aoi_config: dict, start_year: int, end_year: int, wei
     classify = quantile_classify(
         layers=layers_to_classify, 
         aoi=aoi, 
-        scale=get_dynamic_scale(aoi), 
+        scale=get_dynamic_scale(aoi, aoi_config=aoi_config), 
         n_classes=n_classes, 
         custom_labels=custom_labels or FLOOD_CLASS_NAMES, 
         method=method

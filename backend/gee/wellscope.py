@@ -13,7 +13,7 @@ _cache_map = PersistentCache(ttl=3600)
 _cache_stats = PersistentCache(ttl=3600)
 _cache_classify = PersistentCache(ttl=3600)
 _cache_export = PersistentCache(ttl=3600)
-_cache_build = PersistentCache(ttl=3600)
+_cache_build = {}
 _lock = Lock()
 
 FACTOR_ORDER = ["rainfall", "lithology", "slope", "twi", "drainage", "dist_water", "soil", "lulc"]
@@ -103,7 +103,7 @@ def _build_wellscope_base(aoi_config: dict, custom_weights: dict = None):
         from gee.aoi_utils import get_aoi_geometry
         from gee.classify_utils import get_jenks_breaks
         aoi = get_aoi_geometry(aoi_config)
-        dynamic_scale = get_dynamic_scale(aoi)
+        dynamic_scale = get_dynamic_scale(aoi, aoi_config=aoi_config)
 
         weights = _normalize_weights(custom_weights)
         
@@ -111,12 +111,10 @@ def _build_wellscope_base(aoi_config: dict, custom_weights: dict = None):
         end_year = int(aoi_config.get("end_year", 2024))
         
         # Build raw continuous images
-        try:
-            bounds_coords = aoi.bounds(maxError=1000).coordinates().get(0).getInfo()
-            lats = [pt[1] for pt in bounds_coords]
-            use_era5_precip = max(lats) > 50 or min(lats) < -50
-        except:
-            use_era5_precip = True
+        from gee.aoi_utils import get_bounds_and_center
+        bounds, center = get_bounds_and_center(aoi, aoi_config=aoi_config)
+        lats = [pt[1] for pt in bounds]
+        use_era5_precip = max(lats) > 50 or min(lats) < -50
 
         if use_era5_precip:
             era = ee.ImageCollection("ECMWF/ERA5_LAND/MONTHLY_AGGR").select("total_precipitation_sum")
@@ -164,12 +162,17 @@ def _build_wellscope_base(aoi_config: dict, custom_weights: dict = None):
         # Combine for a single histogram pass and mask to land (rain.mask()) to prevent ocean pixels from skewing Jenks breaks globally
         continuous_bands = ee.Image.cat([rain, slope, twi, drainage_density, dist_water, permeability]).updateMask(rain.mask())
         
-        # Fix histogram scale: cap at 5000m so rivers don't completely disappear from sampling
-        scale_hist = min(dynamic_scale * 2 if dynamic_scale else 100, 5000)
+        # Fast adaptive histogram scale for both small study areas and massive continental nations
+        if dynamic_scale and dynamic_scale >= 5000:
+            scale_hist = dynamic_scale
+        else:
+            scale_hist = min(dynamic_scale * 2 if dynamic_scale else 100, 5000)
+
+        hist_region = ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds(maxError=1000)
         with gee_semaphore:
             hist_raw = continuous_bands.reduceRegion(
                 reducer=ee.Reducer.autoHistogram(maxBuckets=50),
-                geometry=aoi.bounds(maxError=1000),
+                geometry=hist_region,
                 scale=scale_hist,
                 maxPixels=1e13,
                 tileScale=4,
@@ -199,7 +202,8 @@ def _build_wellscope_base(aoi_config: dict, custom_weights: dict = None):
         # Use a constant fallback for lithology since the private asset 'litodoloy' causes 403 errors globally
         lith_score = ee.Image(3).toFloat().updateMask(rain.mask()).clip(aoi)
         
-        lulc = ee.ImageCollection("ESA/WorldCover/v200").first().select('Map').unmask(0).clip(aoi)
+        # Global ESA WorldCover 2021 10m composite (avoid single tile .first() bug)
+        lulc = ee.Image("ESA/WorldCover/v200/2021").select('Map').unmask(0).clip(aoi)
         lulc_score = ee.Image(1) \
             .where(lulc.eq(10), 5).where(lulc.eq(90), 5).where(lulc.eq(95), 5) \
             .where(lulc.eq(20), 4).where(lulc.eq(30), 4).where(lulc.eq(40), 3) \
@@ -249,9 +253,7 @@ def compute_wellscope_map(aoi_config: dict, custom_weights: dict = None) -> dict
     ahp_data = compute_ahp_data({k: v * 100 for k, v in weights.items()})
 
     from gee.aoi_utils import get_bounds_and_center
-
-
-    bounds, center = get_bounds_and_center(aoi)
+    bounds, center = get_bounds_and_center(aoi, aoi_config=aoi_config)
 
     with gee_semaphore:
         map_id = suitability_100.getMapId(_SUITABILITY_VIS)
@@ -259,7 +261,9 @@ def compute_wellscope_map(aoi_config: dict, custom_weights: dict = None) -> dict
             if dynamic_scale and dynamic_scale > 10000:
                 print(f"[WellScope] ThumbURL skipped for massive scale: {dynamic_scale}"); thumb_url = None
             else:
-                t_thumb = time.time(); print("[WellScope] Getting ThumbURL..."); thumb_url = suitability_100.getThumbURL({**_SUITABILITY_VIS, "region": aoi.bounds(), "dimensions": 512, "crs": "EPSG:4326", "format": "png"})
+                t_thumb = time.time(); print("[WellScope] Getting ThumbURL...")
+                thumb_region = ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds()
+                thumb_url = suitability_100.getThumbURL({**_SUITABILITY_VIS, "region": thumb_region, "dimensions": 512, "crs": "EPSG:4326", "format": "png"})
         except ee.EEException:
             print(f"[WellScope] ThumbURL failed: {time.time()-t_thumb:.2f}s"); thumb_url = None
 
@@ -298,10 +302,14 @@ def compute_wellscope_stats(aoi_config: dict, custom_weights: dict = None) -> di
 
     aoi, dynamic_scale, _, _, suitability_100 = _build_wellscope_base(aoi_config, custom_weights)
 
+    from gee.aoi_utils import get_bounds_and_center
+    bounds, _ = get_bounds_and_center(aoi, aoi_config=aoi_config)
+    eval_geom = ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds(maxError=1000)
+
     with gee_semaphore:
         stats = suitability_100.reduceRegion(
             reducer=ee.Reducer.mean().combine(ee.Reducer.min(), sharedInputs=True).combine(ee.Reducer.max(), sharedInputs=True),
-            geometry=aoi.bounds(maxError=1000),
+            geometry=eval_geom,
             scale=dynamic_scale,
             maxPixels=1e13,
             tileScale=4,
@@ -359,11 +367,15 @@ def compute_wellscope_export(aoi_config: dict, custom_weights: dict = None) -> d
         if cache_key in _cache_export:
             return _cache_export[cache_key]
 
-    aoi, _, _, _, suitability_100 = _build_wellscope_base(aoi_config, custom_weights)
+    aoi, dynamic_scale, _, _, suitability_100 = _build_wellscope_base(aoi_config, custom_weights)
+    from gee.aoi_utils import get_bounds_and_center
+    bounds, _ = get_bounds_and_center(aoi, aoi_config=aoi_config)
+    dl_geom = ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds()
+    dl_scale = max(dynamic_scale, 100)
 
     with gee_semaphore:
         try:
-            dl_url = suitability_100.getDownloadURL({"scale": 100, "region": aoi.bounds(), "format": "GEO_TIFF", "crs": "EPSG:4326"})
+            dl_url = suitability_100.getDownloadURL({"scale": dl_scale, "region": dl_geom, "format": "GEO_TIFF", "crs": "EPSG:4326"})
         except Exception:
             dl_url = None
 

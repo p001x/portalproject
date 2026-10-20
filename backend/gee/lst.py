@@ -63,10 +63,16 @@ def lst_image_and_aoi(aoi_config: dict, start_date: str, end_date: str):
 
     # 3. 30m Vegetation Cooling Downscaling (Sentinel-2 NDVI / MODIS for large areas)
     # Dense forest/vegetation transpires and cools by up to ~3.0°C relative to bare ground/urban
-    try:
-        area_sqkm = aoi.bounds().area(maxError=1000).divide(1e6).getInfo()
-    except Exception:
-        area_sqkm = 0
+    from gee.aoi_utils import COUNTRY_PRESETS
+    country = aoi_config.get("country", "") if isinstance(aoi_config, dict) else ""
+    is_massive = country in COUNTRY_PRESETS and COUNTRY_PRESETS[country].get("is_massive")
+    if is_massive:
+        area_sqkm = 10000000
+    else:
+        try:
+            area_sqkm = aoi.bounds().area(maxError=1000).divide(1e6).getInfo()
+        except Exception:
+            area_sqkm = 0
 
     if area_sqkm > 20000:
         # For huge regions, avoid Sentinel-2 median (too heavy).

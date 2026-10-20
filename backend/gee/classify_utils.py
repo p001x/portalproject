@@ -241,11 +241,7 @@ def quantile_classify(layers: list, aoi, scale: int, n_classes: int, reverse_pal
     except:
         pass
 
-    try:
-        area_sqkm = 1e9 if is_global else safe_get_info(aoi.area(maxError=1000).divide(1e6))
-    except Exception:
-        area_sqkm = 0
-
+    area_sqkm = 0
     calc_geom = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False) if is_global else aoi.bounds(maxError=1000)
 
     if custom_breaks:

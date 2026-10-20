@@ -103,6 +103,12 @@ def build_dvi_image(aoi_config, start_date, end_date, weights=None, corridor=Non
                 is_global = True
         except: pass
 
+    from gee.aoi_utils import COUNTRY_PRESETS
+    country = aoi_config.get("country", "") if isinstance(aoi_config, dict) else ""
+    is_massive = is_global or (country in COUNTRY_PRESETS and COUNTRY_PRESETS[country].get("is_massive"))
+    if is_massive and area_sqkm is None:
+        area_sqkm = 10000000
+
     if area_sqkm is None:
         try:
             area_sqkm = geometry.bounds().area(maxError=1000).divide(1e6).getInfo() if not is_global else 999999999
@@ -213,12 +219,10 @@ def build_dvi_image(aoi_config, start_date, end_date, weights=None, corridor=Non
     lst_anom = lst_current.subtract(lst_base_mean).rename('LST_ANOM')
 
     # Precipitation — use ERA5 for high latitudes, CHIRPS otherwise
-    try:
-        bounds_coords = geometry.bounds(maxError=1000).coordinates().get(0).getInfo()
-        lats = [pt[1] for pt in bounds_coords]
-        use_era5_precip = max(lats) > 50 or min(lats) < -50
-    except:
-        use_era5_precip = True
+    from gee.aoi_utils import get_bounds_and_center
+    b, _ = get_bounds_and_center(geometry, aoi_config=aoi_config)
+    lats = [pt[1] for pt in b]
+    use_era5_precip = max(lats) > 50 or min(lats) < -50
 
     if use_era5_precip:
         era_col = ee.ImageCollection("ECMWF/ERA5_LAND/MONTHLY_AGGR").select("total_precipitation_sum")

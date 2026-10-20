@@ -29,6 +29,9 @@ class CacheJSONEncoder(json.JSONEncoder):
         except ImportError:
             pass
 
+        type_name = type(obj).__name__.lower()
+        if "lock" in type_name or "future" in type_name or "semaphore" in type_name:
+            return None
         if isinstance(obj, (set, frozenset)):
             return sorted(list(obj))
         if hasattr(obj, "isoformat"):
@@ -40,8 +43,11 @@ class CacheJSONEncoder(json.JSONEncoder):
         if hasattr(obj, "tolist"):
             return obj.tolist()
         if hasattr(obj, "__dict__"):
-            return obj.__dict__
-        return super().default(obj)
+            return {k: v for k, v in obj.__dict__.items() if "lock" not in k.lower() and "lock" not in type(v).__name__.lower()}
+        try:
+            return super().default(obj)
+        except Exception:
+            return str(obj)
 
 
 def _detect_caller_namespace() -> str:

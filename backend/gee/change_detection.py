@@ -34,14 +34,27 @@ def mask_l8_clouds(image):
     return image.updateMask(dilated_cloud.And(cirrus).And(cloud).And(shadow))
 
 
-def get_harmonized_composite(aoi, start_date: str, end_date: str):
+def get_harmonized_composite(aoi, start_date: str, end_date: str, aoi_config: dict = None):
     """
     Produce a clean, cloud-free optical composite (B2, B3, B4, B8, B11, B12)
-    using Sentinel-2 SR (2016-present) or Landsat 8/9 with seamless fallback.
+    using Sentinel-2 SR (2016-present), Landsat 8/9, or MODIS (for massive areas).
     Reflectance is normalized to 0.0 - 1.0.
     """
+    from gee.aoi_utils import COUNTRY_PRESETS
+    country = aoi_config.get("country", "") if isinstance(aoi_config, dict) else ""
+    is_massive = country in COUNTRY_PRESETS and COUNTRY_PRESETS[country].get("is_massive")
+
     year = int(start_date[:4])
-    
+
+    if is_massive and year >= 2000:
+        # 500m MODIS 8-day surface reflectance composite for massive areas
+        modis = ee.ImageCollection("MODIS/061/MOD09A1").filterDate(start_date, end_date).filterBounds(aoi)
+        composite = modis.select(
+            ["sur_refl_b03", "sur_refl_b04", "sur_refl_b01", "sur_refl_b02", "sur_refl_b06", "sur_refl_b07"],
+            ["B2", "B3", "B4", "B8", "B11", "B12"]
+        ).median().multiply(0.0001)
+        return composite.clip(aoi)
+
     if year >= 2016:
         s2_col = (
             ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
@@ -219,11 +232,11 @@ def compute_change_detection(
     from gee.aoi_utils import get_aoi_geometry
     from gee.classify_utils import quantile_classify
     aoi = get_aoi_geometry(aoi_config)
-    dynamic_scale = get_dynamic_scale(aoi)
+    dynamic_scale = get_dynamic_scale(aoi, aoi_config=aoi_config)
 
     # 1. Optical Composites for Both Periods
-    before_comp = get_harmonized_composite(aoi, before_start, before_end)
-    after_comp = get_harmonized_composite(aoi, after_start, after_end)
+    before_comp = get_harmonized_composite(aoi, before_start, before_end, aoi_config=aoi_config)
+    after_comp = get_harmonized_composite(aoi, after_start, after_end, aoi_config=aoi_config)
 
     # 2. Spectral Indices
     before_idx = calculate_index(before_comp, index_type)
@@ -328,6 +341,10 @@ def compute_change_detection(
         [classes[lbl].multiply(ee.Image.pixelArea()).rename(f"c{i}") for i, lbl in enumerate(labels)]
     )
 
+    from gee.aoi_utils import get_bounds_and_center
+    bounds, center = get_bounds_and_center(aoi, aoi_config=aoi_config)
+    eval_geom = ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds(maxError=1000)
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         f_stats = executor.submit(
             lambda: diff.reduceRegion(
@@ -335,7 +352,7 @@ def compute_change_detection(
                 .combine(ee.Reducer.min(), sharedInputs=True)
                 .combine(ee.Reducer.max(), sharedInputs=True)
                 .combine(ee.Reducer.stdDev(), sharedInputs=True),
-                geometry=aoi.bounds(maxError=1000),
+                geometry=eval_geom,
                 scale=dynamic_scale,
                 maxPixels=1e10,
                 tileScale=4,
@@ -344,7 +361,7 @@ def compute_change_detection(
 
         f_area = executor.submit(
             lambda: area_img.reduceRegion(
-                reducer=ee.Reducer.sum(), geometry=aoi.bounds(maxError=1000), scale=dynamic_scale, maxPixels=1e10, tileScale=4
+                reducer=ee.Reducer.sum(), geometry=eval_geom, scale=dynamic_scale, maxPixels=1e10, tileScale=4
             ).getInfo() if method == "threshold" else {}
         )
         
@@ -361,7 +378,7 @@ def compute_change_detection(
         )
 
         f_thumb = executor.submit(
-            lambda: diff_final_viz.getThumbURL({"region": aoi.bounds(), "dimensions": 512, "crs": "EPSG:4326", "format": "png"})
+            lambda: diff_final_viz.getThumbURL({"region": eval_geom, "dimensions": 512, "crs": "EPSG:4326", "format": "png"})
         )
 
         try:
@@ -369,6 +386,9 @@ def compute_change_detection(
         except Exception:
             thumb_url = ""
 
+        stats = f_stats.result() or {}
+        area_dict = f_area.result() or {}
+        classify_res = f_classify.result() or {}
         download_url = None
 
     if method == "threshold":
@@ -409,14 +429,7 @@ def compute_change_detection(
         "total_analyzed_km2": round(total_km2, 2),
     }
 
-    try:
-        from gee.aoi_utils import get_bounds_and_center
-
-        bounds, center = get_bounds_and_center(aoi)
-
-        center_lat, center_lon = center[0], center[1]
-    except Exception:
-        center_lon, center_lat = 29.87, -1.94
+    center_lat, center_lon = center[0], center[1]
 
     result = {
         "tile_url": diff_map_id["tile_fetcher"].url_format,

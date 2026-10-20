@@ -48,7 +48,7 @@ def compute_ndvi(
     from gee.aoi_utils import get_aoi_geometry, get_bounds_and_center
     aoi = get_aoi_geometry(aoi_config)
     bounds, center = get_bounds_and_center(aoi, aoi_config)
-    ee_bounds = ee.Geometry.Polygon(bounds, "EPSG:4326", False)
+    ee_bounds = ee.Geometry.Polygon([bounds], "EPSG:4326", False)
     
     # Calculate dynamic scale based on geometry size (sq km)
     from gee.aoi_utils import get_dynamic_scale
@@ -56,7 +56,7 @@ def compute_ndvi(
 
     from gee.aoi_utils import get_historical_ndvi
     year = int(start_date[:4])
-    median = get_historical_ndvi(aoi, year, start_date, end_date, 20)
+    median = get_historical_ndvi(aoi, year, start_date, end_date, 20, aoi_config=aoi_config)
 
     vis_params = {
         "min": -0.2,
@@ -82,7 +82,7 @@ def compute_ndvi(
         .combine(ee.Reducer.min(), sharedInputs=True)
         .combine(ee.Reducer.max(), sharedInputs=True)
         .combine(ee.Reducer.stdDev(), sharedInputs=True),
-        geometry=aoi.bounds(maxError=1000),
+        geometry=ee_bounds,
         scale=dynamic_scale,
         maxPixels=1e10,
     ).getInfo()

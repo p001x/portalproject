@@ -44,6 +44,9 @@ import geopandas as gpd
 
 def _fetch_osm_names(bbox: list[float], amenities: list[str]) -> list[dict]:
     minx, miny, maxx, maxy = bbox
+    # Skip OSM Overpass on large/country areas to prevent 504 gateway timeouts
+    if abs(maxx - minx) > 3.0 or abs(maxy - miny) > 3.0:
+        return []
     # Expand by 0.2 degrees (~22km) for names to ensure we catch border items
     exp_minx, exp_miny = minx - 0.2, miny - 0.2
     exp_maxx, exp_maxy = maxx + 0.2, maxy + 0.2

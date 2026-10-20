@@ -8,9 +8,16 @@ def ndbi_image_and_aoi(aoi_config: dict, start_date: str, end_date: str):
     from gee.aoi_utils import get_aoi_geometry
     aoi = get_aoi_geometry(aoi_config)
     # Calculate dynamic scale based on geometry size (sq km)
-    from gee.aoi_utils import get_dynamic_scale
-    dynamic_scale = get_dynamic_scale(aoi)    # Sector or small polygon
+    from gee.aoi_utils import get_dynamic_scale, COUNTRY_PRESETS
+    dynamic_scale = get_dynamic_scale(aoi, aoi_config=aoi_config)
 
+    country = aoi_config.get("country", "") if isinstance(aoi_config, dict) else ""
+    is_massive = country in COUNTRY_PRESETS and COUNTRY_PRESETS[country].get("is_massive")
+    if is_massive:
+        modis = ee.ImageCollection("MODIS/061/MOD09A1").filterDate(start_date, end_date).filterBounds(aoi)
+        # NDBI = (SWIR1 - NIR) / (SWIR1 + NIR) -> sur_refl_b06 (SWIR1) & sur_refl_b02 (NIR)
+        ndbi_median = modis.median().normalizedDifference(["sur_refl_b06", "sur_refl_b02"]).rename("NDBI").clip(aoi)
+        return ndbi_median, aoi
 
     from gee.landsat_utils import get_harmonized_landsat_collection, gap_fill
 
@@ -27,7 +34,7 @@ def ndbi_image_and_aoi(aoi_config: dict, start_date: str, end_date: str):
         .map(apply_scale_factors) \
         .map(compute_ndbi)
     
-    if collection.size().getInfo() == 0:
+    if collection.limit(1).size().getInfo() == 0:
         raise ValueError("No satellite imagery (Landsat 4-9) found for this area and date range with <20% cloud cover. Try expanding the date range or choosing a different area.")
 
     ndbi_median = gap_fill(collection.median()).clip(aoi)

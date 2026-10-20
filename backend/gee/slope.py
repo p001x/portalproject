@@ -15,7 +15,7 @@ def _build_slope_base(aoi_config: dict):
     from gee.aoi_utils import get_aoi_geometry
     aoi = get_aoi_geometry(aoi_config)
     from gee.aoi_utils import get_dynamic_scale
-    dynamic_scale = get_dynamic_scale(aoi)
+    dynamic_scale = get_dynamic_scale(aoi, aoi_config=aoi_config)
 
     is_world = aoi_config.get("type") == "world"
 
@@ -82,58 +82,48 @@ def compute_slope_map(aoi_config: dict) -> dict:
     lsi_vis = {"min": 0, "max": 40, "palette": ["#006837", "#1a9850", "#66bd63", "#a6d96a", "#d9ef8b", "#ffffbf", "#fee08b", "#fdae61", "#f46d43", "#d73027", "#a50026"]}
     solar_vis = {"min": 0, "max": 510, "palette": ["#4a1486", "#6a51a3", "#807dba", "#9e9ac8", "#bcbddc", "#dadaeb", "#f2f0f7", "#fff7bc", "#fee391", "#fec44f", "#fe9929", "#ec7014"]}
 
-    slope_map_id = slope.getMapId(slope_vis)
-    hillshade_map_id = hillshade.getMapId(hillshade_vis)
-    aspect_map_id = aspect.getMapId(aspect_vis)
-    tpi_map_id = tpi.getMapId(tpi_vis)
-    tri_map_id = tri.getMapId(tri_vis)
-    upa_map_id = upa.getMapId(upa_vis)
-    dir_map_id = dir.getMapId(dir_vis)
-    lsi_map_id = lsi.getMapId(lsi_vis)
-    solar_map_id = solar.getMapId(solar_vis)
-    contours_masked = contours.updateMask(contours)
-    contours_map_id = contours_masked.getMapId({"palette": ["#000000"]})
+    from gee.aoi_utils import get_bounds_and_center
+    bounds, center = get_bounds_and_center(aoi, aoi_config=aoi_config)
+    thumb_region = ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds()
 
-    try:
-        bounds_info = aoi.bounds(maxError=1000).getInfo()
-        if bounds_info.get("type") == "Polygon":
-            bounds = bounds_info.get("coordinates", [[[0,0]]])[0]
-        elif bounds_info.get("type") == "MultiPolygon":
-            bounds = bounds_info.get("coordinates", [[[[0,0]]]])[0][0]
-        else:
-            bounds = [[0,0],[0,0],[0,0],[0,0]]
-            
-        center_coords = aoi.centroid(maxError=1000).getInfo().get("coordinates", [0, 0])
-        center = [center_coords[1], center_coords[0]]
-    except Exception:
-        bounds = [[0,0],[0,0],[0,0],[0,0]]
-        center = [0, 0]
+    contours_masked = contours.updateMask(contours)
+
+    tasks = {
+        "slope": (slope, slope_vis),
+        "hillshade": (hillshade, hillshade_vis),
+        "aspect": (aspect, aspect_vis),
+        "tpi": (tpi, tpi_vis),
+        "tri": (tri, tri_vis),
+        "upa": (upa, upa_vis),
+        "dir": (dir, dir_vis),
+        "lsi": (lsi, lsi_vis),
+        "solar": (solar, solar_vis),
+        "contours": (contours_masked, {"palette": ["#000000"]}),
+    }
+
+    def fetch_layer(name, img, vis):
+        with gee_semaphore:
+            map_id = img.getMapId(vis)
+            tile_url = map_id["tile_fetcher"].url_format
+            try:
+                thumb_url = img.getThumbURL({**vis, "region": thumb_region, "dimensions": 800, "crs": "EPSG:4326", "format": "png"})
+            except Exception:
+                thumb_url = ""
+            return name, tile_url, thumb_url
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
+        futures = [executor.submit(fetch_layer, name, img, vis) for name, (img, vis) in tasks.items()]
+        results = [f.result() for f in futures]
 
     result = {
-        "slope_tile_url": slope_map_id["tile_fetcher"].url_format,
-        "slope_thumb_url": slope.getThumbURL({**slope_vis, "region": aoi.bounds(), "dimensions": 800, "crs": "EPSG:4326", "format": "png"}),
-        "hillshade_tile_url": hillshade_map_id["tile_fetcher"].url_format,
-        "hillshade_thumb_url": hillshade.getThumbURL({**hillshade_vis, "region": aoi.bounds(), "dimensions": 800, "crs": "EPSG:4326", "format": "png"}),
-        "aspect_tile_url": aspect_map_id["tile_fetcher"].url_format,
-        "aspect_thumb_url": aspect.getThumbURL({**aspect_vis, "region": aoi.bounds(), "dimensions": 800, "crs": "EPSG:4326", "format": "png"}),
-        "tpi_tile_url": tpi_map_id["tile_fetcher"].url_format,
-        "tpi_thumb_url": tpi.getThumbURL({**tpi_vis, "region": aoi.bounds(), "dimensions": 800, "crs": "EPSG:4326", "format": "png"}),
-        "tri_tile_url": tri_map_id["tile_fetcher"].url_format,
-        "tri_thumb_url": tri.getThumbURL({**tri_vis, "region": aoi.bounds(), "dimensions": 800, "crs": "EPSG:4326", "format": "png"}),
-        "upa_tile_url": upa_map_id["tile_fetcher"].url_format,
-        "upa_thumb_url": upa.getThumbURL({**upa_vis, "region": aoi.bounds(), "dimensions": 800, "crs": "EPSG:4326", "format": "png"}),
-        "dir_tile_url": dir_map_id["tile_fetcher"].url_format,
-        "dir_thumb_url": dir.getThumbURL({**dir_vis, "region": aoi.bounds(), "dimensions": 800, "crs": "EPSG:4326", "format": "png"}),
-        "lsi_tile_url": lsi_map_id["tile_fetcher"].url_format,
-        "lsi_thumb_url": lsi.getThumbURL({**lsi_vis, "region": aoi.bounds(), "dimensions": 800, "crs": "EPSG:4326", "format": "png"}),
-        "solar_tile_url": solar_map_id["tile_fetcher"].url_format,
-        "solar_thumb_url": solar.getThumbURL({**solar_vis, "region": aoi.bounds(), "dimensions": 800, "crs": "EPSG:4326", "format": "png"}),
-        "contours_tile_url": contours_map_id["tile_fetcher"].url_format,
-        "contours_thumb_url": contours_masked.getThumbURL({"palette": ["#000000"], "region": aoi.bounds(), "dimensions": 800, "crs": "EPSG:4326", "format": "png"}),
         "center": center,
         "bbox": bounds,
         "district": aoi_config.get("district", aoi_config.get("name", "Custom AOI")),
     }
+    for name, tile_url, thumb_url in results:
+        result[f"{name}_tile_url"] = tile_url
+        result[f"{name}_thumb_url"] = thumb_url
+
     with _lock:
         _cache[cache_key] = result
     return result
@@ -160,6 +150,10 @@ def compute_slope_stats(aoi_config: dict) -> dict:
         [classes[lbl].multiply(ee.Image.pixelArea()).rename(f"c{i}") for i, lbl in enumerate(labels)]
     )
 
+    from gee.aoi_utils import get_bounds_and_center
+    bounds, _ = get_bounds_and_center(aoi, aoi_config=aoi_config)
+    eval_geom = ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds(maxError=1000)
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         f_stats = executor.submit(
             lambda: combined_stats_img.reduceRegion(
@@ -167,12 +161,12 @@ def compute_slope_stats(aoi_config: dict) -> dict:
                 .combine(ee.Reducer.max(), sharedInputs=True)
                 .combine(ee.Reducer.percentile([25, 75]), sharedInputs=True)
                 .combine(ee.Reducer.min(), sharedInputs=True),
-                geometry=aoi.bounds(maxError=1000), scale=dynamic_scale, maxPixels=1e10,
+                geometry=eval_geom, scale=dynamic_scale, maxPixels=1e10,
             ).getInfo()
         )
         f_area = executor.submit(
             lambda: area_img.reduceRegion(
-                reducer=ee.Reducer.sum(), geometry=aoi.bounds(maxError=1000), scale=dynamic_scale, maxPixels=1e10
+                reducer=ee.Reducer.sum(), geometry=eval_geom, scale=dynamic_scale, maxPixels=1e10
             ).getInfo()
         )
         combined_stats = f_stats.result()

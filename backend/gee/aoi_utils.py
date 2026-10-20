@@ -24,6 +24,87 @@ def safe_get_info(ee_obj, retries=6):
                     continue
             raise
 
+COUNTRY_PRESETS = {
+    "Russian Federation": {
+        "bounds": [[19.0, 41.0], [190.0, 41.0], [190.0, 82.0], [19.0, 82.0], [19.0, 41.0]],
+        "center": [61.524, 105.3188],
+        "scale": 25000,
+        "is_massive": True
+    },
+    "Russia": {
+        "bounds": [[19.0, 41.0], [190.0, 41.0], [190.0, 82.0], [19.0, 82.0], [19.0, 41.0]],
+        "center": [61.524, 105.3188],
+        "scale": 25000,
+        "is_massive": True
+    },
+    "Canada": {
+        "bounds": [[-141.0, 41.7], [-52.6, 41.7], [-52.6, 83.1], [-141.0, 83.1], [-141.0, 41.7]],
+        "center": [56.1304, -106.3468],
+        "scale": 20000,
+        "is_massive": True
+    },
+    "United States of America": {
+        "bounds": [[-125.0, 24.5], [-66.9, 24.5], [-66.9, 49.4], [-125.0, 49.4], [-125.0, 24.5]],
+        "center": [37.0902, -95.7129],
+        "scale": 15000,
+        "is_massive": True
+    },
+    "United States": {
+        "bounds": [[-125.0, 24.5], [-66.9, 24.5], [-66.9, 49.4], [-125.0, 49.4], [-125.0, 24.5]],
+        "center": [37.0902, -95.7129],
+        "scale": 15000,
+        "is_massive": True
+    },
+    "China": {
+        "bounds": [[73.5, 18.2], [134.8, 18.2], [134.8, 53.6], [73.5, 53.6], [73.5, 18.2]],
+        "center": [35.8617, 104.1954],
+        "scale": 15000,
+        "is_massive": True
+    },
+    "Brazil": {
+        "bounds": [[-73.9, -33.7], [-34.8, -33.7], [-34.8, 5.3], [-73.9, 5.3], [-73.9, -33.7]],
+        "center": [-14.235, -51.9253],
+        "scale": 15000,
+        "is_massive": True
+    },
+    "Australia": {
+        "bounds": [[113.3, -43.6], [153.6, -43.6], [153.6, -10.7], [113.3, -10.7], [113.3, -43.6]],
+        "center": [-25.2744, 133.7751],
+        "scale": 15000,
+        "is_massive": True
+    },
+    "India": {
+        "bounds": [[68.1, 6.7], [97.4, 6.7], [97.4, 37.1], [68.1, 37.1], [68.1, 6.7]],
+        "center": [20.5937, 78.9629],
+        "scale": 10000,
+        "is_massive": True
+    },
+    "Kazakhstan": {
+        "bounds": [[46.5, 40.6], [87.3, 40.6], [87.3, 55.4], [46.5, 55.4], [46.5, 40.6]],
+        "center": [48.0196, 66.9237],
+        "scale": 10000,
+        "is_massive": True
+    },
+    "Argentina": {
+        "bounds": [[-73.6, -55.1], [-53.6, -55.1], [-53.6, -21.8], [-73.6, -21.8], [-73.6, -55.1]],
+        "center": [-38.4161, -63.6167],
+        "scale": 10000,
+        "is_massive": True
+    },
+    "Algeria": {
+        "bounds": [[-8.7, 18.9], [12.0, 18.9], [12.0, 37.1], [-8.7, 37.1], [-8.7, 18.9]],
+        "center": [28.0339, 1.6596],
+        "scale": 10000,
+        "is_massive": True
+    },
+    "Democratic Republic of the Congo": {
+        "bounds": [[12.2, -13.5], [31.3, -13.5], [31.3, 5.4], [12.2, 5.4], [12.2, -13.5]],
+        "center": [-4.0383, 21.7587],
+        "scale": 10000,
+        "is_massive": True
+    }
+}
+
 def get_dynamic_scale(geom: ee.Geometry, aoi_config: dict = None) -> int:
     """
     Dynamically scales processing resolution to ensure Earth Engine limits are never exceeded.
@@ -39,8 +120,9 @@ def get_dynamic_scale(geom: ee.Geometry, aoi_config: dict = None) -> int:
             if aoi_config.get("district") and not aoi_config.get("sector"):
                 return 60   # Fast district resolution
             return 30       # Sector / village resolution
-        if t == "gaul0":
-            return 1000
+        country = aoi_config.get("country", "")
+        if country in COUNTRY_PRESETS:
+            return COUNTRY_PRESETS[country]["scale"]
         
     try:
         # Attempt to detect if it's the exact whole world polygon before making EE requests
@@ -62,6 +144,8 @@ def get_dynamic_scale(geom: ee.Geometry, aoi_config: dict = None) -> int:
             target_pixels = 50000   # e.g., Brazil, Australia, USA
         elif area_sqkm > 1000000:
             target_pixels = 100000  # e.g., India, Argentina
+        elif area_sqkm > 200000:
+            target_pixels = 150000  # e.g., Germany, France, Kenya
         else:
             target_pixels = 250000  # Normal target: ~4x faster reductions with identical visual stats
         area_sqm = area_sqkm * 1_000_000
@@ -72,7 +156,7 @@ def get_dynamic_scale(geom: ee.Geometry, aoi_config: dict = None) -> int:
     except Exception:
         # If EE area calculation fails (usually because polygon is global/massive and crosses dateline)
         # default to a very large safe scale rather than 2000 to prevent 4GB request size crashes.
-        return 50000
+        return 25000
 
 RWANDA_DISTRICTS = [
     "Bugesera", "Burera", "Gakenke", "Gasabo", "Gatsibo",
@@ -260,15 +344,18 @@ def _get_aoi_geometry_internal(aoi_config: dict) -> ee.Geometry:
             "Democratic Republic of the Congo": "Democratic Republic of the Congo"
         }
         lsib_name = name_map.get(country, country)
-        
         lsib = ee.FeatureCollection("USDOS/LSIB_SIMPLE/2017").filter(ee.Filter.eq("country_na", lsib_name))
         
+        is_massive = country in COUNTRY_PRESETS and COUNTRY_PRESETS[country].get("is_massive")
+        error_margin = 10000 if is_massive else 2000
+
         gaul = ee.FeatureCollection("FAO/GAUL/2015/level0").filter(ee.Filter.eq("ADM0_NAME", country))
-        gaul_simple = gaul.map(lambda f: ee.Feature(f.geometry().simplify(maxError=5000)))
+        gaul_simple = gaul.map(lambda f: ee.Feature(f.geometry().simplify(maxError=error_margin)))
+        lsib_simple = lsib.map(lambda f: ee.Feature(f.geometry().simplify(maxError=error_margin)))
         
         geom = ee.Algorithms.If(
             lsib.size().gt(0),
-            lsib.geometry(),
+            lsib_simple.geometry(),
             gaul_simple.geometry()
         )
         return ee.Geometry(geom)
@@ -307,6 +394,11 @@ def get_aoi_geometry(aoi_config: dict) -> ee.Geometry:
     if aoi_config.get("type") in ("rwanda", "rwanda-micro"):
         return geom
 
+    country = aoi_config.get("country", "")
+    if country in COUNTRY_PRESETS and COUNTRY_PRESETS[country].get("is_massive"):
+        # Pre-simplified server-side, keep purely server-side (prevents 10MB GeoJSON downloads)
+        return geom
+
     try:
         area_sqkm = geom.bounds().area(maxError=1000).divide(1e6).getInfo()
         if area_sqkm > 1000000:
@@ -321,40 +413,10 @@ def get_aoi_geometry(aoi_config: dict) -> ee.Geometry:
     except Exception as e:
         print(f"Warning: Geometry simplification failed: {e}")
         
-    try:
-        bounds_info = geom.bounds(maxError=1000).getInfo()
-        coords = bounds_info.get("coordinates", [[[[0,0]]]])
-        if bounds_info.get("type") == "Polygon":
-            lons = [p[0] for p in coords[0]]
-        else:
-            lons = []
-            for poly in coords:
-                lons.extend([p[0] for p in poly[0]])
-                
-        if max(lons) - min(lons) > 180:
-            if not (min(lons) == -180 and max(lons) == 180 and len(lons) == 5):
-                # Dateline crossed. Reconstruct GeoJSON with positive longitudes
-                geojson = geom.getInfo()
-                if geojson["type"] == "MultiPolygon":
-                    new_coords = []
-                    for poly in geojson["coordinates"]:
-                        new_poly = []
-                        for ring in poly:
-                            new_poly.append([[lon + 360 if lon < 0 else lon, lat] for lon, lat in ring])
-                        new_coords.append(new_poly)
-                    geom = ee.Geometry.MultiPolygon(new_coords, "EPSG:4326", False)
-                elif geojson["type"] == "Polygon":
-                    new_coords = []
-                    for ring in geojson["coordinates"]:
-                        new_coords.append([[lon + 360 if lon < 0 else lon, lat] for lon, lat in ring])
-                    geom = ee.Geometry.Polygon(new_coords, "EPSG:4326", False)
-    except Exception as e:
-        print(f"Warning: Dateline wrapping failed: {e}")
-        
     return geom
 
 
-def get_historical_ndvi(aoi, year: int, start_date: str = None, end_date: str = None, cloud_limit=30):
+def get_historical_ndvi(aoi, year: int, start_date: str = None, end_date: str = None, cloud_limit=30, aoi_config: dict = None):
     import ee
     
     year = int(year)
@@ -369,15 +431,24 @@ def get_historical_ndvi(aoi, year: int, start_date: str = None, end_date: str = 
     except Exception:
         pass
 
-    try:
-        area_sqkm = aoi.bounds().area(maxError=1000).divide(1e6).getInfo() if not is_global else 999999999
-    except Exception:
-        area_sqkm = 999999999
+    country = aoi_config.get("country", "") if isinstance(aoi_config, dict) else ""
+    is_massive = is_global or (country in COUNTRY_PRESETS and COUNTRY_PRESETS[country].get("is_massive"))
+
+    if not is_massive:
+        try:
+            area_sqkm = aoi.bounds().area(maxError=1000).divide(1e6).getInfo() if not is_global else 999999999
+            if area_sqkm > 100000:
+                is_massive = True
+        except Exception:
+            area_sqkm = 999999999
+            is_massive = True
+    else:
+        area_sqkm = 17000000
         
-    # Massive Area Handling (>200,000 kmÃ‚Â² or global):
+    # Massive Area Handling (>200,000 km² or global):
     # Only use MODIS if year >= 2000 (MODIS Terra was launched in Dec 1999, data starts Feb 2000)
-    if (is_global or area_sqkm > 100000) and year >= 2000:
-        modis_dataset = "MODIS/061/MOD13A2" if (is_global or area_sqkm > 300000) else "MODIS/061/MOD13Q1"
+    if is_massive and year >= 2000:
+        modis_dataset = "MODIS/061/MOD13A2"
         modis_col = ee.ImageCollection(modis_dataset).filterDate(start_date, end_date)
         try:
             if modis_col.limit(1).size().getInfo() > 0:
@@ -600,17 +671,24 @@ def get_historical_ndvi(aoi, year: int, start_date: str = None, end_date: str = 
         )
 
 def get_bounds_and_center(aoi, aoi_config=None):
-    if aoi_config and aoi_config.get("type") in ("rwanda", "rwanda-micro"):
-        has_micro = any(aoi_config.get(k) and aoi_config.get(k) != "none" for k in ["district", "sector", "cell", "village"])
-        if not has_micro:
-            # Precomputed Rwanda country bounds and center - eliminates 2 network round-trips
-            return [
-                [28.8617, -2.8398],
-                [30.8988, -2.8398],
-                [30.8988, -1.0474],
-                [28.8617, -1.0474],
-                [28.8617, -2.8398]
-            ], [-1.9403, 29.8739]
+    if aoi_config:
+        country = aoi_config.get("country", "")
+        if country in COUNTRY_PRESETS:
+            preset = COUNTRY_PRESETS[country]
+            return preset["bounds"], preset["center"]
+        if aoi_config.get("type") == "world":
+            return [[-180, -85], [180, -85], [180, 85], [-180, 85], [-180, -85]], [0, 0]
+        if aoi_config.get("type") in ("rwanda", "rwanda-micro"):
+            has_micro = any(aoi_config.get(k) and aoi_config.get(k) != "none" for k in ["district", "sector", "cell", "village"])
+            if not has_micro:
+                # Precomputed Rwanda country bounds and center - eliminates 2 network round-trips
+                return [
+                    [28.8617, -2.8398],
+                    [30.8988, -2.8398],
+                    [30.8988, -1.0474],
+                    [28.8617, -1.0474],
+                    [28.8617, -2.8398]
+                ], [-1.9403, 29.8739]
 
     try:
         bounds_info = aoi.bounds(maxError=1000).getInfo()

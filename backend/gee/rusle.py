@@ -8,21 +8,13 @@ import concurrent.futures
 from threading import Lock
 from gee.classify_utils import quantile_classify
 
-def get_dynamic_scale(geom):
-    try:
-        area_sqkm = geom.area().divide(1e6).getInfo()
-        if area_sqkm > 10000: return 500
-        elif area_sqkm > 2000: return 250
-        elif area_sqkm > 500: return 100
-        else: return 30
-    except:
-        return 250
+from gee.aoi_utils import get_dynamic_scale, get_aoi_geometry, get_bounds_and_center, get_historical_ndvi
 
 _cache_map = PersistentCache(ttl=3600)
 _cache_stats = PersistentCache(ttl=3600)
 _cache_classify = PersistentCache(ttl=3600)
 _cache_export = PersistentCache(ttl=3600)
-_cache_build = PersistentCache(ttl=3600)
+_cache_build = {}
 _lock = Lock()
 
 FACTOR_VIS = {
@@ -91,15 +83,13 @@ def _build_rusle_images(
         return cached.result()
 
     try:
-        from gee.aoi_utils import get_aoi_geometry
+        from gee.aoi_utils import get_aoi_geometry, get_bounds_and_center, get_dynamic_scale, get_historical_ndvi
         import hashlib
         from gee.auth import get_gee_status
         
-        from gee.aoi_utils import get_aoi_geometry, get_bounds_and_center
-        
         aoi = get_aoi_geometry(aoi_config)
-        bounds, _ = get_bounds_and_center(aoi)
-        dynamic_scale = get_dynamic_scale(aoi)
+        bounds, center = get_bounds_and_center(aoi, aoi_config=aoi_config)
+        dynamic_scale = get_dynamic_scale(aoi, aoi_config=aoi_config)
         
         project_id = get_gee_status()["project_id"]
         is_cacheable = aoi_config.get("type") in ["admin", "district", "province", "world"]
@@ -137,6 +127,8 @@ def _build_rusle_images(
                 res = {
                     "aoi": aoi,
                     "scale": dynamic_scale,
+                    "bounds": bounds,
+                    "center": center,
                     "factor_images": factor_images,
                     "risk_index": risk_index,
                 }
@@ -149,8 +141,19 @@ def _build_rusle_images(
         start = f"{year}-01-01"
         end = f"{year}-12-31"
 
+        # R factor (Rainfall Erosivity): CHIRPS only covers 50S to 50N.
+        # Fall back to ERA5-Land monthly precipitation sum (converted m -> mm) for high latitudes.
         chirps_annual = ee.ImageCollection("UCSB-CHG/CHIRPS/DAILY").filterDate(start, end).filterBounds(aoi).sum()
-        R = chirps_annual.multiply(0.35).add(38.5).rename("R")
+        era5_annual = (
+            ee.ImageCollection("ECMWF/ERA5_LAND/MONTHLY_AGGR")
+            .filterDate(start, end)
+            .filterBounds(aoi)
+            .select("total_precipitation_sum")
+            .sum()
+            .multiply(1000)
+        )
+        precip_annual = chirps_annual.unmask(era5_annual).unmask(500)
+        R = precip_annual.multiply(0.35).add(38.5).rename("R")
 
         clay = ee.Image("OpenLandMap/SOL/SOL_CLAY-WFRACTION_USDA-3A1A1A_M/v02").select("b0")
         sand = ee.Image("OpenLandMap/SOL/SOL_SAND-WFRACTION_USDA-3A1A1A_M/v02").select("b0")
@@ -159,11 +162,20 @@ def _build_rusle_images(
         f_cl_si = silt.divide(clay.add(silt).max(1)).pow(0.3)
         K = f_csand.multiply(f_cl_si).multiply(0.763).multiply(0.1317).max(0.020).min(0.060).rename("K")
 
-        dem = ee.Image("USGS/SRTMGL1_003").select("elevation")
+        # Elevation: SRTMGL1 only covers 60S to 60N. Unmask with global Copernicus 30m DEM.
+        srtm = ee.Image("USGS/SRTMGL1_003").select("elevation")
+        copernicus = ee.ImageCollection("COPERNICUS/DEM/GLO30").select("DEM").mosaic()
+        dem = srtm.unmask(copernicus).unmask(0)
+
         slope_deg = ee.Terrain.slope(dem)
         slope_rad = slope_deg.multiply(math.pi / 180)
         sin_theta = slope_rad.sin()
-        flow_acc = ee.Image("WWF/HydroSHEDS/15ACC").select("b1").max(0)
+
+        # Flow Accumulation: HydroSHEDS stops at 60N. Unmask with MERIT Hydro upa.
+        hydro_acc = ee.Image("WWF/HydroSHEDS/15ACC").select("b1")
+        merit_acc = ee.Image("MERIT/Hydro/v1_0_1").select("upa").multiply(100)
+        flow_acc = hydro_acc.unmask(merit_acc).unmask(10).max(0)
+
         cell_area_m2 = 450.0 * 450.0
         As = flow_acc.add(0.5).multiply(cell_area_m2)
         L = As.divide(22.13).pow(0.4)
@@ -172,33 +184,8 @@ def _build_rusle_images(
         S = S_gentle.where(slope_deg.gte(5.14), S_steep).max(0.03)
         LS = L.multiply(S).min(300).rename("LS")
 
-        if year >= 2016:
-            s2_ndvi_col = (
-                ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
-                .filterDate(start, end)
-                .filterBounds(aoi)
-                .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 30))
-                .map(lambda img: img.normalizedDifference(["B8", "B4"]).rename("NDVI"))
-            )
-            ndvi = s2_ndvi_col.median()
-        elif year >= 2014:
-            l8_ndvi_col = (
-                ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
-                .filterDate(start, end)
-                .filterBounds(aoi)
-                .filter(ee.Filter.lt("CLOUD_COVER", 30))
-                .map(lambda img: img.normalizedDifference(["SR_B5", "SR_B4"]).rename("NDVI"))
-            )
-            ndvi = l8_ndvi_col.median()
-        else:
-            l7_ndvi_col = (
-                ee.ImageCollection("LANDSAT/LE07/C02/T1_L2")
-                .filterDate(start, end)
-                .filterBounds(aoi)
-                .filter(ee.Filter.lt("CLOUD_COVER", 30))
-                .map(lambda img: img.normalizedDifference(["SR_B4", "SR_B3"]).rename("NDVI"))
-            )
-            ndvi = l7_ndvi_col.median()
+        # Cover Management (C factor): Use get_historical_ndvi which leverages MODIS for large countries
+        ndvi = get_historical_ndvi(aoi, year, start, end, cloud_limit=30, aoi_config=aoi_config)
         ndvi_safe = ndvi.max(0.001).min(0.990)
         C = ndvi_safe.multiply(-2).divide(ndvi_safe.multiply(-1).add(1)).exp().max(0.001).min(1.0).rename("C")
 
@@ -249,7 +236,7 @@ def _build_rusle_images(
                     image=export_img.toFloat(), # Convert to 32-bit float to save storage space
                     description=f"AutoCache_RUSLE_{year}_{config_hash}",
                     assetId=asset_id,
-                    region=aoi.bounds(),
+                    region=ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds(),
                     scale=dynamic_scale,
                     maxPixels=1e13
                 )
@@ -261,6 +248,8 @@ def _build_rusle_images(
         res = {
             "aoi": aoi,
             "scale": dynamic_scale,
+            "bounds": bounds,
+            "center": center,
             "factor_images": factor_images,
             "risk_index": risk_index,
         }
@@ -287,6 +276,8 @@ def compute_rusle_map(
     
     res = _build_rusle_images(aoi_config, year, reverse_r, reverse_k, reverse_ls, reverse_c, reverse_p)
     aoi = res["aoi"]
+    bounds = res.get("bounds")
+    center = res.get("center")
     factor_images = res["factor_images"]
     
     factor_maps = {k: dict(FACTOR_VIS[k]) for k in RECLASS_FACTOR_ORDER + ["A"]}
@@ -295,9 +286,10 @@ def compute_rusle_map(
         vis = FACTOR_VIS[key]
         vp = {"min": vis["min"], "max": vis["max"], "palette": vis["palette"]}
         smoothed = img.focal_mean(150, 'circle', 'meters')
+        thumb_geom = ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds()
         return {
             "tile_url": smoothed.getMapId(vp)["tile_fetcher"].url_format,
-            "thumb_url": smoothed.getThumbURL({**vp, "region": aoi.bounds(), "dimensions": 512, "format": "png"})
+            "thumb_url": smoothed.getThumbURL({**vp, "region": thumb_geom, "dimensions": 512, "format": "png"})
         }
         
     with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
@@ -311,7 +303,7 @@ def compute_rusle_map(
         "tile_url": factor_maps["A"]["tile_url"],
         "thumb_url": factor_maps["A"]["thumb_url"],
         "factor_maps": factor_maps,
-        "center": aoi.centroid().coordinates().getInfo()[::-1],
+        "center": center,
         "bbox": bounds
     }
     with _lock:
@@ -465,8 +457,12 @@ def compute_rusle_export(
     factor_images = res["factor_images"]
     risk_index = res["risk_index"]
 
+    scale = max(res.get("scale", 250), 250)
+    bounds = res.get("bounds")
+    dl_region = ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds()
+
     def get_dl_url(img):
-        return img.getDownloadURL({"region": aoi.bounds(), "scale": 250, "format": "GEO_TIFF", "crs": "EPSG:4326"})
+        return img.getDownloadURL({"region": dl_region, "scale": scale, "format": "GEO_TIFF", "crs": "EPSG:4326"})
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=7) as dl_executor:
         f_dls = {k: dl_executor.submit(lambda k=k: get_dl_url(factor_images[k])) for k in RECLASS_FACTOR_ORDER + ["A"]}

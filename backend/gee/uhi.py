@@ -27,14 +27,7 @@ _c_hh = (59, 73, 148)
 
 NO_DATA_COLOR = "#d0d0d0"
 
-def get_dynamic_scale(geom):
-    try:
-        area_sqkm = geom.bounds().area(maxError=1000).divide(1e6).getInfo()
-        if area_sqkm > 10000: return 200
-        elif area_sqkm > 2000: return 100
-        else: return 100
-    except:
-        return 100
+from gee.aoi_utils import get_dynamic_scale, get_bounds_and_center
 
 def _get_sectors_fc(aoi_geometry, is_global=False):
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
@@ -51,10 +44,10 @@ def _get_sectors_fc(aoi_geometry, is_global=False):
     else:
         # Filter bounds to AOI locally to reduce payload
         try:
-            bounds = aoi_geometry.bounds().getInfo()["coordinates"][0]
-            lon_min, lat_min = bounds[0]
-            lon_max, lat_max = bounds[2]
-        except:
+            b, _ = get_bounds_and_center(aoi_geometry)
+            lon_min, lat_min = b[0]
+            lon_max, lat_max = b[2]
+        except Exception:
             lon_min, lat_min = -180, -90
             lon_max, lat_max = 180, 90
             
@@ -111,7 +104,11 @@ def _build_uhi_base(aoi_config: dict, start_date: str, end_date: str, grid_size:
         pass
     
     
-    if is_global:
+    from gee.aoi_utils import COUNTRY_PRESETS
+    country = aoi_config.get("country", "") if isinstance(aoi_config, dict) else ""
+    is_massive = is_global or (country in COUNTRY_PRESETS and COUNTRY_PRESETS[country].get("is_massive"))
+    
+    if is_massive:
         modis_ref = ee.ImageCollection("MODIS/061/MCD43A4").filterDate(start_date, end_date).filterBounds(aoi).median()
         ndvi = modis_ref.normalizedDifference(["Nadir_Reflectance_Band2", "Nadir_Reflectance_Band1"]).rename("NDVI")
         ndbi = modis_ref.normalizedDifference(["Nadir_Reflectance_Band6", "Nadir_Reflectance_Band2"]).rename("NDBI")
@@ -156,10 +153,9 @@ def _build_uhi_base(aoi_config: dict, start_date: str, end_date: str, grid_size:
     combined = lst.addBands(ndbi).addBands(ndvi)
     
     # Admin Boundary Zonal Stats (Sector-level) instead of arbitrary grid
-    sectors_gdf, grid_fc = _get_sectors_fc(aoi, is_global)
+    sectors_gdf, grid_fc = _get_sectors_fc(aoi, is_global or is_massive)
     
-    # Reduce at 100m resolution (matching Landsat TIRS native resolution)
-    scale = get_dynamic_scale(aoi)
+    scale = get_dynamic_scale(aoi, aoi_config=aoi_config)
     stats_fc = combined.reduceRegions(collection=grid_fc, reducer=ee.Reducer.mean(), scale=scale)
         
     return aoi, lst, ndbi, ndvi, stats_fc, sectors_gdf, is_global
@@ -244,12 +240,16 @@ def compute_uhi(aoi_config: dict, start_date: str, end_date: str, grid_size: int
             return _cache[cache_key]
 
     aoi, lst_median, ndbi_median, ndvi_median, stats_fc, sectors_gdf, is_global = _build_uhi_base(aoi_config, start_date, end_date, grid_size, lst_source)
-    from gee.aoi_utils import get_bounds_and_center
+    from gee.aoi_utils import get_bounds_and_center, COUNTRY_PRESETS
+    country = aoi_config.get("country", "") if isinstance(aoi_config, dict) else ""
+    is_massive = is_global or (country in COUNTRY_PRESETS and COUNTRY_PRESETS[country].get("is_massive"))
 
-    bounds, center = get_bounds_and_center(aoi)
-    scale = get_dynamic_scale(aoi)
+    bounds, center = get_bounds_and_center(aoi, aoi_config=aoi_config)
+    scale = get_dynamic_scale(aoi, aoi_config=aoi_config)
 
-    calc_geom = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False) if is_global else aoi.bounds(maxError=1000)
+    calc_geom = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False) if is_global else (
+        ee.Geometry.Polygon([bounds], None, False) if is_massive else aoi.bounds(maxError=1000)
+    )
     # Server-side percentile reduction for LST and NDBI
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         f_lst_pct = executor.submit(
