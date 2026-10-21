@@ -269,15 +269,20 @@ def compute_irrigation_export(
 
     aoi, deficit, etc, precip, sm, kc = _build_irrigation_images(aoi_config, start_date, end_date, planting_date, crop_type)
 
+    from gee.aoi_utils import get_bounds_and_center, get_dynamic_scale
+    bounds, _ = get_bounds_and_center(aoi, aoi_config=aoi_config)
+    dl_geom = ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds()
+    scale = max(1000, get_dynamic_scale(aoi, aoi_config=aoi_config))
+
     def safe_url(img, name):
         try:
-            return img.getDownloadURL({"scale": 1000, "region": aoi.bounds(), "format": "GEO_TIFF"})
+            return img.getDownloadURL({"scale": scale, "region": dl_geom, "format": "GEO_TIFF"})
         except Exception:
             return None
 
     def safe_thumb(img, vis):
         try:
-            return img.getThumbURL({**vis, "region": aoi.bounds(), "dimensions": 512, "crs": "EPSG:4326", "format": "png"})
+            return img.getThumbURL({**vis, "region": dl_geom, "dimensions": 512, "crs": "EPSG:4326", "format": "png"})
         except Exception:
             return None
             

@@ -414,10 +414,14 @@ def export_factor_map(aoi_config: dict, factor_key: str, palette: list = None, b
     else:
         raise ValueError(f"Unknown factor {factor_key}")
         
-    if palette:
-        styled = img.visualize(min=vis_min, max=vis_max, palette=palette)
-        url = styled.getDownloadURL({"name": f"biomass_{factor_key}_styled", "scale": dynamic_scale, "region": calc_geom, "format": "GEO_TIFF"})
-    else:
-        url = img.toFloat().getDownloadURL({"name": f"biomass_{factor_key}_raw", "scale": dynamic_scale, "region": calc_geom, "format": "GEO_TIFF"})
+    url = None
+    try:
+        if palette:
+            styled = img.visualize(min=vis_min, max=vis_max, palette=palette)
+            url = styled.getDownloadURL({"name": f"biomass_{factor_key}_styled", "scale": max(dynamic_scale, 100), "region": calc_geom, "format": "GEO_TIFF"})
+        else:
+            url = img.toFloat().getDownloadURL({"name": f"biomass_{factor_key}_raw", "scale": max(dynamic_scale, 100), "region": calc_geom, "format": "GEO_TIFF"})
+    except Exception:
+        url = None
         
     return {"download_url": url}

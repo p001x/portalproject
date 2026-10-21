@@ -197,12 +197,17 @@ def _build_habitat_images(
         if cache_key in _cache_build:
             return _cache_build[cache_key]
             
-        from gee.aoi_utils import get_aoi_geometry
+        from gee.aoi_utils import get_aoi_geometry, COUNTRY_PRESETS
         aoi = get_aoi_geometry(aoi_config)
-        scale = get_dynamic_scale(aoi)
+        scale = get_dynamic_scale(aoi, aoi_config=aoi_config)
+
+        country = aoi_config.get("country", "")
+        is_massive = country in COUNTRY_PRESETS and COUNTRY_PRESETS[country].get("is_massive")
+        is_world = aoi_config.get("type") == "world"
+        is_rwanda = aoi_config.get("type") in ("rwanda", "rwanda-micro") or country == "Rwanda"
         
-        # 20 km buffer to prevent boundary edge distortion in distance calculations
-        aoi_buffer = aoi.buffer(20000)
+        # Buffer to prevent boundary edge distortion; skip on massive/global geometries
+        aoi_buffer = aoi if (is_massive or is_world) else aoi.buffer(20000)
     
         # Calculate raw images
         # Map year to WorldCover version (2020 v100, 2021 v200)
@@ -220,8 +225,17 @@ def _build_habitat_images(
         irrigated_dist = _true_vector_euclidean_distance(irrigated_mask, aoi, scale)
         
         # True Euclidean distance for vector features (roads) with fallback unmask
-        roads = ee.FeatureCollection("projects/sat-io/open-datasets/GRIP4/Africa").filterBounds(aoi_buffer)
-        roads_dist_km = roads.distance(searchRadius=50000, maxError=50).unmask(50000).divide(1000).clip(aoi)
+        if is_rwanda:
+            roads = ee.FeatureCollection("projects/sat-io/open-datasets/GRIP4/Africa").filterBounds(aoi_buffer)
+            roads_dist_km = roads.distance(searchRadius=50000, maxError=50).unmask(50000).divide(1000).clip(aoi)
+        elif is_massive or is_world:
+            roads_dist_km = buildings_dist
+        else:
+            try:
+                roads = ee.FeatureCollection("projects/sat-io/open-datasets/GRIP4/GlobalRoads").filterBounds(aoi_buffer)
+                roads_dist_km = roads.distance(searchRadius=50000, maxError=500).unmask(50000).divide(1000).clip(aoi)
+            except Exception:
+                roads_dist_km = buildings_dist
         
         dem = ee.Image("USGS/SRTMGL1_003").select("elevation").unmask(ee.ImageCollection("COPERNICUS/DEM/GLO30").select("DEM").mosaic(), False).clip(aoi)
         slope_deg = ee.Terrain.slope(dem).clip(aoi)
@@ -357,10 +371,14 @@ def compute_habitat(
     ).getInfo() or {}
     class_areas = {lbl: round((area_dict.get(f"c{i}") or 0) / 1e6, 2) for i, lbl in enumerate(stat_labels)}
 
+    from gee.aoi_utils import get_bounds_and_center
+    bounds, _ = get_bounds_and_center(aoi, aoi_config=aoi_config)
+    dl_geom = ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds()
+
     # 3 & 4. Classify and Export Data (Parallelized with ThreadPoolExecutor for rapid response)
     def safe_url(img, name):
         try:
-            return img.getDownloadURL({"scale": max(scale, 100), "region": aoi.bounds(), "format": "GEO_TIFF", "name": name})
+            return img.getDownloadURL({"scale": max(scale, 100), "region": dl_geom, "format": "GEO_TIFF", "name": name})
         except Exception:
             return None
 
@@ -368,7 +386,7 @@ def compute_habitat(
         if palette is None:
             palette = _SCORE_VIS["palette"]
         try:
-            return img.getThumbURL({"min": 1, "max": classes, "palette": palette, "region": aoi.bounds(), "dimensions": 512, "crs": "EPSG:4326", "format": "png"})
+            return img.getThumbURL({"min": 1, "max": classes, "palette": palette, "region": dl_geom, "dimensions": 512, "crs": "EPSG:4326", "format": "png"})
         except Exception:
             return None
 

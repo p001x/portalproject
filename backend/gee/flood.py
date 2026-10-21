@@ -523,7 +523,8 @@ def compute_flood_export(aoi_config: dict, start_year: int, end_year: int, weigh
     with gee_semaphore:
         calc_geom = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False) if is_global else aoi.bounds(maxError=1000)
         try:
-            download_url = suitability.getDownloadURL({"scale": get_dynamic_scale(aoi), "region": calc_geom, "format": "GEO_TIFF"})
+            scale = max(100, get_dynamic_scale(aoi, aoi_config=aoi_config))
+            download_url = suitability.getDownloadURL({"scale": scale, "region": calc_geom, "format": "GEO_TIFF"})
         except Exception:
             download_url = None
     return {"download_url": download_url}

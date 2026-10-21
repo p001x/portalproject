@@ -255,13 +255,16 @@ def compute_water_harvesting_export(aoi_config: dict, start_year: int, end_year:
     aoi, annual_precip, monthly_precip, _, _ = _build_water_harvesting_images(aoi_config, start_year, end_year)
     
     # Classify using natural breaks for export
-    scale = get_dynamic_scale(aoi)
+    scale = get_dynamic_scale(aoi, aoi_config=aoi_config)
     classified_precip, breaks = apply_natural_breaks(monthly_precip, aoi, scale, len(_PRECIP_VIS["palette"]))
     
     try:
+        from gee.aoi_utils import get_bounds_and_center
+        bounds, _ = get_bounds_and_center(aoi, aoi_config=aoi_config)
+        dl_geom = ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds()
         download_url = monthly_precip.getDownloadURL({
-            "scale": 30, # High res for export
-            "region": aoi.bounds(),
+            "scale": max(scale, 100),
+            "region": dl_geom,
             "format": "GEO_TIFF"
         })
     except Exception:

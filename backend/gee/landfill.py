@@ -79,16 +79,14 @@ def compute_ahp_data(weights: dict) -> dict:
     }
 
 
-def _distance_km(mask, aoi, scale=None):
-    if scale is None: scale = get_dynamic_scale(aoi)
+def _distance_km(mask, aoi, scale=None, aoi_config=None):
+    if scale is None:
+        scale = get_dynamic_scale(aoi, aoi_config=aoi_config)
     
     bg_mask = mask.unmask(0).Not()
-    dist_pixels = bg_mask.fastDistanceTransform(1024, "pixels", "squared_euclidean").sqrt()
-    
-    # fastDistanceTransform returns 0 if no target is found within the neighborhood (1024 pixels).
-    # We must replace these 0s with 1024 so they are correctly treated as "far away", 
-    # rather than being falsely treated as "0 distance" (which ruins the suitability score).
-    dist_pixels = dist_pixels.where(bg_mask.And(dist_pixels.eq(0)), 1024)
+    max_pixels = 512 if scale >= 1000 else 1024
+    dist_pixels = bg_mask.fastDistanceTransform(max_pixels, "pixels", "squared_euclidean").sqrt()
+    dist_pixels = dist_pixels.where(bg_mask.And(dist_pixels.eq(0)), max_pixels)
 
     distance_m = (
         dist_pixels
@@ -116,14 +114,33 @@ def _apply_reverse(score_img, flag):
     return ee.Image(6).subtract(score_img) if flag else score_img
 
 
-def _factor_urls(image, key: str, aoi) -> dict:
+def _factor_urls(image, key: str, aoi, scale=None, aoi_config=None) -> dict:
+    if scale is None:
+        scale = max(100, get_dynamic_scale(aoi, aoi_config=aoi_config))
+    from gee.aoi_utils import get_bounds_and_center
+    bounds, _ = get_bounds_and_center(aoi, aoi_config=aoi_config)
+    dl_geom = ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds()
+
+    tile_url = image.getMapId(_SCORE_VIS)["tile_fetcher"].url_format
+    try:
+        thumb_url = image.getThumbURL({
+            **_SCORE_VIS, "region": dl_geom, "dimensions": 512, "crs": "EPSG:4326", "format": "png"
+        })
+    except Exception:
+        thumb_url = None
+
+    try:
+        download_url = image.getDownloadURL({
+            "name": f"Landfill_{key}_score", "scale": scale,
+            "region": dl_geom, "format": "GEO_TIFF", "filePerBand": False,
+        })
+    except Exception:
+        download_url = None
+
     return {
-        "tile_url": image.getMapId(_SCORE_VIS)["tile_fetcher"].url_format,
-        "thumb_url": image.getThumbURL({**_SCORE_VIS, "region": aoi.bounds(), "dimensions": 512, "crs": "EPSG:4326", "format": "png"}),
-        "download_url": image.getDownloadURL({
-            "name": f"Landfill_{key}_score", "scale": 100,
-            "region": aoi.bounds(), "format": "GEO_TIFF", "filePerBand": False,
-        }),
+        "tile_url": tile_url,
+        "thumb_url": thumb_url,
+        "download_url": download_url,
     }
 
 
@@ -141,13 +158,19 @@ def _build_landfill_base(
     aoi_config: dict, reverse_river: bool, reverse_residential: bool,
     reverse_slope: bool, reverse_road: bool, reverse_lulc: bool, custom_weights: dict | None
 ):
-    from gee.aoi_utils import get_aoi_geometry
+    from gee.aoi_utils import get_aoi_geometry, COUNTRY_PRESETS
     aoi = get_aoi_geometry(aoi_config)
     weights = _normalize_weights(custom_weights)
     reverse_flags = {
         "river": reverse_river, "residential": reverse_residential,
         "slope": reverse_slope, "road": reverse_road, "lulc": reverse_lulc,
     }
+
+    country = aoi_config.get("country", "")
+    is_massive = country in COUNTRY_PRESETS and COUNTRY_PRESETS[country].get("is_massive")
+    is_world = aoi_config.get("type") == "world"
+    is_rwanda = aoi_config.get("type") in ("rwanda", "rwanda-micro") or country == "Rwanda"
+    scale = get_dynamic_scale(aoi, aoi_config=aoi_config)
 
     dem = ee.Image("USGS/SRTMGL1_003").select("elevation").unmask(ee.ImageCollection("COPERNICUS/DEM/GLO30").select("DEM").mosaic(), False)
     slope_pct = ee.Terrain.slope(dem).multiply(math.pi / 180).tan().multiply(100)
@@ -165,16 +188,24 @@ def _build_landfill_base(
     lc = ee.Image("ESA/WorldCover/v200/2021").select("Map").clip(aoi)
     gsw = ee.Image("JRC/GSW1_4/GlobalSurfaceWater").select("occurrence")
     water_mask = gsw.gte(50).unmask(0).Or(lc.eq(80)).Or(lc.eq(90))
-    river_dist_km = _distance_km(water_mask, aoi)
+    river_dist_km = _distance_km(water_mask, aoi, scale=scale, aoi_config=aoi_config)
     river_score = _apply_reverse(_reclass_river_far_is_good(river_dist_km), reverse_flags["river"]).rename("river_score")
 
     residential_mask = lc.eq(50)
-    residential_dist_km = _distance_km(residential_mask, aoi)
+    residential_dist_km = _distance_km(residential_mask, aoi, scale=scale, aoi_config=aoi_config)
     residential_score = _apply_reverse(_reclass_residential_far_is_good(residential_dist_km), reverse_flags["residential"]).rename("residential_score")
     
-    roads = ee.FeatureCollection("projects/sat-io/open-datasets/GRIP4/Africa").filterBounds(aoi)
-    # Use FeatureCollection.distance for true, exact Euclidean distance from vector lines
-    road_dist_km = roads.distance(searchRadius=50000, maxError=50).unmask(50000).divide(1000).clip(aoi)
+    if is_rwanda:
+        roads = ee.FeatureCollection("projects/sat-io/open-datasets/GRIP4/Africa").filterBounds(aoi)
+        road_dist_km = roads.distance(searchRadius=50000, maxError=50).unmask(50000).divide(1000).clip(aoi)
+    elif is_massive or is_world:
+        road_dist_km = _distance_km(lc.eq(50), aoi, scale=max(scale, 500), aoi_config=aoi_config)
+    else:
+        try:
+            roads = ee.FeatureCollection("projects/sat-io/open-datasets/GRIP4/GlobalRoads").filterBounds(aoi)
+            road_dist_km = roads.distance(searchRadius=50000, maxError=500).unmask(50000).divide(1000).clip(aoi)
+        except Exception:
+            road_dist_km = _distance_km(lc.eq(50), aoi, scale=scale, aoi_config=aoi_config)
     road_score = _apply_reverse(_reclass_road_near_is_good(road_dist_km), reverse_flags["road"]).rename("road_score")
 
     lulc_score = (
@@ -242,19 +273,24 @@ def compute_landfill_map(
     )
     
     map_id = suitability.getMapId(_SCORE_VIS)
-    final_thumb_url = suitability.getThumbURL({
-        **_SCORE_VIS, "region": aoi.bounds(), "dimensions": 512, "crs": "EPSG:4326", "format": "png",
-    })
 
     from gee.aoi_utils import get_bounds_and_center
+    bounds, center = get_bounds_and_center(aoi, aoi_config=aoi_config)
+    dl_geom = ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds()
+    scale = max(100, get_dynamic_scale(aoi, aoi_config=aoi_config))
 
-
-    bounds, center = get_bounds_and_center(aoi)
+    final_thumb_url = None
+    try:
+        final_thumb_url = suitability.getThumbURL({
+            **_SCORE_VIS, "region": dl_geom, "dimensions": 512, "crs": "EPSG:4326", "format": "png",
+        })
+    except Exception:
+        pass
 
     factor_maps = {}
     for key in FACTOR_ORDER:
         meta = FACTOR_META[key]
-        urls = _factor_urls(score_images[key], key, aoi)
+        urls = _factor_urls(score_images[key], key, aoi, scale=scale, aoi_config=aoi_config)
         w_pct = round(weights[key] * 100, 1)
         factor_maps[key] = {
             "label": meta["label"],
@@ -313,9 +349,14 @@ def compute_landfill_stats(
         for i, lbl in enumerate(labels)
     ])
 
-    area_dict = area_img.reduceRegion(
-        reducer=ee.Reducer.sum(), geometry=aoi.bounds(maxError=1000), scale=get_dynamic_scale(aoi), maxPixels=1e10
-    ).getInfo()
+    scale = get_dynamic_scale(aoi, aoi_config=aoi_config)
+    from gee.aoi_utils import get_bounds_and_center, safe_get_info
+    bounds, _ = get_bounds_and_center(aoi, aoi_config=aoi_config)
+    calc_geom = ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds(maxError=1000)
+
+    area_dict = safe_get_info(area_img.reduceRegion(
+        reducer=ee.Reducer.sum(), geometry=calc_geom, scale=scale, maxPixels=1e13, bestEffort=True, tileScale=16
+    )) or {}
 
     class_areas = {
         lbl: round((area_dict.get(f"c{i}", 0) or 0) / 1e6, 2)
@@ -355,6 +396,8 @@ def compute_landfill_classify(
         aoi_config, reverse_river, reverse_residential, reverse_slope, reverse_road, reverse_lulc, custom_weights
     )
 
+    scale = get_dynamic_scale(aoi, aoi_config=aoi_config)
+
     classify = quantile_classify(
         layers=[
             {"name": "suitability",    "image": suitability,               "title": "Suitability Index"},
@@ -364,8 +407,9 @@ def compute_landfill_classify(
             {"name": "road_score",     "image": raw_layers["road_dist_km"],       "title": "Road Accessibility (km)"},
             {"name": "lulc_score",     "image": raw_layers["lc"],       "title": "Land Cover (Categorical)"},
         ],
-        aoi=aoi, scale=get_dynamic_scale(aoi), n_classes=n_classes,
-        method=method, custom_labels=custom_labels
+        aoi=aoi, scale=scale, n_classes=n_classes,
+        method=method, custom_labels=custom_labels,
+        aoi_config=aoi_config
     )
     with _lock:
         _cache[cache_key] = result = classify
@@ -390,10 +434,20 @@ def compute_landfill_export(
         aoi_config, reverse_river, reverse_residential, reverse_slope, reverse_road, reverse_lulc, custom_weights
     )
 
-    result = {
-        "download_url": suitability.getDownloadURL({
-            "scale": 100, "region": aoi.bounds(), "format": "GEO_TIFF"
+    from gee.aoi_utils import get_bounds_and_center
+    bounds, _ = get_bounds_and_center(aoi, aoi_config=aoi_config)
+    dl_geom = ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds()
+    scale = max(100, get_dynamic_scale(aoi, aoi_config=aoi_config))
+
+    try:
+        download_url = suitability.getDownloadURL({
+            "scale": scale, "region": dl_geom, "format": "GEO_TIFF"
         })
+    except Exception:
+        download_url = None
+
+    result = {
+        "download_url": download_url
     }
     with _lock:
         _cache[cache_key] = result

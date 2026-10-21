@@ -232,15 +232,26 @@ def compute_slope_export(aoi_config: dict) -> dict:
 
     aoi, dynamic_scale, dem, slope, aspect, hillshade, tpi, tri, upa, dir, contours, lsi, solar = _build_slope_base(aoi_config)
 
+    from gee.aoi_utils import get_bounds_and_center
+    bounds, _ = get_bounds_and_center(aoi, aoi_config=aoi_config)
+    dl_geom = ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds()
+    scale = max(dynamic_scale, 100)
+
+    def safe_dl(img):
+        try:
+            return img.getDownloadURL({"region": dl_geom, "scale": scale, "format": "GEO_TIFF", "crs": "EPSG:4326"})
+        except Exception:
+            return None
+
     result = {
-        "slope_download_url": slope.getDownloadURL({"region": aoi.bounds(), "scale": dynamic_scale, "format": "GEO_TIFF", "crs": "EPSG:4326"}),
-        "hillshade_download_url": hillshade.getDownloadURL({"region": aoi.bounds(), "scale": dynamic_scale, "format": "GEO_TIFF", "crs": "EPSG:4326"}),
-        "aspect_download_url": aspect.getDownloadURL({"region": aoi.bounds(), "scale": dynamic_scale, "format": "GEO_TIFF", "crs": "EPSG:4326"}),
-        "tpi_download_url": tpi.getDownloadURL({"region": aoi.bounds(), "scale": dynamic_scale, "format": "GEO_TIFF", "crs": "EPSG:4326"}),
-        "tri_download_url": tri.getDownloadURL({"region": aoi.bounds(), "scale": dynamic_scale, "format": "GEO_TIFF", "crs": "EPSG:4326"}),
-        "upa_download_url": upa.getDownloadURL({"region": aoi.bounds(), "scale": dynamic_scale, "format": "GEO_TIFF", "crs": "EPSG:4326"}),
-        "dir_download_url": dir.getDownloadURL({"region": aoi.bounds(), "scale": dynamic_scale, "format": "GEO_TIFF", "crs": "EPSG:4326"}),
-        "contours_download_url": contours.getDownloadURL({"region": aoi.bounds(), "scale": dynamic_scale, "format": "GEO_TIFF", "crs": "EPSG:4326"}),
+        "slope_download_url": safe_dl(slope),
+        "hillshade_download_url": safe_dl(hillshade),
+        "aspect_download_url": safe_dl(aspect),
+        "tpi_download_url": safe_dl(tpi),
+        "tri_download_url": safe_dl(tri),
+        "upa_download_url": safe_dl(upa),
+        "dir_download_url": safe_dl(dir),
+        "contours_download_url": safe_dl(contours),
     }
     with _lock:
         _cache[cache_key] = result

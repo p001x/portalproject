@@ -457,12 +457,15 @@ def compute_rusle_export(
     factor_images = res["factor_images"]
     risk_index = res["risk_index"]
 
-    scale = max(res.get("scale", 250), 250)
+    scale = max(res.get("scale", 250), get_dynamic_scale(aoi, aoi_config=aoi_config))
     bounds = res.get("bounds")
     dl_region = ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds()
 
     def get_dl_url(img):
-        return img.getDownloadURL({"region": dl_region, "scale": scale, "format": "GEO_TIFF", "crs": "EPSG:4326"})
+        try:
+            return img.getDownloadURL({"region": dl_region, "scale": scale, "format": "GEO_TIFF", "crs": "EPSG:4326"})
+        except Exception:
+            return None
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=7) as dl_executor:
         f_dls = {k: dl_executor.submit(lambda k=k: get_dl_url(factor_images[k])) for k in RECLASS_FACTOR_ORDER + ["A"]}

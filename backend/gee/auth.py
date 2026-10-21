@@ -417,23 +417,88 @@ def apply_gee_patch():
     def safe_get_download_url(self, *args, **kwargs):
         ensure_primary_credential()
         retries = 8
+        params = None
+        is_arg_dict = False
+        if args and isinstance(args[0], dict):
+            params = dict(args[0])
+            is_arg_dict = True
+        elif kwargs:
+            params = dict(kwargs)
+
         for i in range(retries):
             try:
-                return original_get_download_url(self, *args, **kwargs)
+                if is_arg_dict:
+                    new_args = (params,) + args[1:]
+                    return original_get_download_url(self, *new_args, **kwargs)
+                elif params is not None and not args:
+                    return original_get_download_url(self, **params)
+                else:
+                    return original_get_download_url(self, *args, **kwargs)
             except Exception as e:
+                err_str = str(e)
+                # Handle GEE pixel grid dimensions overflow: e.g. "Pixel grid dimensions (190731x45244) must be less than or equal to 32768."
+                if "Pixel grid dimensions" in err_str and params is not None:
+                    import re, math
+                    match = re.search(r"Pixel grid dimensions \((\d+)x(\d+)\)", err_str)
+                    if match:
+                        w, h = int(match.group(1)), int(match.group(2))
+                        max_dim = max(w, h)
+                        factor = max(2.0, math.ceil(max_dim / 15000.0))
+                        curr_scale = params.get("scale", 30)
+                        params["scale"] = max(int(curr_scale * factor), int(curr_scale * (max_dim / 15000.0)) + 1)
+                        print(f"[safe_get_download_url] Pixel grid limit hit ({w}x{h}). Auto-adjusting scale from {curr_scale} to {params['scale']}.")
+                        continue
+                elif ("request size" in err_str.lower() or "exceeds" in err_str.lower() or "33554432" in err_str) and params is not None:
+                    curr_scale = params.get("scale", 30)
+                    params["scale"] = int(curr_scale * 3)
+                    print(f"[safe_get_download_url] Request size limit hit. Scaling up from {curr_scale} to {params['scale']}.")
+                    continue
+
                 if _is_rotatable_error(e) and i < retries - 1:
                     rotated = rotate_credentials()
                     if rotated:
-                        print(f"[GEE Pool getDownloadURL] Automatically shifted account! Retrying...")
+                        print(f"[GEE Pool getDownloadURL] Transient limit ({err_str[:60]}). Automatically shifted account! Retrying...")
                         time.sleep(0.2)
                         continue
                     sleep_time = (1.5 ** i) + random.uniform(0.5, 1.5)
                     print(f"GEE Limit Hit (getDownloadURL). Backing off for {sleep_time:.2f}s...")
                     time.sleep(sleep_time)
                     continue
+
+                # If pixel grid or request size limit persists, return None to prevent crashing the whole page/endpoint
+                if "Pixel grid dimensions" in err_str or "request size" in err_str.lower() or "exceeds" in err_str.lower():
+                    print(f"[safe_get_download_url] Could not satisfy dimension/size limit ({err_str[:80]}). Returning None to prevent 500 error.")
+                    return None
                 raise
                 
     ee.Image.getDownloadURL = safe_get_download_url
+
+    original_get_thumb_url = ee.Image.getThumbURL
+
+    def safe_get_thumb_url(self, *args, **kwargs):
+        ensure_primary_credential()
+        retries = 8
+        for i in range(retries):
+            try:
+                return original_get_thumb_url(self, *args, **kwargs)
+            except Exception as e:
+                err_str = str(e)
+                if _is_rotatable_error(e) and i < retries - 1:
+                    rotated = rotate_credentials()
+                    if rotated:
+                        print(f"[GEE Pool getThumbURL] Transient limit ({err_str[:60]}). Automatically shifted account! Retrying...")
+                        time.sleep(0.2)
+                        continue
+                    sleep_time = (1.5 ** i) + random.uniform(0.5, 1.5)
+                    print(f"GEE Limit Hit (getThumbURL). Backing off for {sleep_time:.2f}s...")
+                    time.sleep(sleep_time)
+                    continue
+                if "Pixel grid dimensions" in err_str or "dimensions" in err_str.lower():
+                    print(f"[safe_get_thumb_url] Dimension error ({err_str[:80]}). Returning None.")
+                    return None
+                raise
+
+    ee.Image.getThumbURL = safe_get_thumb_url
     
     original_get_map_id = ee.Image.getMapId
     

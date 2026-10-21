@@ -263,6 +263,20 @@ def _build_accessibility_images(aoi_config: dict, amenities: list[str], dest_ame
             raw_points.append({"lon": pf[0], "lat": pf[1], "name": "Proposed Facility", "type": "proposed"})
 
     if not points:
+        # Outside Rwanda or no local amenities: sample built-up center points so global analysis completes
+        try:
+            lc_built = ee.ImageCollection("ESA/WorldCover/v100").first().select("Map").eq(50).clip(aoi)
+            sampled = lc_built.stratifiedSample(numPoints=15, classBand="Map", region=aoi, scale=max(500, get_dynamic_scale(aoi)), geometries=True)
+            sampled_info = safe_get_info(sampled)
+            for feat in (sampled_info or {}).get("features", []):
+                coords = feat.get("geometry", {}).get("coordinates", [])
+                if coords:
+                    points.append(ee.Feature(ee.Geometry.Point(coords), {"name": "Urban Center / Facility"}))
+                    raw_points.append({"lon": coords[0], "lat": coords[1], "name": "Facility / Urban Center", "type": "facility"})
+        except Exception as e:
+            logger.warning(f"Fallback facility sampling failed: {e}")
+
+    if not points:
         debug_info = ""
         if raw_points and len(raw_points) > 0 and "debug" in raw_points[0]:
             debug_info = "\n\nDEBUG INFO:\n" + raw_points[0]["debug"]
@@ -324,14 +338,25 @@ def _build_accessibility_images(aoi_config: dict, amenities: list[str], dest_ame
     
     base_cost = base_cost.multiply(lc_multiplier)
     
-    # Roads GRIP4 Africa
-    roads = ee.FeatureCollection("projects/sat-io/open-datasets/GRIP4/Africa").filterBounds(aoi)
-    # road pace (seconds per meter)
+    country = aoi_config.get("country", "") if isinstance(aoi_config, dict) else ""
+    is_rwanda = country == "Rwanda" or (isinstance(aoi_config, dict) and aoi_config.get("type") in ("rwanda", "rwanda-micro"))
+    from gee.aoi_utils import COUNTRY_PRESETS
+    is_massive = country in COUNTRY_PRESETS and COUNTRY_PRESETS[country].get("is_massive")
+
     road_pace = 3.6 / road_speed_kmh
-    roads_raster = ee.Image(1).paint(roads, road_pace)
-    
-    # Combine (road speed where roads exist, else offroad speed)
-    cost = base_cost.where(roads_raster.neq(1), roads_raster).rename("cost")
+    if is_rwanda:
+        roads = ee.FeatureCollection("projects/sat-io/open-datasets/GRIP4/Africa").filterBounds(aoi)
+        roads_raster = ee.Image(1).paint(roads, road_pace)
+        cost = base_cost.where(roads_raster.neq(1), roads_raster).rename("cost")
+    elif is_massive:
+        cost = base_cost.where(lc.eq(50), road_pace).rename("cost")
+    else:
+        try:
+            roads = ee.FeatureCollection("projects/sat-io/open-datasets/GRIP4/GlobalRoads").filterBounds(aoi)
+            roads_raster = ee.Image(1).paint(roads, road_pace)
+            cost = base_cost.where(roads_raster.neq(1), roads_raster).rename("cost")
+        except Exception:
+            cost = base_cost.where(lc.eq(50), road_pace).rename("cost")
     
     # 3. Compute cumulative cost (travel time in seconds)
     source_img = ee.Image(0).paint(sources, 1).clip(aoi)
@@ -793,10 +818,33 @@ def compute_accessibility_export(aoi_config: dict, amenities: list[str], dest_am
     tt_final = tt_rgb.blend(roads_rgb).blend(points_rgb)
     acc_final = acc_rgb.blend(roads_rgb).blend(points_rgb)
 
+    from gee.aoi_utils import get_bounds_and_center
+    bounds, _ = get_bounds_and_center(aoi, aoi_config=aoi_config if isinstance(aoi_config, dict) else None)
+    dl_geom = ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds()
+    scale = max(100, get_dynamic_scale(aoi, aoi_config=aoi_config if isinstance(aoi_config, dict) else None))
+
+    tt_thumb = None
+    try:
+        tt_thumb = tt_final.getThumbURL({"region": dl_geom, "dimensions": 800, "crs": "EPSG:4326", "format": "png"})
+    except Exception:
+        pass
+
+    tt_dl = None
+    try:
+        tt_dl = travel_time.getDownloadURL({"region": dl_geom, "scale": scale, "format": "GEO_TIFF", "crs": "EPSG:4326"})
+    except Exception:
+        pass
+
+    acc_thumb = None
+    try:
+        acc_thumb = acc_final.getThumbURL({"region": dl_geom, "dimensions": 800, "crs": "EPSG:4326", "format": "png"})
+    except Exception:
+        pass
+
     result = {
-        "travel_time_thumb_url": tt_final.getThumbURL({"region": aoi.bounds(), "dimensions": 800, "crs": "EPSG:4326", "format": "png"}),
-        "travel_time_download_url": travel_time.getDownloadURL({"region": aoi.bounds(), "scale": 100, "format": "GEO_TIFF", "crs": "EPSG:4326"}),
-        "acc_class_thumb_url": acc_final.getThumbURL({"region": aoi.bounds(), "dimensions": 800, "crs": "EPSG:4326", "format": "png"}),
+        "travel_time_thumb_url": tt_thumb,
+        "travel_time_download_url": tt_dl,
+        "acc_class_thumb_url": acc_thumb,
         "factor_maps": {},
     }
     with _lock:

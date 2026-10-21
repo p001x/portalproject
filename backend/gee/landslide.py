@@ -531,11 +531,17 @@ def compute_landslide_export(
         
         def safe_thumb(img, vis):
             with gee_semaphore:
-                return img.getThumbURL(vis)
+                try:
+                    return img.getThumbURL(vis)
+                except Exception:
+                    return None
         
         def safe_dl(img, params):
             with gee_semaphore:
-                return img.getDownloadURL(params)
+                try:
+                    return img.getDownloadURL(params)
+                except Exception:
+                    return None
 
         f_lsi_thumb = executor.submit(lambda: safe_thumb(lsi_class, {**LSI_VIS, "region": calc_geom, "dimensions": 800, "crs": "EPSG:4326", "format": "png"}))
         f_lsi_dl = executor.submit(lambda: safe_dl(lsi_class, {"region": calc_geom, "scale": calc_scale, "format": "GEO_TIFF", "crs": "EPSG:4326"}))
