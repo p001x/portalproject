@@ -234,15 +234,18 @@ def quantile_classify(layers: list, aoi, scale: int, n_classes: int, reverse_pal
     all_bands = ee.Image.cat([img.rename(nm) for nm, img in zip(names, images)])
     
     is_global = False
-    try:
-        geom_str = str(aoi.serialize())
-        if "-180" in geom_str and "180" in geom_str and "90" in geom_str and "-90" in geom_str:
-            is_global = True
-    except:
-        pass
+    if aoi_config and aoi_config.get("type") == "world":
+        is_global = True
+    else:
+        try:
+            geom_str = str(aoi.serialize())
+            if "-180" in geom_str and "180" in geom_str:
+                is_global = True
+        except:
+            pass
 
     area_sqkm = 0
-    calc_geom = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False) if is_global else aoi.bounds(maxError=1000)
+    calc_geom = ee.Geometry.Rectangle([-180, -85.051129, 180, 85.051129], "EPSG:4326", False) if is_global else aoi.bounds(maxError=1000)
 
     if custom_breaks:
         raw_data = {}
@@ -330,7 +333,7 @@ def quantile_classify(layers: list, aoi, scale: int, n_classes: int, reverse_pal
     # Pre-compute the AOI region geometry ONCE outside threads to avoid N redundant getInfo() calls.
     # Each process_panel thread would otherwise call get_bounds_and_center(aoi) independently.
     if is_global:
-        _panel_region = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False)
+        _panel_region = ee.Geometry.Rectangle([-180, -85.051129, 180, 85.051129], "EPSG:4326", False)
     else:
         try:
             _aoi_bounds, _ = get_bounds_and_center(aoi, aoi_config=aoi_config)

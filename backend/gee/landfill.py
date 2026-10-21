@@ -83,6 +83,10 @@ def _distance_km(mask, aoi, scale=None, aoi_config=None):
     if scale is None:
         scale = get_dynamic_scale(aoi, aoi_config=aoi_config)
     
+    # Clamp aoi to Web Mercator bounds so reproject to EPSG:3857 never touches poles
+    mercator_safe = ee.Geometry.Rectangle([-180, -85.051129, 180, 85.051129], "EPSG:4326", False)
+    safe_aoi = aoi.intersection(mercator_safe, maxError=1000)
+
     bg_mask = mask.unmask(0).Not()
     max_pixels = 512 if scale >= 1000 else 1024
     dist_pixels = bg_mask.fastDistanceTransform(max_pixels, "pixels", "squared_euclidean").sqrt()
@@ -91,7 +95,7 @@ def _distance_km(mask, aoi, scale=None, aoi_config=None):
     distance_m = (
         dist_pixels
         .reproject(crs="EPSG:3857", scale=scale)
-        .multiply(scale).clip(aoi)
+        .multiply(scale).clip(safe_aoi)
     )
     return distance_m.divide(1000).reproject(crs="EPSG:4326", scale=scale)
 
@@ -352,7 +356,11 @@ def compute_landfill_stats(
     scale = get_dynamic_scale(aoi, aoi_config=aoi_config)
     from gee.aoi_utils import get_bounds_and_center, safe_get_info
     bounds, _ = get_bounds_and_center(aoi, aoi_config=aoi_config)
-    calc_geom = ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds(maxError=1000)
+    is_world = aoi_config.get("type") == "world" if aoi_config else False
+    if is_world:
+        calc_geom = ee.Geometry.Rectangle([-180, -85.051129, 180, 85.051129], "EPSG:4326", False)
+    else:
+        calc_geom = ee.Geometry.Polygon([bounds], "EPSG:4326", False) if bounds else aoi.bounds(maxError=1000)
 
     area_dict = safe_get_info(area_img.reduceRegion(
         reducer=ee.Reducer.sum(), geometry=calc_geom, scale=scale, maxPixels=1e13, bestEffort=True, tileScale=16

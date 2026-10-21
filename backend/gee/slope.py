@@ -3,12 +3,13 @@ import json
 """Slope / Terrain analysis — no Streamlit dependency."""
 import ee
 from gee.persistent_cache import PersistentCache
-from threading import Lock
+from threading import Lock, BoundedSemaphore
 import concurrent.futures
 from gee.classify_utils import quantile_classify
 
 _cache = PersistentCache(ttl=86400)
 _lock = Lock()
+gee_semaphore = BoundedSemaphore(5)
 
 
 def _build_slope_base(aoi_config: dict):

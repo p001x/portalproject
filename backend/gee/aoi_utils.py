@@ -322,7 +322,7 @@ def _get_aoi_geometry_internal(aoi_config: dict) -> ee.Geometry:
         
         
     elif aoi_type == "world":
-        return ee.Geometry.Rectangle([-180, -90, 180, 90], "EPSG:4326", False)
+        return ee.Geometry.Rectangle([-180, -85.051129, 180, 85.051129], "EPSG:4326", False)
         
     elif aoi_type == "gaul0":
         country = aoi_config.get("country")
@@ -339,7 +339,7 @@ def _get_aoi_geometry_internal(aoi_config: dict) -> ee.Geometry:
             "Democratic People's Republic of Korea": "North Korea",
             "Viet Nam": "Vietnam",
             "Lao People's Democratic Republic": "Laos",
-            "CÃƒÂ´te d'Ivoire": "Cote d'Ivoire",
+            "CÃ´te d'Ivoire": "Cote d'Ivoire",
             "Congo": "Republic of the Congo",
             "Democratic Republic of the Congo": "Democratic Republic of the Congo"
         }
@@ -394,22 +394,28 @@ def get_aoi_geometry(aoi_config: dict) -> ee.Geometry:
     if aoi_config.get("type") in ("rwanda", "rwanda-micro"):
         return geom
 
+    # Fast path for World: already an optimal 4-corner planar rectangle bounded to Web Mercator latitude
+    if aoi_config.get("type") == "world":
+        return geom
+
     country = aoi_config.get("country", "")
     if country in COUNTRY_PRESETS and COUNTRY_PRESETS[country].get("is_massive"):
         # Pre-simplified server-side, keep purely server-side (prevents 10MB GeoJSON downloads)
         return geom
 
     try:
-        area_sqkm = geom.bounds().area(maxError=1000).divide(1e6).getInfo()
-        if area_sqkm > 1000000:
-            # Massive country > 1M sq km -> simplify by 10000 meters
-            geom = geom.simplify(maxError=10000)
-        elif area_sqkm > 100000:
-            # Large country > 100k sq km -> simplify by 2000 meters
-            geom = geom.simplify(maxError=2000)
-        elif area_sqkm > 10000:
-            # Medium country -> simplify by 500 meters
-            geom = geom.simplify(maxError=500)
+        area_res = geom.bounds().area(maxError=1000).divide(1e6).getInfo()
+        if isinstance(area_res, (int, float)):
+            area_sqkm = float(area_res)
+            if area_sqkm > 1000000:
+                # Massive country > 1M sq km -> simplify by 10000 meters
+                geom = geom.simplify(maxError=10000)
+            elif area_sqkm > 100000:
+                # Large country > 100k sq km -> simplify by 2000 meters
+                geom = geom.simplify(maxError=2000)
+            elif area_sqkm > 10000:
+                # Medium country -> simplify by 500 meters
+                geom = geom.simplify(maxError=500)
     except Exception as e:
         print(f"Warning: Geometry simplification failed: {e}")
         
