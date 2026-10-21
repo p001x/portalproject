@@ -214,7 +214,7 @@ def get_quantile_breaks(hist, n_classes):
             target += target_step
     return sorted(list(set(breaks)))
 
-def quantile_classify(layers: list, aoi, scale: int, n_classes: int, reverse_palette: bool = False, custom_labels: list = None, method: str = "natural_breaks", reverse_labels: bool = False, custom_breaks: dict = None, water_mask: ee.Image = None, custom_palette: list = None, add_legend: bool = False) -> dict:
+def quantile_classify(layers: list, aoi, scale: int, n_classes: int, reverse_palette: bool = False, custom_labels: list = None, method: str = "natural_breaks", reverse_labels: bool = False, custom_breaks: dict = None, water_mask: ee.Image = None, custom_palette: list = None, add_legend: bool = False, aoi_config: dict = None, **kwargs) -> dict:
     """
     Classify each layer into n_classes using Natural Breaks (Jenks 1D KMeans approximation)
     computed within `aoi`. All breakpoints and all class areas are fetched in exactly 
@@ -333,7 +333,7 @@ def quantile_classify(layers: list, aoi, scale: int, n_classes: int, reverse_pal
         _panel_region = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False)
     else:
         try:
-            _aoi_bounds, _ = get_bounds_and_center(aoi)
+            _aoi_bounds, _ = get_bounds_and_center(aoi, aoi_config=aoi_config)
             _panel_region = ee.Geometry.Polygon([_aoi_bounds], "EPSG:4326", False)
         except Exception:
             _panel_region = aoi.bounds(maxError=1000)
