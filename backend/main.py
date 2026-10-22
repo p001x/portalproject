@@ -321,14 +321,14 @@ class ForgotPasswordRequest(BaseModel):
 
 class ResetPasswordRequest(BaseModel):
     token: str = Field(...)
-    new_password: str = Field(..., min_length=6)
+    new_password: str = Field(..., min_length=8)
 
 class UpdateProfileRequest(BaseModel):
     name: str = Field(..., min_length=1)
 
 class ChangePasswordRequest(BaseModel):
     old_password: str
-    new_password: str = Field(..., min_length=6)
+    new_password: str = Field(..., min_length=8)
 
 
 @app.post("/api/auth/register", tags=["auth"])
@@ -365,24 +365,11 @@ def login(req: LoginRequest):
     try:
         user = verify_user(email, password)
         if not user:
-            # Auto-provision or sync admin user if first time / changed
             existing = auth_db.get_user_by_email(email)
             if not existing:
-                try:
-                    user = create_new_user(email.split("@")[0].replace(".", " ").title(), email, password)
-                except Exception as ex:
-                    logger.warning("Could not auto-create user in main.py: %s", ex)
-            elif email in ["petersonyang8@gmail.com", "pierrendorimana16@gmail.com"]:
-                try:
-                    import bcrypt
-                    password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-                    auth_db.update_user_password(email, password_hash)
-                    user = auth_db.get_user_by_email(email)
-                except Exception as ex:
-                    logger.warning("Could not update admin password in main.py: %s", ex)
-
-            if not user:
-                raise HTTPException(401, "Invalid email or password")
+                raise HTTPException(401, "No account found with this email. Please register first.")
+            else:
+                raise HTTPException(401, "Incorrect password. If you forgot your password, please use 'Forgot Password?' to reset it.")
 
         if user.get("is_blocked"):
             raise HTTPException(
@@ -402,6 +389,7 @@ def login(req: LoginRequest):
             "email": str(user["email"]),
             "name": str(user.get("name") or user["email"].split("@")[0]),
             "role": str(user.get("role", "user")),
+            "profile_picture": user.get("profile_picture"),
         }
         token = create_access_token({"sub": user_dict["email"], "name": user_dict["name"], "role": user_dict["role"]})
         if isinstance(token, bytes):
@@ -417,31 +405,47 @@ def login(req: LoginRequest):
     except HTTPException:
         raise
     except Exception as e:
-        import traceback
-        trace = traceback.format_exc()
-        logger.error("Login 500 error: %s\n%s", e, trace)
-        raise HTTPException(500, f"Internal Server Error: {str(e)}\n{trace}")
-    except Exception as exc:
-        logger.error("FastAPI login error: %s", exc, exc_info=True)
-        raise HTTPException(500, f"Login error: {str(exc)}")
+        logger.error("Login error: %s", e, exc_info=True)
+        raise HTTPException(500, f"Login error: {str(e)}")
 
 @app.post("/api/auth/forgot-password", tags=["auth"])
 def forgot_password(req: ForgotPasswordRequest, request: Request):
+    email = req.email.strip().lower()
     try:
-        token = generate_reset_token(req.email)
-        origin = request.headers.get("origin")
-        if origin:
-            reset_link = f"{origin}/reset-password?token={token}"
-        else:
-            reset_link = f"https://geoportal-ui.onrender.com/reset-password?token={token}"
-        from email_sender import send_reset_email
         from auth_db import get_user_by_email
-        user = get_user_by_email(req.email)
-        user_name = user["name"] if user else "Valued User"
-        send_reset_email(req.email, reset_link, user_name)
+        user = get_user_by_email(email)
+        if not user:
+            # Don't leak whether email exists for security
+            return {"ok": True, "message": "If the email is registered, a reset link has been sent."}
+
+        token = generate_reset_token(email)
+        origin = request.headers.get("origin")
+        if not origin:
+            referer = request.headers.get("referer")
+            if referer:
+                from urllib.parse import urlparse
+                parsed = urlparse(referer)
+                origin = f"{parsed.scheme}://{parsed.netloc}"
+        if not origin:
+            origin = "http://localhost:5000"
+
+        origin = origin.rstrip("/")
+        reset_link = f"{origin}/reset-password?token={token}"
+
+        try:
+            from email_sender import send_reset_email
+            user_name = user.get("name") or "Valued User"
+            send_reset_email(email, reset_link, user_name)
+        except Exception as ex:
+            logger.error("Failed to send reset email: %s", ex)
+            print(f"\n=========================================\n"
+                  f"🔐 PASSWORD RESET RECOVERY LINK FOR {email}\n"
+                  f"LINK: {reset_link}\n"
+                  f"=========================================\n")
+
         return {"ok": True, "message": "If the email is registered, a reset link has been sent."}
-    except ValueError:
-        # Don't leak whether email exists for security
+    except Exception as e:
+        logger.error("Forgot password error: %s", e)
         return {"ok": True, "message": "If the email is registered, a reset link has been sent."}
 
 
@@ -449,9 +453,12 @@ def forgot_password(req: ForgotPasswordRequest, request: Request):
 def reset_password(req: ResetPasswordRequest):
     try:
         reset_password_with_token(req.token, req.new_password)
-        return {"ok": True, "message": "Password has been reset successfully."}
+        return {"ok": True, "message": "Password has been reset successfully. You can now log in with your new password."}
     except ValueError as e:
         raise HTTPException(400, str(e))
+    except Exception as e:
+        logger.error("Reset password error: %s", e)
+        raise HTTPException(500, f"Failed to reset password: {str(e)}")
 
 @app.get("/api/auth/me", tags=["auth"])
 def get_me(user: dict = Depends(get_current_user)):

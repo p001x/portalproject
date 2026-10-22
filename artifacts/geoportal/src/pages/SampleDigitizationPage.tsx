@@ -2407,59 +2407,7 @@ export function SampleDigitizationPage() {
                 )}
               </div>
 
-              {/* ── 2. Boundary Layer: Study Area (AOI Boundary) ── */}
-              <div className={`rounded-lg border p-2 text-xs shadow-2xs space-y-1.5 transition-all ${
-                !studyArea ? "border-sky-500/40 bg-sky-500/5 ring-1 ring-sky-500/20" : "border-border/50 bg-card/40"
-              }`}>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <input
-                      type="checkbox"
-                      checked={showStudyArea}
-                      disabled={!studyArea}
-                      onChange={(e) => setShowStudyArea(e.target.checked)}
-                      className={`h-3.5 w-3.5 rounded border-border/60 shrink-0 ${!studyArea ? "opacity-30 cursor-not-allowed" : "cursor-pointer"}`}
-                      title={!studyArea ? "Define Study Area first" : "Toggle study area boundary visibility"}
-                    />
-                    {/* Clean Boundary Swatch */}
-                    <div className={`w-3.5 h-3.5 border border-dashed rounded-xs shrink-0 ${
-                      !studyArea ? "border-sky-400/60 bg-sky-500/15" : "border-emerald-400/60 bg-emerald-500/20"
-                    }`} />
-                    <span className="font-medium text-foreground truncate">Study Area (AOI)</span>
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0">
-                    <Badge variant="outline" className={`text-[9px] px-1.5 py-0 h-4 font-mono ${
-                      !studyArea
-                        ? "border-sky-500/50 text-sky-300 bg-sky-500/15 font-semibold"
-                        : "border-emerald-500/40 text-emerald-400 bg-emerald-500/10"
-                    }`}>
-                      {studyArea ? "Defined" : "Required"}
-                    </Badge>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => setIsStudyAreaModalOpen(true)}
-                      className={`h-5 px-1 text-[10px] ${
-                        !studyArea ? "text-sky-300 hover:text-sky-200 hover:bg-sky-500/20" : "text-muted-foreground hover:text-foreground"
-                      }`}
-                      title="Configure AOI"
-                    >
-                      <Edit className="w-3 h-3" />
-                    </Button>
-                    {studyArea && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={clearStudyArea}
-                        className="h-5 w-5 p-0 text-muted-foreground hover:text-destructive"
-                        title="Clear AOI"
-                      >
-                        <X className="w-3 h-3" />
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </div>
+
 
               {/* ── 3. Model Layer: Supervised Classification Raster (if active) ── */}
               {classifyResult?.tile_url && (
@@ -2878,69 +2826,6 @@ export function SampleDigitizationPage() {
                     </div>
                   )}
                 </div>
-
-                {/* Right: Basemap Selector, Add Data, Layer Visibility, Sampling Bias */}
-                <div className="flex items-center gap-2 flex-wrap">
-                  {/* Basemap Select */}
-                  <select 
-                    value={mapStyle} 
-                    onChange={(e) => setMapStyle(e.target.value as "osm" | "satellite" | "none")}
-                    className="bg-muted/40 text-xs px-2.5 py-1 rounded-md border border-border/60 font-medium h-8 focus:outline-none text-foreground shadow-2xs"
-                    title="Select background basemap style"
-                  >
-                    <option value="satellite">Esri Satellite</option>
-                    <option value="osm">OpenStreetMap</option>
-                    <option value="none">Blank Canvas</option>
-                  </select>
-
-                  {/* Add Data */}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setIsAddDataModalOpen(true)}
-                    className={`text-xs flex items-center gap-1.5 border border-border/60 bg-muted/20 hover:bg-muted/50 text-muted-foreground hover:text-foreground px-2.5 h-8 rounded-md transition-colors shadow-2xs ${uploadBusy ? 'opacity-50 pointer-events-none' : ''}`}
-                    title="Upload Shapefile, GeoJSON, or GeoTIFF"
-                  >
-                    {uploadBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-                    <span>{uploadBusy ? 'Uploading...' : 'Add Data'}</span>
-                  </Button>
-
-                  <div className="h-4 w-[1px] bg-border/60 mx-0.5 hidden sm:block" />
-
-                  {/* Layer Visibility Toggle */}
-                  <button
-                    type="button"
-                    onClick={() => setShowAllSamples(!showAllSamples)}
-                    className={`px-2.5 h-8 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 border border-border/60 shadow-2xs ${
-                      showAllSamples ? "bg-muted/50 text-foreground" : "bg-muted/20 text-muted-foreground hover:bg-muted/50"
-                    }`}
-                    title="Toggle visibility of all sample markers on the map"
-                  >
-                    {showAllSamples ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
-                    <span>{showAllSamples ? "Layers Visible" : "Layers Hidden"}</span>
-                  </button>
-
-                  {Object.keys(hiddenClasses).filter((k) => hiddenClasses[k]).length > 0 && (
-                    <Badge variant="outline" className="text-[10px] h-6 px-1.5 font-mono shadow-2xs border-border/50 text-muted-foreground bg-muted/40">
-                      {Object.keys(hiddenClasses).filter((k) => hiddenClasses[k]).length} hidden
-                    </Badge>
-                  )}
-
-                  {/* Sampling Bias Rings Toggle */}
-                  <button
-                    type="button"
-                    onClick={() => setShowCoverageBuffers(!showCoverageBuffers)}
-                    className={`px-2.5 h-8 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 border border-border/60 shadow-2xs ${
-                      showCoverageBuffers 
-                        ? "bg-muted/60 text-foreground font-medium" 
-                        : "bg-muted/20 text-muted-foreground hover:text-foreground hover:bg-muted/50"
-                    }`}
-                    title="Toggle 1km buffer coverage rings around point samples to evaluate spatial clustering and sampling bias"
-                  >
-                    <Compass className="w-3.5 h-3.5 text-muted-foreground" />
-                    <span>{showCoverageBuffers ? "1km Bias Rings (Active)" : "1km Bias Rings"}</span>
-                  </button>
-                </div>
               </div>
 
               {/* Contextual Status Banners (Docked directly beneath sub-bar) */}
@@ -3139,6 +3024,70 @@ export function SampleDigitizationPage() {
 
               {/* Map Container: Fills 100% of remaining flex space unobstructed */}
               <div className="flex-1 relative w-full h-full bg-muted/10">
+
+                {/* Floating Top-Left Map Controls: Basemap, Add Data, Layers, Bias Rings */}
+                <div className="absolute top-3 left-14 z-[1000] pointer-events-auto flex items-center gap-1.5 p-1 bg-card/95 backdrop-blur-md rounded-lg border border-border/80 shadow-md">
+                  {/* Basemap Select */}
+                  <select 
+                    value={mapStyle} 
+                    onChange={(e) => setMapStyle(e.target.value as "osm" | "satellite" | "none")}
+                    className="bg-muted/60 text-xs px-2 py-1 rounded-md border border-border/60 font-medium h-7 focus:outline-none text-foreground shadow-2xs cursor-pointer hover:bg-muted/80"
+                    title="Select background basemap style"
+                  >
+                    <option value="satellite">Esri Satellite</option>
+                    <option value="osm">OpenStreetMap</option>
+                    <option value="none">Blank Canvas</option>
+                  </select>
+
+                  {/* Add Data */}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsAddDataModalOpen(true)}
+                    className={`text-xs h-7 flex items-center gap-1.5 border border-border/60 bg-muted/30 hover:bg-muted/60 text-muted-foreground hover:text-foreground px-2 rounded-md transition-colors shadow-2xs ${uploadBusy ? 'opacity-50 pointer-events-none' : ''}`}
+                    title="Upload Shapefile, GeoJSON, or GeoTIFF"
+                  >
+                    {uploadBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                    <span>{uploadBusy ? 'Uploading...' : 'Add Data'}</span>
+                  </Button>
+
+                  <div className="h-4 w-[1px] bg-border/60 mx-0.5" />
+
+                  {/* Layer Visibility Toggle */}
+                  <button
+                    type="button"
+                    onClick={() => setShowAllSamples(!showAllSamples)}
+                    className={`px-2 h-7 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 border border-border/60 shadow-2xs ${
+                      showAllSamples ? "bg-muted/60 text-foreground" : "bg-muted/20 text-muted-foreground hover:bg-muted/50"
+                    }`}
+                    title="Toggle visibility of all sample markers on the map"
+                  >
+                    {showAllSamples ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
+                    <span>{showAllSamples ? "Layers Visible" : "Layers Hidden"}</span>
+                  </button>
+
+                  {Object.keys(hiddenClasses).filter((k) => hiddenClasses[k]).length > 0 && (
+                    <Badge variant="outline" className="text-[10px] h-5 px-1.5 font-mono shadow-2xs border-border/50 text-muted-foreground bg-muted/40">
+                      {Object.keys(hiddenClasses).filter((k) => hiddenClasses[k]).length} hidden
+                    </Badge>
+                  )}
+
+                  {/* Sampling Bias Rings Toggle */}
+                  <button
+                    type="button"
+                    onClick={() => setShowCoverageBuffers(!showCoverageBuffers)}
+                    className={`px-2 h-7 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 border border-border/60 shadow-2xs ${
+                      showCoverageBuffers 
+                        ? "bg-muted/70 text-foreground font-medium" 
+                        : "bg-muted/20 text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                    }`}
+                    title="Toggle 1km buffer coverage rings around point samples to evaluate spatial clustering and sampling bias"
+                  >
+                    <Compass className="w-3.5 h-3.5 text-muted-foreground" />
+                    <span>{showCoverageBuffers ? "1km Bias Rings (Active)" : "1km Bias Rings"}</span>
+                  </button>
+                </div>
 
                 <MapContainer center={[-1.94, 29.87]} zoom={9} style={{ height: "100%", width: "100%" }} scrollWheelZoom>
                   <MapBoundsController bbox={activeBbox} />
@@ -4671,22 +4620,16 @@ export function SampleDigitizationPage() {
                     Live
                   </Badge>
                 </DialogTitle>
-                <DialogDescription className="text-xs text-muted-foreground">
-                  Collaborate with team members, export GIS training layers, and download desktop GIS cartographic styles.
-                </DialogDescription>
               </div>
             </div>
           </DialogHeader>
 
-          <div className="space-y-5 py-2">
+          <div className="space-y-4 py-2">
             {/* 1. Shareable Session URL */}
-            <div className="p-3.5 rounded-lg bg-muted/30 border border-border/60 space-y-2">
-              <Label className="text-xs font-medium flex items-center justify-between text-foreground">
-                <span className="flex items-center gap-1.5">
-                  <LinkIcon className="w-3.5 h-3.5 text-muted-foreground" />
-                  Direct Session Link
-                </span>
-                <span className="text-[10px] text-muted-foreground">Instant collaboration</span>
+            <div className="p-3 rounded-lg bg-muted/30 border border-border/60 space-y-2">
+              <Label className="text-xs font-medium flex items-center gap-1.5 text-foreground">
+                <LinkIcon className="w-3.5 h-3.5 text-muted-foreground" />
+                Direct Session Link
               </Label>
               <div className="flex items-center gap-2">
                 <Input
@@ -4706,7 +4649,7 @@ export function SampleDigitizationPage() {
             </div>
 
             {/* 2. Standard Vector GIS Formats */}
-            <div className="space-y-2.5">
+            <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label className="text-xs font-medium text-foreground flex items-center gap-1.5">
                   <Download className="w-3.5 h-3.5 text-muted-foreground" />
@@ -4719,22 +4662,17 @@ export function SampleDigitizationPage() {
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                 {/* ESRI Shapefile */}
-                <div className="p-3 rounded-lg border border-border/60 bg-card/60 hover:border-border transition-colors flex flex-col justify-between space-y-2">
-                  <div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-medium text-foreground">Shapefile (.zip)</span>
-                      <Badge variant="outline" className="text-[9px] font-mono border-border/60 text-muted-foreground">ESRI</Badge>
-                    </div>
-                    <p className="text-[11px] text-muted-foreground mt-1">
-                      Complete package (.shp, .shx, .dbf, .prj) ready for ArcGIS &amp; QGIS.
-                    </p>
+                <div className="p-3 rounded-lg border border-border/60 bg-card/60 hover:border-border transition-colors flex flex-col justify-between gap-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-foreground">Shapefile (.zip)</span>
+                    <Badge variant="outline" className="text-[9px] font-mono border-border/60 text-muted-foreground">ESRI</Badge>
                   </div>
                   <Button
                     size="sm"
                     variant="outline"
                     onClick={downloadShapefile}
                     disabled={allCombinedSamples.length === 0}
-                    className="w-full h-7 text-xs font-medium gap-1.5 border-border/60 hover:bg-muted text-foreground"
+                    className="w-full h-8 text-xs font-medium gap-1.5 border-border/60 hover:bg-muted text-foreground"
                   >
                     <Download className="w-3 h-3" />
                     Download .zip
@@ -4742,22 +4680,17 @@ export function SampleDigitizationPage() {
                 </div>
 
                 {/* GeoJSON */}
-                <div className="p-3 rounded-lg border border-border/60 bg-card/60 hover:border-border transition-colors flex flex-col justify-between space-y-2">
-                  <div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-medium text-foreground">GeoJSON</span>
-                      <Badge variant="outline" className="text-[9px] font-mono border-border/60 text-muted-foreground">RFC 7946</Badge>
-                    </div>
-                    <p className="text-[11px] text-muted-foreground mt-1">
-                      Standard web-GIS format with geometries &amp; class attributes.
-                    </p>
+                <div className="p-3 rounded-lg border border-border/60 bg-card/60 hover:border-border transition-colors flex flex-col justify-between gap-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-foreground">GeoJSON</span>
+                    <Badge variant="outline" className="text-[9px] font-mono border-border/60 text-muted-foreground">RFC 7946</Badge>
                   </div>
                   <Button
                     size="sm"
                     variant="outline"
                     onClick={downloadGeoJSON}
                     disabled={allCombinedSamples.length === 0}
-                    className="w-full h-7 text-xs font-medium gap-1.5 border-border/60 hover:bg-muted text-foreground"
+                    className="w-full h-8 text-xs font-medium gap-1.5 border-border/60 hover:bg-muted text-foreground"
                   >
                     <Download className="w-3 h-3" />
                     Download .geojson
@@ -4765,22 +4698,17 @@ export function SampleDigitizationPage() {
                 </div>
 
                 {/* CSV Table */}
-                <div className="p-3 rounded-lg border border-border/60 bg-card/60 hover:border-border transition-colors flex flex-col justify-between space-y-2">
-                  <div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-medium text-foreground">CSV Spreadsheet</span>
-                      <Badge variant="outline" className="text-[9px] font-mono border-border/60 text-muted-foreground">Tabular</Badge>
-                    </div>
-                    <p className="text-[11px] text-muted-foreground mt-1">
-                      Tabular format for Excel, R, pandas, or custom ML pipelines.
-                    </p>
+                <div className="p-3 rounded-lg border border-border/60 bg-card/60 hover:border-border transition-colors flex flex-col justify-between gap-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-foreground">CSV Spreadsheet</span>
+                    <Badge variant="outline" className="text-[9px] font-mono border-border/60 text-muted-foreground">Tabular</Badge>
                   </div>
                   <Button
                     size="sm"
                     variant="outline"
                     onClick={downloadCSV}
                     disabled={allCombinedSamples.length === 0}
-                    className="w-full h-7 text-xs font-medium gap-1.5 border-border/60 hover:bg-muted text-foreground"
+                    className="w-full h-8 text-xs font-medium gap-1.5 border-border/60 hover:bg-muted text-foreground"
                   >
                     <Download className="w-3 h-3" />
                     Download .csv
@@ -4790,24 +4718,21 @@ export function SampleDigitizationPage() {
             </div>
 
             {/* 3. Cartography & Desktop GIS Package */}
-            <div className="space-y-2.5">
-              <Label className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                <Palette className="w-3.5 h-3.5 text-primary" />
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                <Palette className="w-3.5 h-3.5 text-foreground" />
                 Cartographic Symbology &amp; QGIS Styles
               </Label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 {/* QGIS Style .qml */}
-                <div className="p-3 rounded-lg border border-border bg-card/60 flex items-center justify-between gap-3">
-                  <div>
-                    <span className="text-xs font-bold text-foreground block">QGIS Palette Style (.qml)</span>
-                    <span className="text-[11px] text-muted-foreground">XML color map for QGIS layer styling</span>
-                  </div>
+                <div className="p-3 rounded-lg border border-border/60 bg-card/60 flex items-center justify-between gap-3">
+                  <span className="text-xs font-medium text-foreground">QGIS Palette Style (.qml)</span>
                   <Button
                     size="sm"
                     variant="outline"
                     onClick={downloadQMLStyle}
                     disabled={allCombinedSamples.length === 0 && !classifyResult}
-                    className="h-7 text-xs font-semibold gap-1.5 border-primary/30 text-primary hover:bg-primary/10 shrink-0"
+                    className="h-8 text-xs font-medium gap-1.5 border-border/60 hover:bg-muted text-foreground shrink-0"
                   >
                     <Download className="w-3 h-3" />
                     Export .qml
@@ -4815,13 +4740,8 @@ export function SampleDigitizationPage() {
                 </div>
 
                 {/* Classified GeoTIFF (if available) */}
-                <div className="p-3 rounded-lg border border-border bg-card/60 flex items-center justify-between gap-3">
-                  <div>
-                    <span className="text-xs font-bold text-foreground block">Classified GeoTIFF Raster</span>
-                    <span className="text-[11px] text-muted-foreground">
-                      {classifyResult?.download_url ? "Ready for download" : "Run ML Classifier first"}
-                    </span>
-                  </div>
+                <div className="p-3 rounded-lg border border-border/60 bg-card/60 flex items-center justify-between gap-3">
+                  <span className="text-xs font-medium text-foreground">Classified GeoTIFF Raster</span>
                   <Button
                     size="sm"
                     variant="outline"
@@ -4831,7 +4751,7 @@ export function SampleDigitizationPage() {
                       }
                     }}
                     disabled={!classifyResult?.download_url}
-                    className="h-7 text-xs font-semibold gap-1.5 border-primary/30 text-primary hover:bg-primary/10 shrink-0"
+                    className="h-8 text-xs font-medium gap-1.5 border-border/60 hover:bg-muted text-foreground shrink-0"
                   >
                     <Download className="w-3 h-3" />
                     GeoTIFF
@@ -4866,14 +4786,11 @@ export function SampleDigitizationPage() {
               <MapPin className="w-4 h-4 text-sky-400" />
               Define &amp; Select Study Area (AOI)
             </DialogTitle>
-            <DialogDescription className="text-xs text-muted-foreground">
-              Delineate spatial bounds for sample collection, training dataset extraction, and satellite image inference.
-            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
             {/* Status & Boundary Overview Card */}
-            <div className={`p-3.5 rounded-lg border transition-all ${
+            <div className={`p-3 rounded-lg border transition-all ${
               studyArea 
                 ? "border-emerald-500/30 bg-emerald-500/5 ring-1 ring-emerald-500/10" 
                 : "border-sky-500/30 bg-sky-500/5 ring-1 ring-sky-500/10"
@@ -4885,11 +4802,11 @@ export function SampleDigitizationPage() {
                     <span className="text-xs font-semibold text-foreground block">
                       {studyArea ? "Study Area Boundary Active" : "No Study Area Configured"}
                     </span>
-                    <span className="text-[11px] text-muted-foreground">
-                      {studyArea 
-                        ? `${studyArea.features?.length || 1} feature(s) defined${aoiAreaKm2 ? ` • ~${aoiAreaKm2} km²` : ""}`
-                        : "Required to enable sample digitization and satellite inference."}
-                    </span>
+                    {studyArea && (
+                      <span className="text-[11px] text-muted-foreground">
+                        {studyArea.features?.length || 1} feature(s) defined{aoiAreaKm2 ? ` • ~${aoiAreaKm2} km²` : ""}
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5">
@@ -4933,14 +4850,9 @@ export function SampleDigitizationPage() {
               <TabsContent value="presets" className="space-y-3 pt-2">
                 {/* 1-Click: Use Map Viewport */}
                 <div className="p-3 rounded-lg border border-border/60 bg-muted/20 hover:bg-muted/30 transition-all flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <div className="flex items-center gap-1.5">
-                      <Maximize2 className="w-3.5 h-3.5 text-sky-400" />
-                      <span className="text-xs font-semibold text-foreground">Current Map Viewport</span>
-                    </div>
-                    <p className="text-[11px] text-muted-foreground">
-                      Capture bounding box from your current map center and zoom level.
-                    </p>
+                  <div className="flex items-center gap-2">
+                    <Maximize2 className="w-3.5 h-3.5 text-sky-400" />
+                    <span className="text-xs font-semibold text-foreground">Current Map Viewport</span>
                   </div>
                   <Button
                     size="sm"
@@ -4962,20 +4874,15 @@ export function SampleDigitizationPage() {
                       <div
                         key={preset.id}
                         onClick={() => applyStudyAreaPreset(preset)}
-                        className="p-2.5 rounded-lg border border-border/60 bg-muted/15 hover:bg-muted/30 hover:border-sky-500/50 cursor-pointer transition-all group flex flex-col justify-between"
+                        className="p-2.5 rounded-lg border border-border/60 bg-muted/15 hover:bg-muted/30 hover:border-sky-500/50 cursor-pointer transition-all group flex flex-col justify-between gap-2"
                       >
-                        <div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs font-semibold text-foreground group-hover:text-sky-300 transition-colors">
-                              {preset.name}
-                            </span>
-                            <ChevronRight className="w-3.5 h-3.5 text-muted-foreground group-hover:text-sky-400 group-hover:translate-x-0.5 transition-all" />
-                          </div>
-                          <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-2">
-                            {preset.desc}
-                          </p>
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-foreground group-hover:text-sky-300 transition-colors">
+                            {preset.name}
+                          </span>
+                          <ChevronRight className="w-3.5 h-3.5 text-muted-foreground group-hover:text-sky-400 group-hover:translate-x-0.5 transition-all" />
                         </div>
-                        <div className="mt-2 flex items-center justify-between text-[10px] text-muted-foreground/80 font-mono">
+                        <div className="flex items-center justify-between text-[10px] text-muted-foreground/80 font-mono">
                           <span>[{preset.bbox[0]}, {preset.bbox[1]}]</span>
                           <span className="text-sky-400 font-sans font-medium text-[10px]">Select &rarr;</span>
                         </div>
@@ -4991,23 +4898,20 @@ export function SampleDigitizationPage() {
                   {/* Option A: Box (Rectangle) */}
                   <div
                     onClick={() => startAoiDrawing("rectangle")}
-                    className="p-3.5 rounded-lg border border-border/60 bg-muted/20 hover:bg-muted/30 hover:border-sky-500/60 transition-all cursor-pointer group flex flex-col justify-between space-y-3"
+                    className="p-3.5 rounded-lg border border-border/60 bg-muted/20 hover:bg-muted/30 hover:border-sky-500/60 transition-all cursor-pointer group flex flex-col justify-between gap-3"
                   >
-                    <div className="space-y-1">
+                    <div className="flex items-center gap-2">
                       <div className="w-7 h-7 rounded-md bg-sky-500/10 border border-sky-500/30 flex items-center justify-center text-sky-400 group-hover:scale-105 transition-transform">
                         <Square className="w-4 h-4" />
                       </div>
-                      <span className="text-xs font-semibold text-foreground block pt-1">
+                      <span className="text-xs font-semibold text-foreground block">
                         Box (Rectangle AOI)
                       </span>
-                      <p className="text-[11px] text-muted-foreground leading-relaxed">
-                        Recommended for high stability. Click and drag or click two diagonal corners on the map.
-                      </p>
                     </div>
                     <Button
                       size="sm"
                       variant="outline"
-                      className="w-full h-7 text-xs font-medium border-border/60 group-hover:border-sky-500/50 group-hover:text-sky-300"
+                      className="w-full h-8 text-xs font-medium border-border/60 group-hover:border-sky-500/50 group-hover:text-sky-300"
                     >
                       Draw Rectangle Box
                     </Button>
@@ -5016,23 +4920,20 @@ export function SampleDigitizationPage() {
                   {/* Option B: Freeform Polygon */}
                   <div
                     onClick={() => startAoiDrawing("polygon")}
-                    className="p-3.5 rounded-lg border border-border/60 bg-muted/20 hover:bg-muted/30 hover:border-sky-500/60 transition-all cursor-pointer group flex flex-col justify-between space-y-3"
+                    className="p-3.5 rounded-lg border border-border/60 bg-muted/20 hover:bg-muted/30 hover:border-sky-500/60 transition-all cursor-pointer group flex flex-col justify-between gap-3"
                   >
-                    <div className="space-y-1">
+                    <div className="flex items-center gap-2">
                       <div className="w-7 h-7 rounded-md bg-sky-500/10 border border-sky-500/30 flex items-center justify-center text-sky-400 group-hover:scale-105 transition-transform">
                         <MapPin className="w-4 h-4" />
                       </div>
-                      <span className="text-xs font-semibold text-foreground block pt-1">
+                      <span className="text-xs font-semibold text-foreground block">
                         Freeform Polygon AOI
                       </span>
-                      <p className="text-[11px] text-muted-foreground leading-relaxed">
-                        For irregular borders or custom administrative units. Click vertices on map, then click start point to close.
-                      </p>
                     </div>
                     <Button
                       size="sm"
                       variant="outline"
-                      className="w-full h-7 text-xs font-medium border-border/60 group-hover:border-sky-500/50 group-hover:text-sky-300"
+                      className="w-full h-8 text-xs font-medium border-border/60 group-hover:border-sky-500/50 group-hover:text-sky-300"
                     >
                       Draw Freeform Polygon
                     </Button>
@@ -5061,12 +4962,9 @@ export function SampleDigitizationPage() {
                       <p className="text-xs font-semibold text-foreground">
                         Click or drag boundary file to upload
                       </p>
-                      <p className="text-[11px] text-muted-foreground mt-0.5">
-                        Supports <span className="font-mono text-sky-400">.geojson</span>, <span className="font-mono text-sky-400">.json</span>, or zipped Shapefile <span className="font-mono text-sky-400">.zip</span> (.shp, .shx, .dbf)
-                      </p>
                     </div>
                     <Badge variant="outline" className="text-[10px] font-mono border-border/60 text-muted-foreground">
-                      Max file size: 25MB • Standard CRS: WGS84
+                      .geojson • .json • zipped .shp (.zip)
                     </Badge>
                   </div>
                 </div>

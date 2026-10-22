@@ -48,6 +48,7 @@ import { AccountBlockedDialog } from "@/components/AccountBlockedDialog";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { NotificationProvider, useNotifications } from "@/hooks/use-notifications";
 import { GEEAuthGate } from "@/components/GEEAuthGate";
+import { UserNav } from "@/components/UserNav";
 import { GEEProjectConfig } from "@/components/GEEProjectConfig";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -153,49 +154,79 @@ function UserProfile() {
   const { user, logout } = useAuth();
   if (!user) return null;
 
+  const isAdmin = user.role === "admin" || 
+    ["petersonyang8@gmail.com", "pierrendorimana16@gmail.com"].includes(user.email?.toLowerCase());
+
+  const displayName = user.name || user.email.split("@")[0].replace(".", " ").replace(/_/g, " ");
+  const avatarUrl = user.avatarUrl || user.profile_picture;
+  const initials = displayName
+    .split(" ")
+    .map((part) => part[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join("")
+    .toUpperCase() || "U";
+
   return (
-  <div className="pt-4 border-t flex flex-col gap-4">
-    {/* Profile Info */}
-    <div className="flex items-center gap-3 overflow-hidden px-2">
-      <img src={user.avatarUrl} alt="Avatar" className="w-10 h-10 rounded-full bg-slate-800 shrink-0 border border-border" />
-      <div className="overflow-hidden">
-        <p className="text-sm font-bold text-foreground truncate">{user.name}</p>
-        <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+    <div className="pt-3 border-t border-border/60 flex flex-col gap-3">
+      {/* Profile Info Card */}
+      <div className="flex items-center gap-3 overflow-hidden px-2 py-1.5 rounded-xl bg-muted/40 dark:bg-card/40 border border-border/50">
+        <div className="relative shrink-0">
+          <div className="w-9 h-9 rounded-full overflow-hidden bg-gradient-to-br from-emerald-600 via-teal-600 to-cyan-700 flex items-center justify-center text-white text-xs font-bold border border-white/20 shadow-sm">
+            {avatarUrl ? (
+              <img src={avatarUrl} alt={displayName} className="w-full h-full object-cover" />
+            ) : (
+              <span>{initials}</span>
+            )}
+          </div>
+          <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-background" />
+        </div>
+
+        <div className="overflow-hidden flex-1 leading-tight">
+          <div className="flex items-center gap-1.5">
+            <p className="text-xs font-bold text-foreground truncate">{displayName}</p>
+            {isAdmin && (
+              <span className="px-1 py-0.2 text-[8px] font-extrabold uppercase tracking-wider bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25 rounded">
+                Admin
+              </span>
+            )}
+          </div>
+          <p className="text-[10px] text-muted-foreground truncate mt-0.5">{user.email}</p>
+        </div>
+      </div>
+
+      {/* Icon Menu Row */}
+      <div className="flex items-center justify-between px-2 bg-muted/20 py-1 rounded-xl">
+        {/* Notifications */}
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button variant="ghost" size="icon" className="relative text-muted-foreground hover:text-foreground h-8 w-8 rounded-lg" title="Notifications">
+              <Bell className="w-4 h-4" />
+              <NotificationBadge />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-80 p-0" align="start" side="right">
+            <NotificationList />
+          </PopoverContent>
+        </Popover>
+
+        {/* Settings */}
+        <Link href="/settings">
+          <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground h-8 w-8 rounded-lg" title="Settings">
+            <Settings className="w-4 h-4" />
+          </Button>
+        </Link>
+
+        {/* Logout */}
+        <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive h-8 w-8 rounded-lg" onClick={logout} title="Log out">
+          <LogOut className="w-4 h-4" />
+        </Button>
+      </div>
+      
+      <div className="px-1">
+        <GeeUsageIndicator />
       </div>
     </div>
-
-    {/* Icon Menu Row */}
-    <div className="flex items-center justify-around px-2">
-      {/* Notifications */}
-      <Popover>
-        <PopoverTrigger asChild>
-          <Button variant="ghost" size="icon" className="relative text-muted-foreground hover:text-foreground" title="Notifications">
-            <Bell className="w-5 h-5" />
-            <NotificationBadge />
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="w-80 p-0" align="start" side="right">
-          <NotificationList />
-        </PopoverContent>
-      </Popover>
-
-      {/* Settings */}
-      <Link href="/settings">
-        <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-foreground" title="Settings">
-          <Settings className="w-5 h-5" />
-        </Button>
-      </Link>
-
-      {/* Logout */}
-      <Button variant="ghost" size="icon" className="text-muted-foreground hover:text-destructive" onClick={logout} title="Log out">
-        <LogOut className="w-5 h-5" />
-      </Button>
-    </div>
-    
-    <div className="px-2">
-      <GeeUsageIndicator />
-    </div>
-  </div>
   );
 }
 
@@ -503,16 +534,7 @@ function Layout({ children }: { children: React.ReactNode }) {
           <div className="flex items-center gap-2">
             {isFocusedMode && (
               <div className="hidden md:flex items-center gap-2">
-                <ThemeToggle />
-                {user ? (
-                  <UserProfileDropdown />
-                ) : (
-                  <Link href="/auth">
-                    <Button variant="outline" size="sm" className="h-8 text-xs font-semibold">
-                      Sign In
-                    </Button>
-                  </Link>
-                )}
+                <UserNav />
               </div>
             )}
             <Sheet>

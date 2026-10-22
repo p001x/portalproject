@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { Link } from "wouter";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { UserNav } from "@/components/UserNav";
 import { ArrowRight, ArrowLeft, Search, Star, Database } from "lucide-react";
 import { SiteBrand } from "@/components/SiteBrand";
 import { agriWaterModules, riskDisasterModules, urbanEnvModules, coreSpatialModules } from "@/config/modules";
@@ -110,21 +111,17 @@ export function AnalysisHubPage() {
           {/* Subtle accent bar on hover */}
           <div className={`absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-primary/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300`} />
 
-          {/* Top Row: Status badge / Category tag + Actions */}
+          {/* Top Row: Optional status + Actions */}
           <div className="flex items-center justify-between mb-4 relative z-10">
-            <div className="flex items-center gap-2">
+            <div>
               {module.status ? (
-                <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full z-20 shadow-sm
+                <span className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full z-20 shadow-xs
                   ${module.status === 'NEW' ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30' : 
                     module.status === 'BETA' ? 'bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30' : 
                     'bg-purple-500/15 text-purple-600 dark:text-purple-400 border border-purple-500/30'}`}>
                   {module.status}
                 </span>
-              ) : (
-                <span className={`text-[10px] font-semibold tracking-wide uppercase px-2.5 py-0.5 rounded-md ${colors.bg} ${colors.text} border ${colors.border}`}>
-                  Analytics
-                </span>
-              )}
+              ) : null}
             </div>
             
             <div className="flex items-center gap-1.5">
@@ -179,7 +176,10 @@ export function AnalysisHubPage() {
             </Link>
           </div>
         </div>
-        <ThemeToggle />
+        <div className="flex items-center gap-3">
+          <ThemeToggle />
+          <UserNav />
+        </div>
       </header>
 
       {/* Main Content */}

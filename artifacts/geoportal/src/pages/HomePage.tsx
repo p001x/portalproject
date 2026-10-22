@@ -1,117 +1,91 @@
-import { useState } from "react";
-import { Link } from "wouter";
-import { ThemeToggle } from "@/components/ThemeToggle";
+import { Link, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
-import { ArrowRight, Globe2, Layers, Map, Bell, Settings, LogOut, Menu } from "lucide-react";
+import { ArrowRight, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { useNotifications } from "@/hooks/use-notifications";
-import { NotificationList } from "@/App";
 import { SiteBrand, SiteLogoOnly } from "@/components/SiteBrand";
+import { UserNav } from "@/components/UserNav";
 
 export function HomePage() {
-  const { user, logout } = useAuth();
-  const { unreadCount } = useNotifications();
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const { user } = useAuth();
+  const [loc] = useLocation();
   
   return (
     <div className="min-h-screen bg-background flex flex-col relative overflow-hidden">
       {/* Background aesthetic */}
       <div className="absolute inset-0 z-0 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-emerald-500/10 via-background to-background pointer-events-none" />
+      <div className="absolute top-0 -left-40 w-96 h-96 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none" />
 
-      {/* Header */}
-      <header className="relative z-10 px-6 py-6 flex justify-between items-start">
-        <div className="flex flex-col gap-6">
-          <SiteBrand size="normal" hideSubtitleOnMobile />
-          
-          {user && (
-            <div className="relative flex flex-col items-start gap-4 ml-2 mt-2">
-              <Button variant="ghost" onClick={() => setIsMenuOpen(!isMenuOpen)} className="p-3 text-muted-foreground hover:text-foreground transition-colors" title={isMenuOpen ? "Fold Menu" : "Unfold Menu"} aria-label={isMenuOpen ? "Close menu" : "Open menu"}>
-                <Menu className="w-12 h-12" />
-              </Button>
-              
-              {isMenuOpen && (
-                <div className="absolute top-12 left-0 flex flex-col items-start gap-6 animate-in fade-in slide-in-from-top-2 duration-300 bg-background/95 backdrop-blur-sm p-6 rounded-xl border shadow-xl z-50 min-w-[240px]">
-              <div className="flex items-center gap-4">
-                <ThemeToggle />
-                <span className="text-base font-semibold text-muted-foreground">Theme</span>
-              </div>
-              
-              <Popover>
-                <PopoverTrigger asChild>
-                  <div className="flex items-center gap-4 cursor-pointer group">
-                    <Button variant="ghost" size="icon" className="relative text-muted-foreground group-hover:text-foreground pointer-events-none scale-110" aria-label="Notifications">
-                      <Bell className="w-6 h-6" />
-                      {unreadCount > 0 && (
-                        <span className="absolute top-0 right-0 flex h-3 w-3 items-center justify-center rounded-full bg-red-500 ring-2 ring-background"></span>
-                      )}
-                    </Button>
-                    <span className="text-base font-semibold text-muted-foreground group-hover:text-foreground transition-colors">Notifications</span>
-                  </div>
-                </PopoverTrigger>
-                <PopoverContent className="w-80 p-0" align="start">
-                  <NotificationList />
-                </PopoverContent>
-              </Popover>
-
-              <Link href="/settings">
-                <div className="flex items-center gap-4 cursor-pointer group">
-                  <Button variant="ghost" size="icon" className="text-muted-foreground group-hover:text-foreground pointer-events-none scale-110" title="Settings" aria-label="Settings">
-                    <Settings className="w-6 h-6" />
-                  </Button>
-                  <span className="text-base font-semibold text-muted-foreground group-hover:text-foreground transition-colors">Settings</span>
-                </div>
-              </Link>
-
-              <div className="flex items-center gap-4 cursor-pointer group" onClick={logout}>
-                <Button variant="ghost" size="icon" className="text-muted-foreground group-hover:text-destructive pointer-events-none scale-110" title="Log out" aria-label="Log out">
-                  <LogOut className="w-6 h-6" />
-                </Button>
-                <span className="text-base font-semibold text-muted-foreground group-hover:text-destructive transition-colors">Log out</span>
-              </div>
-
-              </div>
-              )}
-            </div>
-          )}
-        </div>
-
+      {/* Unified Premium Header */}
+      <header className="relative z-20 px-6 py-4 flex justify-between items-center border-b border-border/40 bg-background/60 backdrop-blur-xl sticky top-0">
         <div className="flex items-center gap-8">
+          <SiteBrand size="normal" hideSubtitleOnMobile />
+
           {/* Navigation Links */}
-          <nav className="hidden md:flex items-center gap-6">
+          <nav className="hidden md:flex items-center gap-1 bg-muted/30 dark:bg-muted/20 p-1 rounded-full border border-border/50">
             <Link href="/">
-              <span className="text-sm font-bold text-foreground cursor-pointer hover:text-emerald-500 transition-colors">Home</span>
+              <span className={`text-xs font-bold px-3.5 py-1.5 rounded-full transition-all cursor-pointer ${
+                loc === "/" 
+                  ? "bg-background text-foreground shadow-sm" 
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
+              }`}>
+                Home
+              </span>
+            </Link>
+            <Link href="/platform">
+              <span className={`text-xs font-bold px-3.5 py-1.5 rounded-full transition-all cursor-pointer ${
+                loc === "/platform" 
+                  ? "bg-background text-foreground shadow-sm" 
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
+              }`}>
+                Platform
+              </span>
             </Link>
             <Link href="/about">
-              <span className="text-sm font-bold text-muted-foreground cursor-pointer hover:text-foreground transition-colors">About</span>
+              <span className={`text-xs font-bold px-3.5 py-1.5 rounded-full transition-all cursor-pointer ${
+                loc === "/about" 
+                  ? "bg-background text-foreground shadow-sm" 
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
+              }`}>
+                About
+              </span>
             </Link>
             <Link href="/services">
-              <span className="text-sm font-bold text-muted-foreground cursor-pointer hover:text-foreground transition-colors">Services</span>
+              <span className={`text-xs font-bold px-3.5 py-1.5 rounded-full transition-all cursor-pointer ${
+                loc === "/services" 
+                  ? "bg-background text-foreground shadow-sm" 
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
+              }`}>
+                Services
+              </span>
             </Link>
             <Link href="/contact">
-              <span className="text-sm font-bold text-muted-foreground cursor-pointer hover:text-foreground transition-colors">Contact</span>
+              <span className={`text-xs font-bold px-3.5 py-1.5 rounded-full transition-all cursor-pointer ${
+                loc === "/contact" 
+                  ? "bg-background text-foreground shadow-sm" 
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
+              }`}>
+                Contact
+              </span>
             </Link>
           </nav>
+        </div>
 
-          <div className="flex items-center gap-4">
-            {!user ? (
-              <>
-                <ThemeToggle />
-                <Link href="/about">
-                  <Button variant="outline">Learn More</Button>
-              </Link>
-              <Link href="/auth">
-                <Button>Sign In</Button>
-              </Link>
-            </>
-          ) : (
-            <Link href="/platform">
-              <Button className="gap-2 bg-emerald-500 text-white hover:bg-emerald-600 shadow-md shadow-emerald-500/10">
-                Open Platform <ArrowRight className="w-4 h-4" />
+        {/* Right Header: Open Platform + Always Visible User Profile / Auth Nav */}
+        <div className="flex items-center gap-3">
+          {user && (
+            <Link href="/platform" className="hidden lg:inline-flex">
+              <Button 
+                size="sm" 
+                className="gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-semibold text-xs rounded-xl shadow-sm hover:shadow-emerald-500/20 px-3.5 h-9"
+              >
+                <span>Launch Hub</span>
+                <ArrowRight className="w-3.5 h-3.5" />
               </Button>
             </Link>
           )}
-          </div>
+
+          {/* User Nav (Avatar + Name Pill + Notifications Bell) */}
+          <UserNav />
         </div>
       </header>
 

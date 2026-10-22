@@ -1721,27 +1721,11 @@ def flask_auth_login():
     try:
         user = verify_user(email, password)
         if not user:
-            # Check if user exists in DB
             existing = auth_db.get_user_by_email(email)
             if not existing:
-                # User doesn't exist yet - auto-create account
-                try:
-                    role = "admin" if email in ["petersonyang8@gmail.com", "pierrendorimana16@gmail.com"] else "user"
-                    user = create_new_user(email.split("@")[0].replace(".", " ").title(), email, password)
-                except Exception as ex:
-                    logger.warning("Could not auto-create user: %s", ex)
-            elif email in ["petersonyang8@gmail.com", "pierrendorimana16@gmail.com"]:
-                # If it's the admin and password differed from stored hash, sync to new password
-                try:
-                    import bcrypt
-                    password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-                    auth_db.update_user_password(email, password_hash)
-                    user = auth_db.get_user_by_email(email)
-                except Exception as ex:
-                    logger.warning("Could not update admin password: %s", ex)
-
-            if not user:
-                return jsonify({"detail": "Invalid email or password"}), 401
+                return jsonify({"detail": "No account found with this email. Please register first."}), 401
+            else:
+                return jsonify({"detail": "Incorrect password. If you forgot your password, please reset it."}), 401
 
         user_dict = {
             "id": str(user.get("id") or user.get("email")),

@@ -59,8 +59,8 @@ def _get_jwt_secret() -> str:
 # ── Password Validation ──────────────────────────────────────────────────────
 
 def validate_password(password: str) -> bool:
-    """Validate password strength: min 6 chars."""
-    if len(password) < 6:
+    """Validate password strength: min 8 chars."""
+    if not password or len(password.strip()) < 8:
         return False
     return True
 
@@ -113,26 +113,27 @@ def verify_user(email: str, password: str) -> Optional[dict]:
 def create_new_user(name: str, email: str, password: str) -> dict:
     """Creates a new user. Raises ValueError if validation fails."""
     if not validate_password(password):
-        raise ValueError("Password must be at least 6 characters.")
+        raise ValueError("Password must be at least 8 characters long.")
 
-    existing = auth_db.get_user_by_email(email)
+    email_clean = email.strip().lower()
+    existing = auth_db.get_user_by_email(email_clean)
     password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
     role = "user"
-    if email.lower() in ["petersonyang8@gmail.com", "pierrendorimana16@gmail.com"]:
+    if email_clean in ["petersonyang8@gmail.com", "pierrendorimana16@gmail.com"]:
         role = "admin"
 
     if existing:
         if not existing.get("password_hash"):
             # Account was created via Google or OTP, allow setting a password
-            auth_db.update_user_password(email, password_hash)
+            auth_db.update_user_password(email_clean, password_hash)
             # Update name if provided
-            auth_db.update_user_name(email, name)
+            auth_db.update_user_name(email_clean, name)
         else:
-            raise ValueError("Email already registered.")
+            raise ValueError("Email already registered. Please log in or reset your password.")
     else:
-        auth_db.create_user(name, email, password_hash, role)
+        auth_db.create_user(name, email_clean, password_hash, role)
 
-    new_user = auth_db.get_user_by_email(email)
+    new_user = auth_db.get_user_by_email(email_clean)
     return {
         "id": new_user["id"],
         "name": new_user["name"],
@@ -230,52 +231,70 @@ def get_current_user(request: Request) -> dict:
         "email": email,
         "name": payload.get("name", (db_user["name"] if db_user else email.split("@")[0])),
         "role": role,
+        "profile_picture": db_user.get("profile_picture") if db_user else None,
         "is_guest": False,
     }
 
 
 def generate_reset_token(email: str) -> str:
-    """Generate a password reset token for the given email."""
-    user = auth_db.get_user_by_email(email)
+    """Generate a password reset token for the given email (valid for 30 minutes)."""
+    email_clean = email.strip().lower()
+    user = auth_db.get_user_by_email(email_clean)
     if not user:
         raise ValueError("User not found.")
     
     token = secrets.token_urlsafe(32)
-    expiry = datetime.now(timezone.utc) + timedelta(minutes=5)
+    expiry = datetime.now(timezone.utc) + timedelta(minutes=30)
     
-    auth_db.set_reset_token(email, token, expiry.isoformat())
+    auth_db.set_reset_token(email_clean, token, expiry.isoformat())
     return token
 
 
 def reset_password_with_token(token: str, new_password: str) -> bool:
     """Reset password using a token."""
-    user = auth_db.get_user_by_reset_token(token)
+    if not token or not token.strip():
+        raise ValueError("Invalid reset token.")
+
+    user = auth_db.get_user_by_reset_token(token.strip())
     if not user:
-        raise ValueError("Invalid reset token. Please ensure you clicked the most recent link sent to your email, and that you are using the local version of the app, not the live website.")
+        raise ValueError("Invalid or expired reset token. Please request a new password reset link.")
     
-    expiry = datetime.fromisoformat(user["reset_token_expiry"])
-    if datetime.now(timezone.utc) > expiry:
-        raise ValueError("Reset token has expired.")
+    if not user.get("reset_token_expiry"):
+        raise ValueError("This reset link has already been used or is no longer valid.")
+
+    try:
+        expiry = datetime.fromisoformat(user["reset_token_expiry"])
+        if datetime.now(timezone.utc) > expiry:
+            raise ValueError("Reset token has expired (valid for 30 minutes). Please request a new password reset link.")
+    except Exception:
+        raise ValueError("Invalid token expiration. Please request a new password reset link.")
     
     if not validate_password(new_password):
-        raise ValueError("Password must be 8-15 characters long and contain uppercase, lowercase, and numbers.")
+        raise ValueError("Password must be at least 8 characters long.")
     
     password_hash = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
     auth_db.update_user_password(user["email"], password_hash)
+    logger.info(f"Password successfully reset for user: {user['email']}")
     return True
 
 def change_user_password(email: str, old_password: str, new_password: str) -> bool:
     """Change a user's password after verifying the old password."""
-    user = auth_db.get_user_by_email(email)
+    email_clean = email.strip().lower()
+    user = auth_db.get_user_by_email(email_clean)
     if not user:
         raise ValueError("User not found.")
         
-    if not bcrypt.checkpw(old_password.encode('utf-8'), user["password_hash"].encode('utf-8')):
+    raw_hash = user.get("password_hash")
+    if not raw_hash:
+        raise ValueError("No password set on this account. Please use password reset.")
+
+    raw_hash_bytes = raw_hash.encode('utf-8') if isinstance(raw_hash, str) else raw_hash
+    if not bcrypt.checkpw(old_password.encode('utf-8'), raw_hash_bytes):
         raise ValueError("Incorrect current password.")
         
     if not validate_password(new_password):
-        raise ValueError("New password must be 8-15 characters long and contain uppercase, lowercase, and numbers.")
+        raise ValueError("New password must be at least 8 characters long.")
         
     password_hash = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-    auth_db.update_user_password(email, password_hash)
+    auth_db.update_user_password(email_clean, password_hash)
     return True

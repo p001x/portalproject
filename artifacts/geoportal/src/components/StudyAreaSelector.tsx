@@ -15,7 +15,6 @@ import {
   FileCheck2, 
   Trash2, 
   Sparkles, 
-  ShieldCheck, 
   FileCode2, 
   AlertCircle 
 } from "lucide-react";
@@ -286,9 +285,6 @@ export function StudyAreaSelector({ value, onChange }: StudyAreaSelectorProps) {
       <div className="flex items-center justify-between">
         <Label className="text-sm font-semibold flex items-center gap-1.5">
           Study Area
-          <span className="text-[10px] font-normal text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded-full inline-flex items-center gap-1">
-            <ShieldCheck className="w-2.5 h-2.5" /> Isolated & Permanent Cache
-          </span>
         </Label>
       </div>
 
@@ -483,9 +479,6 @@ export function StudyAreaSelector({ value, onChange }: StudyAreaSelectorProps) {
                     {featureCount} feature{featureCount > 1 ? "s" : ""}
                   </span>
                 )}
-                <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
-                  <Sparkles className="w-3 h-3" /> Permanent Cache Ready
-                </span>
               </div>
             </div>
           )}
@@ -554,10 +547,6 @@ export function StudyAreaSelector({ value, onChange }: StudyAreaSelectorProps) {
               <span>{uploadError}</span>
             </div>
           )}
-
-          <div className="text-[11px] text-muted-foreground/80 leading-relaxed bg-muted/10 p-2 rounded border border-border/50">
-            <strong>Permanent Caching Guarantee:</strong> When an analysis is executed for any study area, results are permanently stored in an isolated module corridor. Revisiting or re-running that study area returns immediately without reprocessing.
-          </div>
         </TabsContent>
       </Tabs>
     </div>

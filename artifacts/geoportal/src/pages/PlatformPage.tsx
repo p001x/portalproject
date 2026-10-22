@@ -53,15 +53,37 @@ const MODULES = [
   }
 ];
 
+import { UserNav } from "@/components/UserNav";
+
 export function PlatformPage() {
   const { user } = useAuth();
 
   return (
     <div className="min-h-screen bg-background flex flex-col selection:bg-primary/20">
       {/* Header */}
-      <header className="bg-card/80 backdrop-blur-md border-b border-border/80 px-8 py-4 flex items-center justify-between sticky top-0 z-50">
-        <SiteBrand size="normal" hideSubtitleOnMobile />
-        <ThemeToggle />
+      <header className="bg-card/80 backdrop-blur-md border-b border-border/80 px-6 py-4 flex items-center justify-between sticky top-0 z-50">
+        <div className="flex items-center gap-8">
+          <SiteBrand size="normal" hideSubtitleOnMobile />
+          
+          <nav className="hidden md:flex items-center gap-6">
+            <Link href="/">
+              <span className="text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer">Home</span>
+            </Link>
+            <Link href="/about">
+              <span className="text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer">About</span>
+            </Link>
+            <Link href="/services">
+              <span className="text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer">Services</span>
+            </Link>
+            <Link href="/contact">
+              <span className="text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer">Contact</span>
+            </Link>
+          </nav>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <UserNav />
+        </div>
       </header>
 
       {/* Main Content */}

@@ -41,7 +41,7 @@ def send_reset_email(to_email: str, reset_link: str, user_name: str = "Valued Us
         msg["From"] = smtp_user
         msg["To"] = to_email
 
-        text = f"Hello {user_name},\n\nYou requested a password reset for your SPETRO Geo-Analysis Portal account. Please click the link below to securely reset your password. This link is valid for 5 minutes.\n\n{reset_link}\n\nIf you did not request this, please ignore this email and your password will remain unchanged.\n\nBest regards,\nThe SPETRO Team"
+        text = f"Hello {user_name},\n\nYou requested a password reset for your SPETRO Geo-Analysis Portal account. Please click the link below to securely reset your password. This link is valid for 30 minutes.\n\n{reset_link}\n\nIf you did not request this, please ignore this email and your password will remain unchanged.\n\nBest regards,\nThe SPETRO Team"
         html = f"""
         <!DOCTYPE html>
         <html>
@@ -71,7 +71,7 @@ def send_reset_email(to_email: str, reset_link: str, user_name: str = "Valued Us
             <div class="content">
               <h2 class="greeting">Hello {user_name},</h2>
               <p>We received a request to reset the password associated with your SPETRO account (<strong>{to_email}</strong>).</p>
-              <p>For your security, this request is highly time-sensitive. Please click the button below within the next <strong>5 minutes</strong> to choose a new password.</p>
+              <p>For your security, this request is time-sensitive. Please click the button below within the next <strong>30 minutes</strong> to choose a new password.</p>
               
               <div class="button-container">
                 <a href="{reset_link}" class="button">Securely Reset Password</a>

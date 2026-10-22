@@ -2,6 +2,7 @@ import { Link } from "wouter";
 import { ArrowLeft, Mail, MapPin, Phone, MessageSquare, Send } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
+import { UserNav } from "@/components/UserNav";
 
 export function ContactPage() {
   return (
@@ -22,7 +23,9 @@ export function ContactPage() {
             </div>
           </div>
         </div>
-        <ThemeToggle />
+        <div className="flex items-center gap-3">
+          <UserNav />
+        </div>
       </header>
 
       {/* Main Content */}

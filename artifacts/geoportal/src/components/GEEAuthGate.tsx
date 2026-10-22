@@ -8,7 +8,6 @@ import { Badge } from "@/components/ui/badge";
 import {
   Shield,
   LogIn,
-  LogOut,
   Loader2,
   AlertCircle,
   CheckCircle2,
@@ -306,40 +305,8 @@ export function GEEAuthGate({ children }: GEEAuthGateProps) {
     );
   }
 
-  // Authenticated — render children with auth status bar
-  return (
-    <div className="h-full flex flex-col">
-      {/* Auth status bar - Sleek Minimalist */}
-      <div className="shrink-0 px-6 py-1.5 bg-muted/30 border-b border-border/50 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
-          <span className="text-[11px] font-medium text-foreground/85 tracking-tight">
-            GEE Authenticated
-          </span>
-          <span className="text-[10px] font-mono px-2 py-0.5 bg-muted/60 text-muted-foreground border border-border/50 rounded">
-            {email}
-          </span>
-          {projectName && (
-            <span className="text-[10px] font-mono px-2 py-0.5 bg-muted/40 text-muted-foreground/80 border border-border/30 rounded ml-1">
-              Project: {projectName}
-            </span>
-          )}
-        </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={handleLogout}
-          className="h-6 px-2 text-[11px] text-muted-foreground hover:text-foreground gap-1 transition-colors"
-        >
-          <LogOut className="w-3 h-3" />
-          Sign Out
-        </Button>
-      </div>
-
-      {/* Main content */}
-      <div className="flex-1 overflow-hidden">{children}</div>
-    </div>
-  );
+  // Authenticated — render children directly without extra header bar
+  return <>{children}</>;
 }
 
 

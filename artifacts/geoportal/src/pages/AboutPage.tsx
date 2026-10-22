@@ -1,6 +1,7 @@
 import { Link } from "wouter";
 import { ArrowLeft, Globe, Map, Zap, Target, BookOpen, Shield, Users, Mail, Linkedin, Leaf, Eye, BarChart } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { UserNav } from "@/components/UserNav";
 
 export function AboutPage() {
   return (
@@ -21,7 +22,9 @@ export function AboutPage() {
             </div>
           </div>
         </div>
-        <ThemeToggle />
+        <div className="flex items-center gap-3">
+          <UserNav />
+        </div>
       </header>
 
       {/* Main Content */}
