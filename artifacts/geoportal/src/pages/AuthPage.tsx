@@ -39,6 +39,16 @@ export function AuthPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
+  const [isAdminMode, setIsAdminMode] = useState(false);
+
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("admin") === "true" || params.get("admin") === "1" || params.get("role") === "admin") {
+        setIsAdminMode(true);
+      }
+    } catch (e) {}
+  }, []);
   
   const { login, register, loginWithGoogle, requestOtp, forgotPassword, isLoading } = useAuth();
   const [error, setError] = useState<string | null>(null);
@@ -72,8 +82,10 @@ export function AuthPage() {
     }
   };
 
-  // Load and manage Google Identity Services
+  // Load and manage Google Identity Services (only when admin mode is active)
   useEffect(() => {
+    if (!isAdminMode) return;
+
     let script = document.getElementById("google-gsi-client") as HTMLScriptElement | null;
     if (!script) {
       script = document.createElement("script");
@@ -116,7 +128,7 @@ export function AuthPage() {
     } else {
       script.onload = initGoogleBtn;
     }
-  }, [loginWithGoogle, resolvedTheme, mode, step]);
+  }, [loginWithGoogle, resolvedTheme, mode, step, isAdminMode]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -584,13 +596,13 @@ export function AuthPage() {
             )}
           </div>
 
-          {/* Divider & Google OAuth Section */}
-          {step !== "otp" && mode !== "forgot" && (
+          {/* Divider & Google OAuth Section - Hidden from regular users, visible ONLY for admins */}
+          {isAdminMode && step !== "otp" && mode !== "forgot" && (
             <div className="mt-6 pt-5 border-t border-border/60">
               <div className="relative flex py-1 items-center mb-4">
                 <div className="flex-grow border-t border-border/60"></div>
-                <span className="shrink-0 px-3 text-[11px] font-bold uppercase tracking-wider text-muted-foreground/70">
-                  Or continue with
+                <span className="shrink-0 px-3 text-[11px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">
+                  Admin Sign In with Google
                 </span>
                 <div className="flex-grow border-t border-border/60"></div>
               </div>
@@ -602,10 +614,25 @@ export function AuthPage() {
             </div>
           )}
 
-          {/* Platform Security Badge */}
-          <div className="mt-7 pt-4 border-t border-border/40 flex items-center justify-center gap-2 text-[11px] text-muted-foreground/80 font-medium">
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-            <span>Protected by Google Earth Engine & SPETRO Shield</span>
+          {/* Platform Security Badge & Subtle Admin Access Link */}
+          <div className="mt-7 pt-4 border-t border-border/40 flex flex-col items-center justify-center gap-1.5 text-[11px] text-muted-foreground/80 font-medium">
+            <div 
+              onClick={() => setIsAdminMode(!isAdminMode)}
+              className="flex items-center gap-1.5 cursor-pointer hover:text-foreground transition-colors select-none"
+              title={isAdminMode ? "Click to exit admin mode" : "Admin portal access"}
+            >
+              <ShieldCheck className={`w-3.5 h-3.5 ${isAdminMode ? "text-amber-500" : "text-emerald-500"}`} />
+              <span>{isAdminMode ? "Admin Gateway Active" : "Protected by Google Earth Engine & SPETRO Shield"}</span>
+            </div>
+            {!isAdminMode && (
+              <button
+                type="button"
+                onClick={() => setIsAdminMode(true)}
+                className="text-[10px] text-muted-foreground/40 hover:text-muted-foreground transition-colors cursor-pointer"
+              >
+                Admin Sign In
+              </button>
+            )}
           </div>
 
         </div>
