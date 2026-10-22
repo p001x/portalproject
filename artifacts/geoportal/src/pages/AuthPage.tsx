@@ -43,8 +43,34 @@ export function AuthPage() {
   const { login, register, loginWithGoogle, requestOtp, forgotPassword, isLoading } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const [isResending, setIsResending] = useState(false);
   const [, setLocation] = useLocation();
   const { resolvedTheme } = useTheme();
+
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setResendCooldown((prev) => Math.max(0, prev - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [resendCooldown]);
+
+  const handleResendOtp = async () => {
+    if (!email || resendCooldown > 0 || isResending) return;
+    setIsResending(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      await requestOtp(email);
+      setSuccess(`A new 4-digit verification code has been sent to ${email}.`);
+      setResendCooldown(30);
+    } catch (err: any) {
+      setError(err.message || "Failed to resend verification code. Please try again.");
+    } finally {
+      setIsResending(false);
+    }
+  };
 
   // Load and manage Google Identity Services
   useEffect(() => {
@@ -135,6 +161,8 @@ export function AuthPage() {
           return;
         }
         await requestOtp(email);
+        setSuccess(`A 4-digit verification code has been sent to ${email}. Check your inbox or spam folder.`);
+        setResendCooldown(30);
         setStep("otp");
       } else if (mode === "forgot") {
         await forgotPassword(email);
@@ -290,11 +318,20 @@ export function AuthPage() {
           <form onSubmit={handleSubmit} className="flex flex-col space-y-4">
             
             {step === "otp" ? (
-              <div className="flex flex-col items-center justify-center space-y-5 my-2">
+              <div className="flex flex-col items-center justify-center space-y-4 my-2">
                 <div className="w-12 h-12 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-500">
                   <KeyRound className="w-6 h-6" />
                 </div>
                 
+                <div className="text-center space-y-0.5">
+                  <p className="text-xs text-muted-foreground">
+                    We sent a 4-digit verification code to
+                  </p>
+                  <p className="text-xs font-semibold text-foreground">
+                    {email}
+                  </p>
+                </div>
+
                 <div className="w-full max-w-[240px]">
                   <label htmlFor="code" className="block text-xs font-semibold text-center text-muted-foreground mb-2">
                     4-Digit Verification Code
@@ -310,6 +347,40 @@ export function AuthPage() {
                     autoFocus
                     className="w-full bg-muted/40 dark:bg-slate-950/40 border border-border focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 text-foreground text-2xl tracking-[0.5em] font-mono font-bold text-center py-3 rounded-xl outline-none transition-all"
                   />
+                </div>
+
+                {/* Resend Code Option & Change Email */}
+                <div className="flex flex-col items-center gap-2 pt-1 text-xs">
+                  <button
+                    type="button"
+                    disabled={resendCooldown > 0 || isResending}
+                    onClick={handleResendOtp}
+                    className="font-medium text-emerald-600 dark:text-emerald-400 hover:text-emerald-500 disabled:opacity-50 transition-colors flex items-center gap-1.5 cursor-pointer"
+                  >
+                    {isResending ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Sending new code...</span>
+                      </>
+                    ) : resendCooldown > 0 ? (
+                      <span>Resend code in {resendCooldown}s</span>
+                    ) : (
+                      <span>Didn't receive code? Resend Code</span>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStep("details");
+                      setCode("");
+                      setError(null);
+                      setSuccess(null);
+                    }}
+                    className="text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                  >
+                    Use a different email
+                  </button>
                 </div>
               </div>
             ) : (

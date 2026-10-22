@@ -4427,7 +4427,7 @@ class OTPRequest(BaseModel):
 
 class OTPVerifyRequest(BaseModel):
     email: str = Field(..., min_length=3)
-    code: str = Field(..., min_length=6, max_length=6)
+    code: str = Field(..., min_length=4, max_length=6)
     name: Optional[str] = None
 
 class GoogleAuthRequest(BaseModel):
@@ -4436,7 +4436,10 @@ class GoogleAuthRequest(BaseModel):
 @app.post("/api/auth/otp/request", tags=["auth"])
 def request_otp(req: OTPRequest):
     email = req.email.strip().lower()
-    from auth_db import save_otp
+    from auth_db import save_otp, get_user_by_email
+    existing = get_user_by_email(email)
+    if existing and existing.get("password_hash"):
+        raise HTTPException(400, "An account with this email already exists. Please log in.")
     from email_sender import send_otp_email
     try:
         code = save_otp(email, expires_in_minutes=10)

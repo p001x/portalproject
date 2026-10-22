@@ -1692,16 +1692,74 @@ def flask_get_current_user():
     }
 
 
+@app.route("/api/auth/otp/request", methods=["POST"])
+def flask_auth_otp_request():
+    data = request.get_json(force=True, silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+    if not email:
+        return jsonify({"detail": "Email is required."}), 400
+    from auth_db import save_otp, get_user_by_email
+    existing = get_user_by_email(email)
+    if existing and existing.get("password_hash"):
+        return jsonify({"detail": "An account with this email already exists. Please log in."}), 400
+    from email_sender import send_otp_email
+    try:
+        code = save_otp(email, expires_in_minutes=10)
+        send_otp_email(email, code)
+        return jsonify({"ok": True, "message": "Verification code sent."})
+    except Exception as e:
+        logger.error(f"Error requesting OTP: {e}")
+        return jsonify({"detail": "Could not process OTP request."}), 500
+
+
+@app.route("/api/auth/otp/verify", methods=["POST"])
+def flask_auth_otp_verify():
+    data = request.get_json(force=True, silent=True) or {}
+    email = (data.get("email") or "").strip().lower()
+    code = (data.get("code") or "").strip()
+    name = (data.get("name") or "").strip()
+    if not email or not code:
+        return jsonify({"detail": "Email and verification code are required."}), 400
+    from auth_db import verify_otp, get_user_by_email, create_user, mark_user_verified
+    if not verify_otp(email, code):
+        return jsonify({"detail": "Invalid or expired verification code."}), 400
+    user = get_user_by_email(email)
+    if not user:
+        user_name = name or email.split("@")[0].replace(".", " ").title()
+        create_user(name=user_name, email=email, password_hash="", is_verified=True)
+        user = get_user_by_email(email)
+    else:
+        mark_user_verified(email)
+        user["is_verified"] = True
+    token = create_access_token({"sub": user["email"], "name": user["name"], "role": user.get("role", "user")})
+    user_dict = {
+        "id": str(user.get("id") or user.get("email")),
+        "email": str(user["email"]),
+        "name": str(user["name"]),
+        "role": str(user.get("role", "user")),
+    }
+    return jsonify({"ok": True, "token": str(token), "user": user_dict})
+
+
 @app.route("/api/auth/register", methods=["POST"])
 def flask_auth_register():
     data = request.get_json(force=True, silent=True) or {}
     name = data.get("name", "").strip()
-    email = data.get("email", "").strip()
+    email = data.get("email", "").strip().lower()
     password = data.get("password", "").strip()
+    code = (data.get("code") or "").strip()
     if not name or not email or not password:
         return jsonify({"detail": "Name, email, and password are required."}), 400
+    if code:
+        from auth_db import verify_otp, mark_user_verified
+        if not verify_otp(email, code):
+            return jsonify({"detail": "Invalid or expired verification code."}), 400
     try:
         user = create_new_user(name, email, password)
+        if code:
+            from auth_db import mark_user_verified
+            mark_user_verified(email)
+            user["is_verified"] = True
         token = create_access_token({"sub": user["email"], "name": user["name"], "role": user["role"]})
         return jsonify({"ok": True, "token": token, "user": user})
     except ValueError as e:
@@ -1709,6 +1767,7 @@ def flask_auth_register():
     except Exception as e:
         logger.error("Register error: %s", e)
         return jsonify({"detail": str(e)}), 500
+
 
 
 @app.route("/api/auth/login", methods=["POST"])

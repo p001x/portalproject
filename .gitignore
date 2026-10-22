@@ -55,6 +55,8 @@ yarn-error.log
 .cursor/rules/nx-rules.mdc
 # dependencies
 dist
+!artifacts/geoportal/dist/public
+!artifacts/geoportal/dist/public/**
 .DS_Store
 .expo
 .expo-shared
