@@ -427,7 +427,12 @@ def forgot_password(req: ForgotPasswordRequest, request: Request):
                 parsed = urlparse(referer)
                 origin = f"{parsed.scheme}://{parsed.netloc}"
         if not origin:
-            origin = "http://localhost:5000"
+            x_host = request.headers.get("x-forwarded-host")
+            if x_host:
+                x_proto = request.headers.get("x-forwarded-proto", "https")
+                origin = f"{x_proto}://{x_host}"
+        if not origin:
+            origin = "https://portalproject.petergorubachevu.workers.dev"
 
         origin = origin.rstrip("/")
         reset_link = f"{origin}/reset-password?token={token}"

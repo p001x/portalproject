@@ -21,10 +21,10 @@ def send_reset_email(to_email: str, reset_link: str, user_name: str = "Valued Us
     except ImportError:
         pass
 
-    smtp_server = os.environ.get("SMTP_SERVER")
-    smtp_port = os.environ.get("SMTP_PORT")
-    smtp_user = os.environ.get("SMTP_USER")
-    smtp_password = os.environ.get("SMTP_PASSWORD")
+    smtp_server = os.environ.get("SMTP_SERVER") or "smtp.gmail.com"
+    smtp_port = os.environ.get("SMTP_PORT") or "587"
+    smtp_user = os.environ.get("SMTP_USER") or "petersonyang8@gmail.com"
+    smtp_password = os.environ.get("SMTP_PASSWORD") or "ghhkuzsdcfbbgoab"
 
     if not all([smtp_server, smtp_port, smtp_user, smtp_password]):
         logger.warning(f"SMTP not fully configured. Mocking email to {to_email}.")
@@ -121,10 +121,10 @@ def send_otp_email(to_email: str, code: str):
     except ImportError:
         pass
 
-    smtp_server = os.environ.get("SMTP_SERVER")
-    smtp_port = os.environ.get("SMTP_PORT")
-    smtp_user = os.environ.get("SMTP_USER")
-    smtp_password = os.environ.get("SMTP_PASSWORD")
+    smtp_server = os.environ.get("SMTP_SERVER") or "smtp.gmail.com"
+    smtp_port = os.environ.get("SMTP_PORT") or "587"
+    smtp_user = os.environ.get("SMTP_USER") or "petersonyang8@gmail.com"
+    smtp_password = os.environ.get("SMTP_PASSWORD") or "ghhkuzsdcfbbgoab"
 
     if not all([smtp_server, smtp_port, smtp_user, smtp_password]):
         logger.warning(f"SMTP not fully configured. Mocking OTP to {to_email}. CODE: {code}")

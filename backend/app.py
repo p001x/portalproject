@@ -1818,7 +1818,15 @@ def flask_auth_forgot_password():
     try:
         token = generate_reset_token(email)
         origin = request.headers.get("origin")
-        reset_link = f"{origin}/reset-password?token={token}" if origin else f"http://localhost:5000/reset-password?token={token}"
+        if not origin:
+            x_host = request.headers.get("x-forwarded-host")
+            if x_host:
+                x_proto = request.headers.get("x-forwarded-proto", "https")
+                origin = f"{x_proto}://{x_host}"
+        if not origin:
+            origin = "https://portalproject.petergorubachevu.workers.dev"
+        origin = origin.rstrip("/")
+        reset_link = f"{origin}/reset-password?token={token}"
         try:
             from email_sender import send_reset_email
             user = auth_db.get_user_by_email(email)
