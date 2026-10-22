@@ -23,13 +23,13 @@ interface AuthContextType {
   isLoading: boolean;
   blockedInfo: BlockedAccountInfo | null;
   setBlockedInfo: (info: BlockedAccountInfo | null) => void;
-  requestOtp: (email: string) => Promise<void>;
+  requestOtp: (email: string) => Promise<any>;
   verifyOtp: (email: string, code: string, name?: string) => Promise<void>;
   loginWithGoogle: (token: string) => Promise<void>;
   login: (email: string, password?: string) => Promise<void>;
   register: (name: string, email: string, password?: string, code?: string) => Promise<void>;
   logout: () => void;
-  forgotPassword: (email: string) => Promise<void>;
+  forgotPassword: (email: string) => Promise<any>;
   resetPassword: (token: string, newPassword: string) => Promise<void>;
 }
 
@@ -109,6 +109,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!res.ok) {
         throw new Error(getErrorMessage(data, "Failed to request OTP"));
       }
+      return data;
     } finally {
       setIsLoading(false);
     }
@@ -245,6 +246,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!res.ok) {
       throw new Error(getErrorMessage(data, "Failed to send reset link"));
     }
+    return data;
   };
 
   const resetPassword = async (token: string, newPassword: string) => {

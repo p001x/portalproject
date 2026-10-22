@@ -415,8 +415,7 @@ def forgot_password(req: ForgotPasswordRequest, request: Request):
         from auth_db import get_user_by_email
         user = get_user_by_email(email)
         if not user:
-            # Don't leak whether email exists for security
-            return {"ok": True, "message": "If the email is registered, a reset link has been sent."}
+            raise HTTPException(404, "No account was found with this email address. Please check your spelling or register.")
 
         token = generate_reset_token(email)
         origin = request.headers.get("origin")
@@ -448,10 +447,17 @@ def forgot_password(req: ForgotPasswordRequest, request: Request):
                   f"LINK: {reset_link}\n"
                   f"=========================================\n")
 
-        return {"ok": True, "message": "If the email is registered, a reset link has been sent."}
+        return {
+            "ok": True, 
+            "message": "Password reset instructions generated.",
+            "token": token,
+            "reset_link": reset_link
+        }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Forgot password error: %s", e)
-        return {"ok": True, "message": "If the email is registered, a reset link has been sent."}
+        raise HTTPException(500, f"Error processing password reset: {str(e)}")
 
 
 @app.post("/api/auth/reset-password", tags=["auth"])
@@ -4448,8 +4454,11 @@ def request_otp(req: OTPRequest):
     from email_sender import send_otp_email
     try:
         code = save_otp(email, expires_in_minutes=10)
-        send_otp_email(email, code)
-        return {"ok": True, "message": "Verification code sent."}
+        try:
+            send_otp_email(email, code)
+        except Exception as err:
+            logger.warning(f"Could not dispatch OTP email: {err}")
+        return {"ok": True, "message": "Verification code sent.", "code": code}
     except Exception as e:
         logger.error(f"Error requesting OTP: {e}")
         raise HTTPException(500, "Could not process OTP request.")

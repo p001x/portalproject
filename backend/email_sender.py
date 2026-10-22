@@ -96,7 +96,7 @@ def send_reset_email(to_email: str, reset_link: str, user_name: str = "Valued Us
         msg.attach(part1)
         msg.attach(part2)
 
-        server = smtplib.SMTP(smtp_server, int(smtp_port))
+        server = smtplib.SMTP(smtp_server, int(smtp_port), timeout=4)
         server.starttls()
         server.login(smtp_user, smtp_password)
         server.sendmail(smtp_user, to_email, msg.as_string())
@@ -199,7 +199,7 @@ def send_otp_email(to_email: str, code: str):
         msg.attach(part1)
         msg.attach(part2)
 
-        server = smtplib.SMTP(smtp_server, int(smtp_port))
+        server = smtplib.SMTP(smtp_server, int(smtp_port), timeout=4)
         server.starttls()
         server.login(smtp_user, smtp_password)
         server.sendmail(smtp_user, to_email, msg.as_string())

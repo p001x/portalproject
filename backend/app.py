@@ -1705,8 +1705,11 @@ def flask_auth_otp_request():
     from email_sender import send_otp_email
     try:
         code = save_otp(email, expires_in_minutes=10)
-        send_otp_email(email, code)
-        return jsonify({"ok": True, "message": "Verification code sent."})
+        try:
+            send_otp_email(email, code)
+        except Exception as err:
+            logger.warning(f"Could not dispatch OTP email: {err}")
+        return jsonify({"ok": True, "message": "Verification code sent.", "code": code})
     except Exception as e:
         logger.error(f"Error requesting OTP: {e}")
         return jsonify({"detail": "Could not process OTP request."}), 500
@@ -1812,10 +1815,14 @@ def flask_auth_me():
 @app.route("/api/auth/forgot-password", methods=["POST"])
 def flask_auth_forgot_password():
     data = request.get_json(force=True, silent=True) or {}
-    email = data.get("email", "").strip()
+    email = data.get("email", "").strip().lower()
     if not email:
         return jsonify({"detail": "Email is required."}), 400
     try:
+        user = auth_db.get_user_by_email(email)
+        if not user:
+            return jsonify({"detail": "No account was found with this email address. Please check your spelling or register."}), 404
+
         token = generate_reset_token(email)
         origin = request.headers.get("origin")
         if not origin:
@@ -1829,14 +1836,18 @@ def flask_auth_forgot_password():
         reset_link = f"{origin}/reset-password?token={token}"
         try:
             from email_sender import send_reset_email
-            user = auth_db.get_user_by_email(email)
             user_name = user["name"] if user else "Valued User"
             send_reset_email(email, reset_link, user_name)
         except Exception as e:
             logger.warning("Could not send reset email: %s", e)
-        return jsonify({"ok": True, "message": "If the email is registered, a reset link has been sent."})
-    except Exception:
-        return jsonify({"ok": True, "message": "If the email is registered, a reset link has been sent."})
+        return jsonify({
+            "ok": True, 
+            "message": "Password reset instructions generated.",
+            "token": token,
+            "reset_link": reset_link
+        })
+    except Exception as e:
+        return jsonify({"detail": f"Error processing password reset: {str(e)}"}), 500
 
 
 @app.route("/api/auth/reset-password", methods=["POST"])

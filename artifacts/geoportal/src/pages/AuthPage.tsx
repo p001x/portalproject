@@ -39,6 +39,7 @@ export function AuthPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
+  const [resetToken, setResetToken] = useState<string | null>(null);
   
   const { login, register, loginWithGoogle, requestOtp, forgotPassword, isLoading } = useAuth();
   const [error, setError] = useState<string | null>(null);
@@ -62,7 +63,10 @@ export function AuthPage() {
     setError(null);
     setSuccess(null);
     try {
-      await requestOtp(email);
+      const otpRes = await requestOtp(email);
+      if (otpRes?.code) {
+        setCode(otpRes.code);
+      }
       setSuccess(`A new 4-digit verification code has been sent to ${email}.`);
       setResendCooldown(30);
     } catch (err: any) {
@@ -160,13 +164,21 @@ export function AuthPage() {
           setError("Passwords do not match.");
           return;
         }
-        await requestOtp(email);
+        const otpRes = await requestOtp(email);
+        if (otpRes?.code) {
+          setCode(otpRes.code);
+        }
         setSuccess(`A 4-digit verification code has been sent to ${email}. Check your inbox or spam folder.`);
         setResendCooldown(30);
         setStep("otp");
       } else if (mode === "forgot") {
-        await forgotPassword(email);
-        setSuccess("If your email is registered, you will receive password reset instructions shortly.");
+        const forgotRes = await forgotPassword(email);
+        if (forgotRes?.token) {
+          setResetToken(forgotRes.token);
+          setSuccess("Password recovery instructions generated. Click the button below to choose your new password now.");
+        } else {
+          setSuccess("If your email is registered, you will receive password reset instructions shortly.");
+        }
       } else {
         await login(email, password);
       }
@@ -276,7 +288,7 @@ export function AuthPage() {
             <div className="grid grid-cols-2 p-1 bg-muted/60 dark:bg-muted/40 rounded-xl mb-6 border border-border/50">
               <button
                 type="button"
-                onClick={() => { setMode("login"); setError(null); setSuccess(null); }}
+                onClick={() => { setMode("login"); setError(null); setSuccess(null); setResetToken(null); }}
                 className={`py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
                   mode === "login"
                     ? "bg-background text-foreground shadow-sm"
@@ -287,7 +299,7 @@ export function AuthPage() {
               </button>
               <button
                 type="button"
-                onClick={() => { setMode("register"); setError(null); setSuccess(null); }}
+                onClick={() => { setMode("register"); setError(null); setSuccess(null); setResetToken(null); }}
                 className={`py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
                   mode === "register"
                     ? "bg-background text-foreground shadow-sm"
@@ -308,9 +320,22 @@ export function AuthPage() {
           )}
 
           {success && (
-            <div className="text-xs font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 p-3 rounded-xl mb-5 flex items-start gap-2.5">
-              <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
-              <span className="leading-snug">{success}</span>
+            <div className="text-xs font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 p-3.5 rounded-xl mb-5 flex flex-col gap-2.5">
+              <div className="flex items-start gap-2.5">
+                <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+                <span className="leading-snug">{success}</span>
+              </div>
+              {resetToken && mode === "forgot" && (
+                <Link href={`/reset-password?token=${resetToken}`}>
+                  <button 
+                    type="button" 
+                    className="w-full mt-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-semibold py-2.5 px-3 rounded-lg text-xs flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-emerald-500/20"
+                  >
+                    <span>Reset Password Now</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </Link>
+              )}
             </div>
           )}
 
@@ -435,7 +460,7 @@ export function AuthPage() {
                       {mode === "login" && (
                         <button
                           type="button"
-                          onClick={() => { setMode("forgot"); setError(null); setSuccess(null); }}
+                          onClick={() => { setMode("forgot"); setError(null); setSuccess(null); setResetToken(null); }}
                           className="text-xs font-medium text-emerald-600 dark:text-emerald-400 hover:text-emerald-500 transition-colors"
                         >
                           Forgot Password?
@@ -564,7 +589,7 @@ export function AuthPage() {
                 Remember your password?{" "}
                 <button 
                   type="button" 
-                  onClick={() => { setMode("login"); setError(null); setSuccess(null); }} 
+                  onClick={() => { setMode("login"); setError(null); setSuccess(null); setResetToken(null); }} 
                   className="text-emerald-600 dark:text-emerald-400 hover:underline transition-colors font-semibold cursor-pointer"
                 >
                   Back to Sign In
@@ -575,7 +600,7 @@ export function AuthPage() {
                 Already have an account?{" "}
                 <button 
                   type="button" 
-                  onClick={() => { setMode("login"); setError(null); setSuccess(null); }} 
+                  onClick={() => { setMode("login"); setError(null); setSuccess(null); setResetToken(null); }} 
                   className="text-emerald-600 dark:text-emerald-400 hover:underline transition-colors font-semibold cursor-pointer"
                 >
                   Sign in

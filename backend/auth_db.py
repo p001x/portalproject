@@ -1,6 +1,7 @@
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any
 import secrets
+from sqlalchemy import func
 
 from database import SessionLocal
 from models import User, GeeUsage, UserActivity, UserAppeal
@@ -37,8 +38,11 @@ def _user_to_dict(user: User) -> Dict[str, Any]:
     }
 
 def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
+    if not email:
+        return None
+    email_clean = email.strip().lower()
     with SessionLocal() as db:
-        user = db.query(User).filter(User.email == email).first()
+        user = db.query(User).filter(func.lower(User.email) == email_clean).first()
         return _user_to_dict(user) if user else None
 
 def get_user_by_reset_token(token: str) -> Optional[Dict[str, Any]]:
@@ -72,8 +76,11 @@ def get_user_by_google_id(google_id: str) -> Optional[Dict[str, Any]]:
         return _user_to_dict(user) if user else None
 
 def mark_user_verified(email: str) -> None:
+    if not email:
+        return
+    email_clean = email.strip().lower()
     with SessionLocal() as db:
-        user = db.query(User).filter(User.email == email).first()
+        user = db.query(User).filter(func.lower(User.email) == email_clean).first()
         if user:
             user.is_verified = True
             db.commit()
@@ -85,18 +92,20 @@ from datetime import timedelta
 def save_otp(email: str, expires_in_minutes: int = 10) -> str:
     code = f"{random.randint(0, 9999):04d}"
     expires_at = (datetime.now(timezone.utc) + timedelta(minutes=expires_in_minutes)).isoformat()
+    email_clean = email.strip().lower()
     with SessionLocal() as db:
         # Invalidate old OTPs
-        db.query(OTP).filter(OTP.email == email, OTP.used == False).update({"used": True})
+        db.query(OTP).filter(func.lower(OTP.email) == email_clean, OTP.used == False).update({"used": True}, synchronize_session=False)
         
-        new_otp = OTP(email=email, code=code, expires_at=expires_at, used=False)
+        new_otp = OTP(email=email_clean, code=code, expires_at=expires_at, used=False)
         db.add(new_otp)
         db.commit()
     return code
 
 def verify_otp(email: str, code: str) -> bool:
+    email_clean = email.strip().lower()
     with SessionLocal() as db:
-        otp = db.query(OTP).filter(OTP.email == email, OTP.code == code, OTP.used == False).order_by(OTP.id.desc()).first()
+        otp = db.query(OTP).filter(func.lower(OTP.email) == email_clean, OTP.code == code.strip(), OTP.used == False).order_by(OTP.id.desc()).first()
         if not otp:
             return False
             
@@ -110,8 +119,11 @@ def verify_otp(email: str, code: str) -> bool:
         return True
 
 def update_user_password(email: str, password_hash: str) -> None:
+    if not email:
+        return
+    email_clean = email.strip().lower()
     with SessionLocal() as db:
-        user = db.query(User).filter(User.email == email).first()
+        user = db.query(User).filter(func.lower(User.email) == email_clean).first()
         if user:
             user.password_hash = password_hash
             user.reset_token = None
@@ -119,8 +131,11 @@ def update_user_password(email: str, password_hash: str) -> None:
             db.commit()
 
 def set_reset_token(email: str, token: str, expiry_iso: str) -> None:
+    if not email:
+        return
+    email_clean = email.strip().lower()
     with SessionLocal() as db:
-        user = db.query(User).filter(User.email == email).first()
+        user = db.query(User).filter(func.lower(User.email) == email_clean).first()
         if user:
             user.reset_token = token
             user.reset_token_expiry = expiry_iso
