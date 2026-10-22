@@ -1,1 +1,1 @@
-SMTP Error for petersonyang8@gmail.com: [Errno 11001] getaddrinfo failed
+SMTP Error for test_login@example.com: [Errno 11001] getaddrinfo failed

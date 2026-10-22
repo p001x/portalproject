@@ -431,7 +431,7 @@ def forgot_password(req: ForgotPasswordRequest, request: Request):
                 x_proto = request.headers.get("x-forwarded-proto", "https")
                 origin = f"{x_proto}://{x_host}"
         if not origin:
-            origin = "https://portalproject.petergorubachevu.workers.dev"
+            origin = "https://portalproject.spetro-geoportal.workers.dev"
 
         origin = origin.rstrip("/")
         reset_link = f"{origin}/reset-password?token={token}"
