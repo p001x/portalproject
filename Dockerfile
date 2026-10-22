@@ -30,5 +30,5 @@ WORKDIR $HOME/app/backend
 # Expose port 8080 (Cloud Run standard)
 EXPOSE 8080
 
-# Run the FastAPI app with multi-worker concurrency
-CMD sh -c "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080} --workers 4 --timeout-keep-alive 65"
+# Run the FastAPI app (Single worker required for Render 512MB free tier memory limit)
+CMD sh -c "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1 --timeout-keep-alive 65"
