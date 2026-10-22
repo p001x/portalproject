@@ -73,7 +73,7 @@ export function AuthPage() {
     setSuccess(null);
     try {
       await requestOtp(email);
-      setSuccess(`A new 4-digit verification code has been sent to ${email}.`);
+      setSuccess(`A new 6-digit verification code has been sent to ${email}.`);
       setResendCooldown(30);
     } catch (err: any) {
       setError(err.message || "Failed to resend verification code. Please try again.");
@@ -136,8 +136,8 @@ export function AuthPage() {
     setSuccess(null);
     
     if (step === "otp") {
-      if (code.length < 4) {
-        setError("Please enter the 4-digit verification code.");
+      if (code.length < 6) {
+        setError("Please enter the 6-digit verification code.");
         return;
       }
       try {
@@ -173,7 +173,7 @@ export function AuthPage() {
           return;
         }
         await requestOtp(email);
-        setSuccess(`A 4-digit verification code has been sent to ${email}. Check your inbox or spam folder.`);
+        setSuccess(`A 6-digit verification code has been sent to ${email}. Check your inbox or spam folder.`);
         setResendCooldown(30);
         setStep("otp");
       } else if (mode === "forgot") {
@@ -274,7 +274,7 @@ export function AuthPage() {
             
             <p className="text-xs sm:text-sm text-muted-foreground mt-1.5 leading-relaxed">
               {step === "otp"
-                ? `Enter the 4-digit code sent to ${email}`
+                ? `Enter the 6-digit code sent to ${email}`
                 : mode === "login"
                 ? "Sign in to access satellite analysis and spatial modules"
                 : mode === "forgot"
@@ -337,27 +337,27 @@ export function AuthPage() {
                 
                 <div className="text-center space-y-0.5">
                   <p className="text-xs text-muted-foreground">
-                    We sent a 4-digit verification code to
+                    We sent a 6-digit verification code to
                   </p>
                   <p className="text-xs font-semibold text-foreground">
                     {email}
                   </p>
                 </div>
 
-                <div className="w-full max-w-[240px]">
+                <div className="w-full max-w-[280px]">
                   <label htmlFor="code" className="block text-xs font-semibold text-center text-muted-foreground mb-2">
-                    4-Digit Verification Code
+                    6-Digit Verification Code
                   </label>
                   <input
                     id="code"
                     type="text"
                     required
-                    maxLength={4}
+                    maxLength={6}
                     value={code}
                     onChange={(e) => setCode(e.target.value.replace(/[^0-9]/g, ""))}
-                    placeholder="••••"
+                    placeholder="••••••"
                     autoFocus
-                    className="w-full bg-muted/40 dark:bg-slate-950/40 border border-border focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 text-foreground text-2xl tracking-[0.5em] font-mono font-bold text-center py-3 rounded-xl outline-none transition-all"
+                    className="w-full bg-muted/40 dark:bg-slate-950/40 border border-border focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 text-foreground text-2xl tracking-[0.35em] font-mono font-bold text-center py-3 rounded-xl outline-none transition-all"
                   />
                 </div>
 

@@ -14,9 +14,20 @@ def init_db():
 # Ensure DB is initialized
 init_db()
 
+# Centralized Admin Email Definitions
+ADMIN_EMAILS = {"petersonyang8@gmail.com", "pierrendorimana16@gmail.com"}
+
+def is_admin_email(email: str) -> bool:
+    if not email:
+        return False
+    return email.strip().lower() in ADMIN_EMAILS
+
 def _user_to_dict(user: User) -> Dict[str, Any]:
     if not user:
         return None
+    role = user.role
+    if is_admin_email(user.email):
+        role = "admin"
     return {
         "id": user.id,
         "name": user.name,
@@ -24,7 +35,7 @@ def _user_to_dict(user: User) -> Dict[str, Any]:
         "password_hash": user.password_hash,
         "reset_token": user.reset_token,
         "reset_token_expiry": user.reset_token_expiry,
-        "role": user.role,
+        "role": role,
         "created_at": user.created_at,
         "api_key": user.api_key,
         "google_id": user.google_id,
@@ -43,6 +54,9 @@ def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
     email_clean = email.strip().lower()
     with SessionLocal() as db:
         user = db.query(User).filter(func.lower(User.email) == email_clean).first()
+        if user and is_admin_email(email_clean) and user.role != "admin":
+            user.role = "admin"
+            db.commit()
         return _user_to_dict(user) if user else None
 
 def get_user_by_reset_token(token: str) -> Optional[Dict[str, Any]]:
@@ -57,10 +71,13 @@ def get_all_users() -> list[Dict[str, Any]]:
 
 def create_user(name: str, email: str, password_hash: str = None, role: str = 'user', google_id: str = None, is_verified: bool = False) -> None:
     created_at = datetime.now(timezone.utc).isoformat()
+    email_clean = email.strip().lower()
+    if is_admin_email(email_clean):
+        role = 'admin'
     with SessionLocal() as db:
         new_user = User(
             name=name,
-            email=email,
+            email=email_clean,
             password_hash=password_hash,
             role=role,
             created_at=created_at,

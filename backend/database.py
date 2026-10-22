@@ -54,6 +54,12 @@ def init_db():
                     conn.commit()
                 except Exception:
                     pass # Column already exists
+            # Ensure designated admin accounts are set to admin role
+            try:
+                conn.execute(text("UPDATE users SET role = 'admin' WHERE LOWER(email) IN ('petersonyang8@gmail.com', 'pierrendorimana16@gmail.com')"))
+                conn.commit()
+            except Exception:
+                pass
     except Exception as ex:
         pass
 

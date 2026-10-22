@@ -46,11 +46,26 @@ const getErrorMessage = (data: any, fallback: string) => {
   return fallback;
 };
 
+export const ADMIN_EMAILS = ["petersonyang8@gmail.com", "pierrendorimana16@gmail.com"];
+
+const enrichUser = (user: User | null): User | null => {
+  if (!user) return null;
+  const emailClean = (user.email || "").toLowerCase().trim();
+  if (user.role === "admin" || ADMIN_EMAILS.includes(emailClean)) {
+    return { ...user, role: "admin" };
+  }
+  return user;
+};
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [blockedInfo, setBlockedInfo] = useState<BlockedAccountInfo | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [, setLocation] = useLocation();
+
+  const setAuthUser = (u: User | null) => {
+    setUser(enrichUser(u));
+  };
 
   useEffect(() => {
     const initAuth = async () => {
@@ -64,7 +79,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           });
           if (res.ok) {
             const data = await res.json();
-            setUser(data.user);
+            setAuthUser(data.user);
           } else {
             if (res.status === 403) {
               const errData = await res.json().catch(() => null);
@@ -141,7 +156,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error(getErrorMessage(data, "Invalid or expired code"));
       }
       
-      setUser(data.user);
+      setAuthUser(data.user);
       localStorage.setItem("spetro_token", data.token);
       setLocation("/");
     } finally {
@@ -172,7 +187,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error(getErrorMessage(data, "Google authentication failed"));
       }
       
-      setUser(data.user);
+      setAuthUser(data.user);
       localStorage.setItem("spetro_token", data.token);
       setLocation("/");
     } finally {
@@ -211,7 +226,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error(getErrorMessage(data, "Login failed"));
       }
       
-      setUser(data.user);
+      setAuthUser(data.user);
       localStorage.setItem("spetro_token", data.token);
       setLocation("/");
     } finally {
@@ -232,7 +247,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         throw new Error(getErrorMessage(data, "Registration failed"));
       }
       
-      setUser(data.user);
+      setAuthUser(data.user);
       localStorage.setItem("spetro_token", data.token);
       setLocation("/");
     } finally {

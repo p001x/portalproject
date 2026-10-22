@@ -162,7 +162,7 @@ def send_reset_email(to_email: str, reset_link: str, user_name: str = "Valued Us
 
 def send_otp_email(to_email: str, code: str, resend_key: str = None):
     """
-    Sends a 4-digit OTP verification email via Resend HTTPS (or fallback to SMTP).
+    Sends a 6-digit OTP verification email via Resend HTTPS (or fallback to SMTP).
     """
     try:
         from dotenv import load_dotenv
@@ -221,7 +221,7 @@ def send_otp_email(to_email: str, code: str, resend_key: str = None):
             <div class="content">
               <h2 class="greeting">Authentication Required</h2>
               <p>You have requested to verify your email address (<strong>{to_email}</strong>) for access to the SPETRO platform.</p>
-              <p>Please enter the following 4-digit secure verification code to complete your request:</p>
+              <p>Please enter the following 6-digit secure verification code to complete your request:</p>
               
               <div class="code-box">
                 <div class="code">{code}</div>
