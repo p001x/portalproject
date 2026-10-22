@@ -88,3 +88,51 @@ class Notification(Base):
     type = Column(String, default="info") # "security", "analysis", "community", "system"
     read = Column(Boolean, default=False)
     timestamp = Column(String, nullable=False)
+
+class Comment(Base):
+    __tablename__ = 'comments'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    author = Column(String, nullable=False)
+    content = Column(Text, nullable=False)
+    tag = Column(String, nullable=True)
+    image_url = Column(String, nullable=True)
+    timestamp = Column(String, nullable=False)
+    is_edited = Column(Integer, default=0)
+    parent_id = Column(Integer, nullable=True)
+    category = Column(String, default='General')
+
+class CommentUpvote(Base):
+    __tablename__ = 'comment_upvotes'
+    comment_id = Column(Integer, primary_key=True)
+    author = Column(String, primary_key=True)
+
+class CommunityNotification(Base):
+    __tablename__ = 'community_notifications'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    recipient = Column(String, nullable=False)
+    sender = Column(String, nullable=False)
+    type = Column(String, nullable=False)
+    comment_id = Column(Integer, nullable=False)
+    read = Column(Integer, default=0)
+    timestamp = Column(String, nullable=False)
+
+class BlogPost(Base):
+    __tablename__ = 'posts'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    title = Column(String, nullable=False)
+    excerpt = Column(Text, nullable=True)
+    category = Column(String, nullable=True)
+    content = Column(Text, nullable=False)
+    image_url = Column(String, nullable=True)
+    read_time = Column(String, nullable=True)
+    timestamp = Column(String, nullable=False)
+
+class ServiceRequest(Base):
+    __tablename__ = 'service_requests'
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_email = Column(String, nullable=False)
+    service_type = Column(String, nullable=False)
+    message = Column(Text, nullable=True)
+    status = Column(String, default='pending')
+    created_at = Column(String, nullable=False)
+

@@ -8,8 +8,17 @@ logger = logging.getLogger(__name__)
 
 DB_PATH = os.path.join(os.path.dirname(__file__), 'community.db')
 
+def get_connection():
+    conn = sqlite3.connect(DB_PATH, timeout=15.0)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+    except Exception:
+        pass
+    return conn
+
 def init_community_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS comments (
@@ -85,7 +94,7 @@ def add_comment(author: str, content: str, tag: str = None, image_url: str = Non
     """Inserts a new comment into the database securely via parameterized query."""
     timestamp = datetime.datetime.utcnow().isoformat()
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_connection()
         c = conn.cursor()
         c.execute(
             "INSERT INTO comments (author, content, tag, image_url, timestamp, parent_id, category) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -113,7 +122,7 @@ def add_comment(author: str, content: str, tag: str = None, image_url: str = Non
 
 def get_comments(tag_filter: Optional[str] = None, search: Optional[str] = None, limit: int = 100, offset: int = 0, category: Optional[str] = None) -> List[Dict]:
     """Retrieves the latest comments, optionally filtered by a tag or search query, with pagination."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     c = conn.cursor()
     
     query = "SELECT c.id, c.author, c.content, c.tag, c.image_url, c.timestamp, c.is_edited, c.parent_id, GROUP_CONCAT(u.author) as upvoters, c.category FROM comments c LEFT JOIN comment_upvotes u ON c.id = u.comment_id"
@@ -160,7 +169,7 @@ def get_comments(tag_filter: Optional[str] = None, search: Optional[str] = None,
     return comments
 
 def get_comment(comment_id: int) -> Optional[Dict]:
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     c = conn.cursor()
     c.execute("SELECT id, author, content, tag, image_url, timestamp, is_edited, parent_id, category FROM comments WHERE id = ?", (comment_id,))
     row = c.fetchone()
@@ -180,7 +189,7 @@ def get_comment(comment_id: int) -> Optional[Dict]:
     }
 
 def update_comment(comment_id: int, new_content: str) -> bool:
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     c = conn.cursor()
     c.execute("UPDATE comments SET content = ?, is_edited = 1 WHERE id = ?", (new_content, comment_id))
     rows_affected = c.rowcount
@@ -189,7 +198,7 @@ def update_comment(comment_id: int, new_content: str) -> bool:
     return rows_affected > 0
 
 def delete_comment(comment_id: int) -> None:
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     c = conn.cursor()
     c.execute("DELETE FROM comments WHERE id = ? OR parent_id = ?", (comment_id, comment_id))
     c.execute("DELETE FROM comment_upvotes WHERE comment_id = ?", (comment_id,))
@@ -198,7 +207,7 @@ def delete_comment(comment_id: int) -> None:
 
 def toggle_upvote(comment_id: int, author: str) -> bool:
     timestamp = datetime.datetime.utcnow().isoformat()
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     c = conn.cursor()
     c.execute("SELECT 1 FROM comment_upvotes WHERE comment_id = ? AND author = ?", (comment_id, author))
     exists = c.fetchone()
@@ -223,7 +232,7 @@ def toggle_upvote(comment_id: int, author: str) -> bool:
     return is_upvoted
 
 def set_forum_frozen(frozen: bool) -> None:
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     c = conn.cursor()
     c.execute(
         "INSERT OR REPLACE INTO forum_settings (key, value) VALUES ('is_frozen', ?)",
@@ -233,7 +242,7 @@ def set_forum_frozen(frozen: bool) -> None:
     conn.close()
 
 def is_forum_frozen() -> bool:
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     c = conn.cursor()
     c.execute("SELECT value FROM forum_settings WHERE key = 'is_frozen'")
     row = c.fetchone()
@@ -241,21 +250,21 @@ def is_forum_frozen() -> bool:
     return row is not None and row[0] == "1"
 
 def block_user(author: str) -> None:
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     c = conn.cursor()
     c.execute("INSERT OR IGNORE INTO blocked_users (author) VALUES (?)", (author.lower(),))
     conn.commit()
     conn.close()
 
 def unblock_user(author: str) -> None:
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     c = conn.cursor()
     c.execute("DELETE FROM blocked_users WHERE author = ?", (author.lower(),))
     conn.commit()
     conn.close()
 
 def is_user_blocked(author: str) -> bool:
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     c = conn.cursor()
     c.execute("SELECT 1 FROM blocked_users WHERE author = ?", (author.lower(),))
     row = c.fetchone()
@@ -263,7 +272,7 @@ def is_user_blocked(author: str) -> bool:
     return row is not None
 
 def get_blocked_users() -> List[str]:
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     c = conn.cursor()
     c.execute("SELECT author FROM blocked_users ORDER BY author ASC")
     rows = c.fetchall()
@@ -272,7 +281,7 @@ def get_blocked_users() -> List[str]:
 
 def get_user_comments(author: str) -> List[Dict]:
     """Fetch all comments posted by a specific user (by author name or email)."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     c = conn.cursor()
     c.execute(
         """
@@ -299,7 +308,7 @@ def get_user_comments(author: str) -> List[Dict]:
 
 def get_user_comment_count(author: str) -> int:
     """Return total number of comments posted by a user."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     c = conn.cursor()
     c.execute("SELECT COUNT(*) FROM comments WHERE LOWER(author) = LOWER(?)", (author,))
     row = c.fetchone()
@@ -308,7 +317,7 @@ def get_user_comment_count(author: str) -> int:
 
 # --- User Profiles ---
 def get_user_profile(author: str) -> Dict:
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     c = conn.cursor()
     c.execute("SELECT bio, avatar_url FROM user_profiles WHERE author = ?", (author,))
     row = c.fetchone()
@@ -318,7 +327,7 @@ def get_user_profile(author: str) -> Dict:
     return {"author": author, "bio": "", "avatar_url": ""}
 
 def update_user_profile(author: str, bio: str, avatar_url: str = None) -> None:
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     c = conn.cursor()
     c.execute(
         "INSERT OR REPLACE INTO user_profiles (author, bio, avatar_url) VALUES (?, ?, ?)",
@@ -329,7 +338,7 @@ def update_user_profile(author: str, bio: str, avatar_url: str = None) -> None:
 
 # --- Notifications ---
 def get_notifications(author: str) -> List[Dict]:
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     c = conn.cursor()
     c.execute(
         "SELECT id, sender, type, comment_id, read, timestamp FROM community_notifications WHERE recipient = ? ORDER BY id DESC LIMIT 50",
@@ -340,7 +349,7 @@ def get_notifications(author: str) -> List[Dict]:
     return [{"id": r[0], "sender": r[1], "type": r[2], "comment_id": r[3], "read": bool(r[4]), "timestamp": r[5]} for r in rows]
 
 def mark_notifications_read(author: str) -> None:
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_connection()
     c = conn.cursor()
     c.execute("UPDATE community_notifications SET read = 1 WHERE recipient = ?", (author,))
     conn.commit()
