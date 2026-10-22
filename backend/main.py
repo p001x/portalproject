@@ -439,7 +439,7 @@ def forgot_password(req: ForgotPasswordRequest, request: Request):
         try:
             from email_sender import send_reset_email
             user_name = user.get("name") or "Valued User"
-            send_reset_email(email, reset_link, user_name)
+            send_reset_email(email, reset_link, user_name, resend_key=request.headers.get("x-resend-key"))
         except Exception as ex:
             logger.error("Failed to send reset email: %s", ex)
             print(f"\n=========================================\n"
@@ -4443,7 +4443,7 @@ class GoogleAuthRequest(BaseModel):
     token: str
 
 @app.post("/api/auth/otp/request", tags=["auth"])
-def request_otp(req: OTPRequest):
+def request_otp(req: OTPRequest, request: Request):
     email = req.email.strip().lower()
     from auth_db import save_otp, get_user_by_email
     existing = get_user_by_email(email)
@@ -4453,7 +4453,7 @@ def request_otp(req: OTPRequest):
     try:
         code = save_otp(email, expires_in_minutes=10)
         try:
-            send_otp_email(email, code)
+            send_otp_email(email, code, resend_key=request.headers.get("x-resend-key"))
         except Exception as err:
             logger.warning(f"Could not dispatch OTP email: {err}")
         return {"ok": True, "message": "Verification code sent to your email inbox."}

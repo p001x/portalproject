@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 _HERE = Path(__file__).resolve().parent
 _ENV_FILE = _HERE / ".env"
 
-def send_via_resend(to_email: str, subject: str, text: str, html: str) -> bool:
+def send_via_resend(to_email: str, subject: str, text: str, html: str, api_key: str = None) -> bool:
     """
     Sends email over HTTPS port 443 via Resend API.
     Never blocked by cloud firewalls.
@@ -21,7 +21,8 @@ def send_via_resend(to_email: str, subject: str, text: str, html: str) -> bool:
     except ImportError:
         pass
 
-    api_key = os.environ.get("RESEND_API_KEY")
+    if not api_key:
+        api_key = os.environ.get("RESEND_API_KEY")
     from_email = os.environ.get("RESEND_FROM") or "SPETRO Geoportal <onboarding@resend.dev>"
     
     if not api_key:
@@ -55,7 +56,7 @@ def send_via_resend(to_email: str, subject: str, text: str, html: str) -> bool:
         return False
     return False
 
-def send_reset_email(to_email: str, reset_link: str, user_name: str = "Valued User"):
+def send_reset_email(to_email: str, reset_link: str, user_name: str = "Valued User", resend_key: str = None):
     """
     Sends a password reset email via Resend HTTPS (or fallback to SMTP).
     """
@@ -136,7 +137,7 @@ def send_reset_email(to_email: str, reset_link: str, user_name: str = "Valued Us
         """
 
         # 1. Attempt delivery via Resend HTTPS (Port 443 - instantaneous and unblocked)
-        if send_via_resend(to_email, "Password Reset Request - SPETRO Geoportal", text, html):
+        if send_via_resend(to_email, "Password Reset Request - SPETRO Geoportal", text, html, api_key=resend_key):
             return
 
         part1 = MIMEText(text, "plain")
@@ -159,9 +160,9 @@ def send_reset_email(to_email: str, reset_link: str, user_name: str = "Valued Us
         except Exception:
             pass
 
-def send_otp_email(to_email: str, code: str):
+def send_otp_email(to_email: str, code: str, resend_key: str = None):
     """
-    Sends a 4-digit OTP verification email via SMTP.
+    Sends a 4-digit OTP verification email via Resend HTTPS (or fallback to SMTP).
     """
     try:
         from dotenv import load_dotenv
@@ -243,7 +244,7 @@ def send_otp_email(to_email: str, code: str):
         """
 
         # 1. Attempt delivery via Resend HTTPS (Port 443 - instantaneous and unblocked)
-        if send_via_resend(to_email, f"Your Verification Code: {code}", text, html):
+        if send_via_resend(to_email, f"Your Verification Code: {code}", text, html, api_key=resend_key):
             return
 
         part1 = MIMEText(text, "plain")

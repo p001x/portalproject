@@ -52,6 +52,9 @@ export default {
       headers.set("Host", new URL(backendOrigin).host);
       headers.set("X-Forwarded-Host", url.host);
       headers.set("X-Forwarded-Proto", url.protocol.replace(":", ""));
+      if (env.RESEND_API_KEY) {
+        headers.set("X-Resend-Key", env.RESEND_API_KEY);
+      }
 
       // Forward request to backend
       const response = await fetch(targetUrl.toString(), {

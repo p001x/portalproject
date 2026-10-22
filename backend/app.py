@@ -1706,7 +1706,7 @@ def flask_auth_otp_request():
     try:
         code = save_otp(email, expires_in_minutes=10)
         try:
-            send_otp_email(email, code)
+            send_otp_email(email, code, resend_key=request.headers.get("X-Resend-Key"))
         except Exception as err:
             logger.warning(f"Could not dispatch OTP email: {err}")
         return jsonify({"ok": True, "message": "Verification code sent to your email inbox."})
@@ -1837,7 +1837,7 @@ def flask_auth_forgot_password():
         try:
             from email_sender import send_reset_email
             user_name = user["name"] if user else "Valued User"
-            send_reset_email(email, reset_link, user_name)
+            send_reset_email(email, reset_link, user_name, resend_key=request.headers.get("X-Resend-Key"))
         except Exception as e:
             logger.warning("Could not send reset email: %s", e)
         return jsonify({
