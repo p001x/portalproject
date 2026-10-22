@@ -1709,7 +1709,7 @@ def flask_auth_otp_request():
             send_otp_email(email, code)
         except Exception as err:
             logger.warning(f"Could not dispatch OTP email: {err}")
-        return jsonify({"ok": True, "message": "Verification code sent.", "code": code})
+        return jsonify({"ok": True, "message": "Verification code sent to your email inbox."})
     except Exception as e:
         logger.error(f"Error requesting OTP: {e}")
         return jsonify({"detail": "Could not process OTP request."}), 500
@@ -1842,9 +1842,7 @@ def flask_auth_forgot_password():
             logger.warning("Could not send reset email: %s", e)
         return jsonify({
             "ok": True, 
-            "message": "Password reset instructions generated.",
-            "token": token,
-            "reset_link": reset_link
+            "message": "Password reset instructions have been sent to your email inbox."
         })
     except Exception as e:
         return jsonify({"detail": f"Error processing password reset: {str(e)}"}), 500

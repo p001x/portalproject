@@ -449,9 +449,7 @@ def forgot_password(req: ForgotPasswordRequest, request: Request):
 
         return {
             "ok": True, 
-            "message": "Password reset instructions generated.",
-            "token": token,
-            "reset_link": reset_link
+            "message": "Password reset instructions have been sent to your email inbox."
         }
     except HTTPException:
         raise
@@ -4458,7 +4456,7 @@ def request_otp(req: OTPRequest):
             send_otp_email(email, code)
         except Exception as err:
             logger.warning(f"Could not dispatch OTP email: {err}")
-        return {"ok": True, "message": "Verification code sent.", "code": code}
+        return {"ok": True, "message": "Verification code sent to your email inbox."}
     except Exception as e:
         logger.error(f"Error requesting OTP: {e}")
         raise HTTPException(500, "Could not process OTP request.")

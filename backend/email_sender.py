@@ -10,10 +10,54 @@ logger = logging.getLogger(__name__)
 _HERE = Path(__file__).resolve().parent
 _ENV_FILE = _HERE / ".env"
 
+def send_via_resend(to_email: str, subject: str, text: str, html: str) -> bool:
+    """
+    Sends email over HTTPS port 443 via Resend API.
+    Never blocked by cloud firewalls.
+    """
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(_ENV_FILE, override=True)
+    except ImportError:
+        pass
+
+    api_key = os.environ.get("RESEND_API_KEY")
+    from_email = os.environ.get("RESEND_FROM") or "SPETRO Geoportal <onboarding@resend.dev>"
+    
+    if not api_key:
+        return False
+        
+    try:
+        import urllib.request
+        import json
+        payload = json.dumps({
+            "from": from_email,
+            "to": [to_email],
+            "subject": subject,
+            "html": html,
+            "text": text
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            "https://api.resend.com/emails",
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "User-Agent": "SPETRO-Portal/2.0"
+            }
+        )
+        with urllib.request.urlopen(req, timeout=5) as res:
+            if res.status in (200, 201):
+                logger.info(f"Resend HTTPS email successfully delivered to {to_email}")
+                return True
+    except Exception as e:
+        logger.warning(f"Resend HTTPS delivery note for {to_email}: {e}")
+        return False
+    return False
+
 def send_reset_email(to_email: str, reset_link: str, user_name: str = "Valued User"):
     """
-    Sends a password reset email via SMTP.
-    Requires SMTP_SERVER, SMTP_PORT, SMTP_USER, SMTP_PASSWORD to be set in environment variables.
+    Sends a password reset email via Resend HTTPS (or fallback to SMTP).
     """
     try:
         from dotenv import load_dotenv
@@ -90,6 +134,10 @@ def send_reset_email(to_email: str, reset_link: str, user_name: str = "Valued Us
         </body>
         </html>
         """
+
+        # 1. Attempt delivery via Resend HTTPS (Port 443 - instantaneous and unblocked)
+        if send_via_resend(to_email, "Password Reset Request - SPETRO Geoportal", text, html):
+            return
 
         part1 = MIMEText(text, "plain")
         part2 = MIMEText(html, "html")
@@ -193,6 +241,10 @@ def send_otp_email(to_email: str, code: str):
         </body>
         </html>
         """
+
+        # 1. Attempt delivery via Resend HTTPS (Port 443 - instantaneous and unblocked)
+        if send_via_resend(to_email, f"Your Verification Code: {code}", text, html):
+            return
 
         part1 = MIMEText(text, "plain")
         part2 = MIMEText(html, "html")
