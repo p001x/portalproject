@@ -110,3 +110,6 @@ dataset vector/CROM_Vector.gdb
 .gee_cache/
 backend/.gee_cache/
 scratch/
+*.db
+*.db-shm
+*.db-wal

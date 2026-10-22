@@ -51,8 +51,10 @@ def _get_jwt_secret() -> str:
         except Exception:
             pass
 
-    secret = "geoportal-jwt-super-secret-key-2026-auth-token-salt"
+    # In development/fallback, generate a cryptographically strong random secret if missing
+    secret = secrets.token_hex(32)
     os.environ["JWT_SECRET"] = secret
+    logger.warning("JWT_SECRET was not set in environment. Generated an ephemeral secure key.")
     return secret
 
 
@@ -87,8 +89,7 @@ def verify_user(email: str, password: str) -> Optional[dict]:
             is_valid = bcrypt.checkpw(password.encode("utf-8"), raw_hash_bytes)
         except Exception as e:
             logger.warning("Bcrypt check exception: %s", e)
-            if str(password) == str(raw_hash):
-                is_valid = True
+            is_valid = False
 
         if not is_valid:
             return None

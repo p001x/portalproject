@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, lazy, Suspense } from "react";
 import { Switch, Route, Router as WouterRouter, Link, useLocation } from "wouter";
 import { AnalyticsTracker } from "@/hooks/useAnalytics";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -6,44 +6,48 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
-import { NDVIPage } from "@/pages/NDVIPage";
-import { LSTPage } from "@/pages/LSTPage";
-import { RUSLEPage } from "@/pages/RUSLEPage";
-import { SlopePage } from "@/pages/SlopePage";
-import EarthworkPage from "@/pages/EarthworkPage";
-import { LandfillPage } from "@/pages/LandfillPage";
-import { AirPollutionPage } from "@/pages/AirPollutionPage";
-import { LandslidePage } from "@/pages/LandslidePage";
-import { UHIPage } from "@/pages/UHIPage";
-import { DroughtPage } from "@/pages/DroughtPage";
-import { FloodPage } from "@/pages/FloodPage";
-import { AccessibilityPage } from "@/pages/AccessibilityPage";
-import { HabitatSuitabilityPage } from "@/pages/HabitatSuitabilityPage";
-import { IrrigationPage } from "@/pages/IrrigationPage";
-import { WaterHarvestingPage } from "@/pages/WaterHarvestingPage";
-import { WellScopePage } from "@/pages/WellScopePage";
-import { BiomassPage } from "@/pages/BiomassPage";
-import { RareDataPage } from "@/pages/RareDataPage";
-import { DataHarvesterPage } from "@/pages/DataHarvesterPage";
-import { SampleDigitizationPage } from "@/pages/SampleDigitizationPage";
-import { ChangeDetectionPage } from "@/pages/ChangeDetectionPage";
-import { AnalysisHubPage } from "@/pages/AnalysisHubPage";
-import { DashboardPage } from "@/pages/DashboardPage";
-import { CloudIngestPage } from "@/pages/CloudIngestPage";
-import { ServicesPage } from "@/pages/ServicesPage";
-import { PricingPage } from "@/pages/PricingPage";
-import { CommunityPage } from "@/pages/CommunityPage";
+
+// Statically load the primary home page for instantaneous landing paint
 import { HomePage } from "@/pages/HomePage";
-import { PlatformPage } from "@/pages/PlatformPage";
-import { AuthPage } from "@/pages/AuthPage";
-import { ResetPasswordPage } from "@/pages/ResetPasswordPage";
-import { SettingsPage } from "@/pages/SettingsPage";
-import { AboutPage } from "@/pages/AboutPage";
-import { ContactPage } from "@/pages/ContactPage";
-import { AcademyPage } from "@/pages/AcademyPage";
-import { BlogPage } from "@/pages/BlogPage";
-import { CanvaStandalonePage } from "@/pages/CanvaStandalonePage";
-import { UserManagementPage } from "@/pages/UserManagementPage";
+
+// Dynamically lazy-load heavy analysis, tools, and secondary pages on demand
+const NDVIPage = lazy(() => import("@/pages/NDVIPage").then(m => ({ default: m.NDVIPage })));
+const LSTPage = lazy(() => import("@/pages/LSTPage").then(m => ({ default: m.LSTPage })));
+const RUSLEPage = lazy(() => import("@/pages/RUSLEPage").then(m => ({ default: m.RUSLEPage })));
+const SlopePage = lazy(() => import("@/pages/SlopePage").then(m => ({ default: m.SlopePage })));
+const EarthworkPage = lazy(() => import("@/pages/EarthworkPage"));
+const LandfillPage = lazy(() => import("@/pages/LandfillPage").then(m => ({ default: m.LandfillPage })));
+const AirPollutionPage = lazy(() => import("@/pages/AirPollutionPage").then(m => ({ default: m.AirPollutionPage })));
+const LandslidePage = lazy(() => import("@/pages/LandslidePage").then(m => ({ default: m.LandslidePage })));
+const UHIPage = lazy(() => import("@/pages/UHIPage").then(m => ({ default: m.UHIPage })));
+const DroughtPage = lazy(() => import("@/pages/DroughtPage").then(m => ({ default: m.DroughtPage })));
+const FloodPage = lazy(() => import("@/pages/FloodPage").then(m => ({ default: m.FloodPage })));
+const AccessibilityPage = lazy(() => import("@/pages/AccessibilityPage").then(m => ({ default: m.AccessibilityPage })));
+const HabitatSuitabilityPage = lazy(() => import("@/pages/HabitatSuitabilityPage").then(m => ({ default: m.HabitatSuitabilityPage })));
+const IrrigationPage = lazy(() => import("@/pages/IrrigationPage").then(m => ({ default: m.IrrigationPage })));
+const WaterHarvestingPage = lazy(() => import("@/pages/WaterHarvestingPage").then(m => ({ default: m.WaterHarvestingPage })));
+const WellScopePage = lazy(() => import("@/pages/WellScopePage").then(m => ({ default: m.WellScopePage })));
+const BiomassPage = lazy(() => import("@/pages/BiomassPage").then(m => ({ default: m.BiomassPage })));
+const RareDataPage = lazy(() => import("@/pages/RareDataPage").then(m => ({ default: m.RareDataPage })));
+const DataHarvesterPage = lazy(() => import("@/pages/DataHarvesterPage").then(m => ({ default: m.DataHarvesterPage })));
+const SampleDigitizationPage = lazy(() => import("@/pages/SampleDigitizationPage").then(m => ({ default: m.SampleDigitizationPage })));
+const ChangeDetectionPage = lazy(() => import("@/pages/ChangeDetectionPage").then(m => ({ default: m.ChangeDetectionPage })));
+const AnalysisHubPage = lazy(() => import("@/pages/AnalysisHubPage").then(m => ({ default: m.AnalysisHubPage })));
+const DashboardPage = lazy(() => import("@/pages/DashboardPage").then(m => ({ default: m.DashboardPage })));
+const CloudIngestPage = lazy(() => import("@/pages/CloudIngestPage").then(m => ({ default: m.CloudIngestPage })));
+const ServicesPage = lazy(() => import("@/pages/ServicesPage").then(m => ({ default: m.ServicesPage })));
+const PricingPage = lazy(() => import("@/pages/PricingPage").then(m => ({ default: m.PricingPage })));
+const CommunityPage = lazy(() => import("@/pages/CommunityPage").then(m => ({ default: m.CommunityPage })));
+const PlatformPage = lazy(() => import("@/pages/PlatformPage").then(m => ({ default: m.PlatformPage })));
+const AuthPage = lazy(() => import("@/pages/AuthPage").then(m => ({ default: m.AuthPage })));
+const ResetPasswordPage = lazy(() => import("@/pages/ResetPasswordPage").then(m => ({ default: m.ResetPasswordPage })));
+const SettingsPage = lazy(() => import("@/pages/SettingsPage").then(m => ({ default: m.SettingsPage })));
+const AboutPage = lazy(() => import("@/pages/AboutPage").then(m => ({ default: m.AboutPage })));
+const ContactPage = lazy(() => import("@/pages/ContactPage").then(m => ({ default: m.ContactPage })));
+const AcademyPage = lazy(() => import("@/pages/AcademyPage").then(m => ({ default: m.AcademyPage })));
+const BlogPage = lazy(() => import("@/pages/BlogPage").then(m => ({ default: m.BlogPage })));
+const CanvaStandalonePage = lazy(() => import("@/pages/CanvaStandalonePage").then(m => ({ default: m.CanvaStandalonePage })));
+const UserManagementPage = lazy(() => import("@/pages/UserManagementPage").then(m => ({ default: m.UserManagementPage })));
 import { AccountBlockedDialog } from "@/components/AccountBlockedDialog";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { NotificationProvider, useNotifications } from "@/hooks/use-notifications";
@@ -569,55 +573,66 @@ function NotFound() {
 function Router() {
   return (
     <Layout>
-      <Switch>
-        <Route path="/" component={HomePage} />
-        <Route path="/platform" component={PlatformPage} />
-        <Route path="/auth" component={AuthPage} />
-        <Route path="/reset-password" component={ResetPasswordPage} />
-        <Route path="/settings" component={SettingsPage} />
-        <Route path="/about" component={AboutPage} />
-        <Route path="/contact" component={ContactPage} />
-        <Route path="/analysis" component={AnalysisHubPage} />
-        <Route path="/export-editor" component={CanvaStandalonePage} />
-        <Route path="/analysis-hub" component={AnalysisHubPage} />
-        <Route path="/ndvi" component={NDVIPage} />
-        <Route path="/change-detection" component={ChangeDetectionPage} />
-        <Route path="/lst" component={LSTPage} />
-        <Route path="/rusle" component={RUSLEPage} />
-        <Route path="/slope" component={SlopePage} />
-        <Route path="/earthwork" component={EarthworkPage} />
-        <Route path="/landfill" component={LandfillPage} />
-        <Route path="/air" component={AirPollutionPage} />
-        <Route path="/landslide" component={LandslidePage} />
-        <Route path="/flood" component={FloodPage} />
-        <Route path="/drought" component={DroughtPage} />
-        <Route path="/uhi" component={UHIPage} />
-        <Route path="/accessibility" component={AccessibilityPage} />
-        <Route path="/habitat" component={HabitatSuitabilityPage} />
-        <Route path="/irrigation" component={IrrigationPage} />
-        <Route path="/water-harvesting" component={WaterHarvestingPage} />
-        <Route path="/wellscope" component={WellScopePage} />
-        <Route path="/biomass" component={BiomassPage} />
-        <Route path="/rare-data" component={RareDataPage} />
-        <Route path="/harvester" component={DataHarvesterPage} />
-        <Route path="/samples">
-          <GEEAuthGate>
-            <div className="h-full flex flex-col">
-              <div className="flex-1 overflow-hidden">
-                <SampleDigitizationPage />
-              </div>
+      <Suspense
+        fallback={
+          <div className="h-full w-full flex items-center justify-center p-8 bg-background">
+            <div className="flex flex-col items-center gap-3 text-muted-foreground animate-pulse">
+              <div className="w-9 h-9 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+              <span className="text-xs font-medium tracking-wide">Loading module...</span>
             </div>
-          </GEEAuthGate>
-        </Route>
-        <Route path="/community" component={CommunityPage} />
-        <Route path="/admin/users" component={UserManagementPage} />
-        <Route path="/dashboard" component={DashboardPage} />
-        <Route path="/cloud-ingest" component={CloudIngestPage} />
-        <Route path="/services" component={PricingPage} />
-        <Route path="/academy" component={AcademyPage} />
-        <Route path="/blog" component={BlogPage} />
-        <Route component={NotFound} />
-      </Switch>
+          </div>
+        }
+      >
+        <Switch>
+          <Route path="/" component={HomePage} />
+          <Route path="/platform" component={PlatformPage} />
+          <Route path="/auth" component={AuthPage} />
+          <Route path="/reset-password" component={ResetPasswordPage} />
+          <Route path="/settings" component={SettingsPage} />
+          <Route path="/about" component={AboutPage} />
+          <Route path="/contact" component={ContactPage} />
+          <Route path="/analysis" component={AnalysisHubPage} />
+          <Route path="/export-editor" component={CanvaStandalonePage} />
+          <Route path="/analysis-hub" component={AnalysisHubPage} />
+          <Route path="/ndvi" component={NDVIPage} />
+          <Route path="/change-detection" component={ChangeDetectionPage} />
+          <Route path="/lst" component={LSTPage} />
+          <Route path="/rusle" component={RUSLEPage} />
+          <Route path="/slope" component={SlopePage} />
+          <Route path="/earthwork" component={EarthworkPage} />
+          <Route path="/landfill" component={LandfillPage} />
+          <Route path="/air" component={AirPollutionPage} />
+          <Route path="/landslide" component={LandslidePage} />
+          <Route path="/flood" component={FloodPage} />
+          <Route path="/drought" component={DroughtPage} />
+          <Route path="/uhi" component={UHIPage} />
+          <Route path="/accessibility" component={AccessibilityPage} />
+          <Route path="/habitat" component={HabitatSuitabilityPage} />
+          <Route path="/irrigation" component={IrrigationPage} />
+          <Route path="/water-harvesting" component={WaterHarvestingPage} />
+          <Route path="/wellscope" component={WellScopePage} />
+          <Route path="/biomass" component={BiomassPage} />
+          <Route path="/rare-data" component={RareDataPage} />
+          <Route path="/harvester" component={DataHarvesterPage} />
+          <Route path="/samples">
+            <GEEAuthGate>
+              <div className="h-full flex flex-col">
+                <div className="flex-1 overflow-hidden">
+                  <SampleDigitizationPage />
+                </div>
+              </div>
+            </GEEAuthGate>
+          </Route>
+          <Route path="/community" component={CommunityPage} />
+          <Route path="/admin/users" component={UserManagementPage} />
+          <Route path="/dashboard" component={DashboardPage} />
+          <Route path="/cloud-ingest" component={CloudIngestPage} />
+          <Route path="/services" component={PricingPage} />
+          <Route path="/academy" component={AcademyPage} />
+          <Route path="/blog" component={BlogPage} />
+          <Route component={NotFound} />
+        </Switch>
+      </Suspense>
     </Layout>
   );
 }

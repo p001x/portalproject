@@ -90,7 +90,8 @@ import random
 from datetime import timedelta
 
 def save_otp(email: str, expires_in_minutes: int = 10) -> str:
-    code = f"{random.randint(0, 9999):04d}"
+    # Generate cryptographically secure 6-digit code (100000 - 999999)
+    code = f"{secrets.randbelow(900000) + 100000:06d}"
     expires_at = (datetime.now(timezone.utc) + timedelta(minutes=expires_in_minutes)).isoformat()
     email_clean = email.strip().lower()
     with SessionLocal() as db:

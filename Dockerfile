@@ -30,5 +30,5 @@ WORKDIR $HOME/app/backend
 # Expose port 8080 (Cloud Run standard)
 EXPOSE 8080
 
-# Run the FastAPI app (Google Cloud Run injects the PORT environment variable, defaults to 8080)
-CMD sh -c "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1"
+# Run the FastAPI app with multi-worker concurrency
+CMD sh -c "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080} --workers 4 --timeout-keep-alive 65"

@@ -28,36 +28,49 @@ def init_db():
 
 init_db()
 
+_GEOIP_CACHE = {}
+
 async def fetch_country_from_ip(ip: str) -> str:
-    # Handle localhost
-    if ip in ("127.0.0.1", "::1", "localhost"):
+    if not ip or ip in ("127.0.0.1", "::1", "localhost", "unknown"):
         return "Localhost"
     
+    if ip in _GEOIP_CACHE:
+        return _GEOIP_CACHE[ip]
+
     try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
+        async with httpx.AsyncClient(timeout=1.5) as client:
             response = await client.get(f"http://ip-api.com/json/{ip}")
             data = response.json()
             if data.get("status") == "success":
-                return data.get("country", "Unknown")
-    except Exception as e:
-        logger.warning(f"Failed to fetch GeoIP for {ip}: {e}")
+                country = data.get("country", "Unknown")
+                _GEOIP_CACHE[ip] = country
+                return country
+    except Exception:
+        pass
     return "Unknown"
 
 async def log_visit(ip: str, endpoint: str):
     try:
-        country = await fetch_country_from_ip(ip)
-        timestamp = datetime.datetime.utcnow().isoformat()
+        # Resolve country quickly from cache, or default without hanging the request
+        if ip in _GEOIP_CACHE:
+            country = _GEOIP_CACHE[ip]
+        elif ip in ("127.0.0.1", "::1", "localhost", "unknown"):
+            country = "Localhost"
+        else:
+            country = "Unknown"
+            # Queue background task to update cache for future hits
+            asyncio.create_task(fetch_country_from_ip(ip))
+
+        timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
         
-        # Write to db synchronously, it's fast enough
         def _write_db():
-            conn = sqlite3.connect(DB_PATH)
-            c = conn.cursor()
-            c.execute(
-                "INSERT INTO visits (timestamp, ip, country, endpoint) VALUES (?, ?, ?, ?)",
-                (timestamp, ip, country, endpoint)
-            )
-            conn.commit()
-            conn.close()
+            with sqlite3.connect(DB_PATH, timeout=10.0) as conn:
+                c = conn.cursor()
+                c.execute(
+                    "INSERT INTO visits (timestamp, ip, country, endpoint) VALUES (?, ?, ?, ?)",
+                    (timestamp, ip, country, endpoint)
+                )
+                conn.commit()
             
         await asyncio.to_thread(_write_db)
     except Exception as e:

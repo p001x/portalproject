@@ -200,7 +200,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     logger.error(f"Global exception: {error_msg}")
     return JSONResponse(
         status_code=500,
-        content={"detail": f"Internal Server Error: {str(exc)}", "traceback": error_msg}
+        content={"detail": "An internal server error occurred. Please contact the administrator."}
     )
 
 app.add_middleware(
@@ -418,23 +418,24 @@ def forgot_password(req: ForgotPasswordRequest, request: Request):
             raise HTTPException(404, "No account was found with this email address. Please check your spelling or register.")
 
         token = generate_reset_token(email)
-        origin = request.headers.get("origin")
-        if not origin:
-            referer = request.headers.get("referer")
-            if referer:
-                from urllib.parse import urlparse
-                parsed = urlparse(referer)
-                origin = f"{parsed.scheme}://{parsed.netloc}"
-        if not origin:
-            x_host = request.headers.get("x-forwarded-host")
-            if x_host:
-                x_proto = request.headers.get("x-forwarded-proto", "https")
-                origin = f"{x_proto}://{x_host}"
-        if not origin:
-            origin = "https://portalproject.spetro-geoportal.workers.dev"
+        allowed_hosts = [
+            "portalproject.spetro-geoportal.workers.dev",
+            "localhost:5000",
+            "localhost:8001",
+            "127.0.0.1:5000",
+            "127.0.0.1:8001",
+        ]
+        default_frontend = os.environ.get("FRONTEND_URL", "https://portalproject.spetro-geoportal.workers.dev").rstrip("/")
+        
+        origin = request.headers.get("origin") or ""
+        from urllib.parse import urlparse
+        parsed = urlparse(origin) if origin else None
+        if parsed and parsed.netloc in allowed_hosts:
+            base_url = f"{parsed.scheme}://{parsed.netloc}"
+        else:
+            base_url = default_frontend
 
-        origin = origin.rstrip("/")
-        reset_link = f"{origin}/reset-password?token={token}"
+        reset_link = f"{base_url}/reset-password?token={token}"
 
         try:
             from email_sender import send_reset_email
@@ -442,10 +443,6 @@ def forgot_password(req: ForgotPasswordRequest, request: Request):
             send_reset_email(email, reset_link, user_name, resend_key=request.headers.get("x-resend-key"))
         except Exception as ex:
             logger.error("Failed to send reset email: %s", ex)
-            print(f"\n=========================================\n"
-                  f"🔐 PASSWORD RESET RECOVERY LINK FOR {email}\n"
-                  f"LINK: {reset_link}\n"
-                  f"=========================================\n")
 
         return {
             "ok": True, 
