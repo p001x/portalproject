@@ -4,7 +4,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
 } from "recharts";
-import { Loader2, Trash2, FileText, Printer , Play, Tag, RotateCcw, Map } from "lucide-react";
+import { Loader2, Trash2, FileText, Printer , Play, Tag, RotateCcw, Map, Sliders, BarChart3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
@@ -14,6 +14,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { api } from "@/lib/api";
 import type { HabitatExportResult, AOIConfig, AhpData } from "@/lib/api";
 import { DistrictMap, LegendItem } from "@/components/DistrictMap";
@@ -174,6 +176,10 @@ export function HabitatSuitabilityPage() {
   const [method, setMethod] = useState("natural_breaks");
   const [customClassNames, setCustomClassNames] = useState<string[]>(() => getDefaultLabels(5));
   const [activeTab, setActiveTab] = useState("map");
+
+  const isMobile = useIsMobile();
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const [mobileTab, setMobileTab] = useState<"params" | "results">("params");
 
   // Initialize from config
   useEffect(() => {
@@ -342,30 +348,13 @@ export function HabitatSuitabilityPage() {
     Object.entries(config.factor_meta).map(([k, v]: any) => [k, v.label])
   ) as Record<string, string>;
 
-  return (
-    <div className="space-y-6 max-w-[1600px] mx-auto">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">Crane Habitat Suitability</h1>
-          <p className="text-muted-foreground mt-2 max-w-3xl">
-            Multi-Criteria Evaluation (MCE) for Grey Crowned Cranes using the Analytical Hierarchy Process (AHP).
-          </p>
+  const controlsContent = (
+    <div className="flex flex-col gap-5 p-5">
+      <div className="space-y-5">
+        <div className="space-y-3">
+          <Label>Study Area</Label>
+          <StudyAreaSelector value={aoi} onChange={setAoi} />
         </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        <div className="lg:col-span-1">
-          <div className="bg-card border rounded-lg shadow-sm flex flex-col h-[calc(100vh-160px)] sticky top-20 overflow-hidden">
-            <h3 className="font-semibold text-lg flex items-center border-b p-5 shrink-0">
-              Configuration
-            </h3>
-            
-            <div className="flex-1 overflow-y-auto min-h-0 px-5 py-4">
-              <div className="space-y-5">
-                <div className="space-y-3">
-                  <Label>Study Area</Label>
-                  <StudyAreaSelector value={aoi} onChange={setAoi} />
-                </div>
 
                 <div className="space-y-1.5">
                   <Label className="text-xs text-muted-foreground">Analysis Year</Label>
@@ -540,18 +529,18 @@ export function HabitatSuitabilityPage() {
                   </div>
                 </div>
               </div>
-            </div>
 
-            <div className="p-5 border-t shrink-0">
+            <div className="pt-4 shrink-0">
               <Button onClick={runAnalysis} disabled={isPending} className="w-full h-11 text-base">
                 {isPending && <Loader2 className="mr-2 h-5 w-5 animate-spin" />}
                 {isPending ? "Generating Map..." : "Run AHP Overlay"}
               </Button>
             </div>
-          </div>
-        </div>
+    </div>
+  );
 
-        <div className="lg:col-span-3 flex flex-col h-[calc(100vh-160px)] sticky top-20">
+  const mainContent = (
+    <div className="h-full flex flex-col w-full overflow-y-auto">
           {isPending && !anyData ? (
             <div className="h-[600px] border rounded-lg flex flex-col items-center justify-center bg-slate-50/50 text-slate-400">
               <Loader2 className="w-8 h-8 animate-spin mb-4" />
@@ -772,6 +761,137 @@ export function HabitatSuitabilityPage() {
               <p className="text-sm mt-1">Select a study area and adjust AHP weights, then click Run Analysis.</p>
             </div>
           )}
+    </div>
+  );
+
+  if (isMobile) {
+    return (
+      <div className="relative w-full h-[calc(100vh-65px)] overflow-hidden flex flex-col bg-background">
+        <div className="flex-1 w-full h-full relative overflow-hidden">
+          {mainContent}
+        </div>
+
+        {/* Floating Mobile Bottom Action Bar */}
+        <div className="absolute bottom-4 left-4 right-4 z-[1000] flex items-center gap-2 bg-background/95 backdrop-blur-md p-2 rounded-2xl border shadow-xl">
+          <Button
+            variant="outline"
+            size="sm"
+            className="flex-1 gap-1.5 text-xs font-semibold h-10 rounded-xl"
+            onClick={() => {
+              setMobileTab("params");
+              setMobileDrawerOpen(true);
+            }}
+          >
+            <Sliders className="w-4 h-4 text-primary" />
+            Parameters
+          </Button>
+
+          <Button
+            size="sm"
+            className="flex-1 gap-1.5 text-xs font-semibold h-10 rounded-xl bg-primary text-primary-foreground shadow-md"
+            onClick={runAnalysis}
+            disabled={isPending}
+          >
+            {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+            {isPending ? "Generating…" : "Run AHP"}
+          </Button>
+
+          {anyData && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1 gap-1.5 text-xs font-semibold h-10 rounded-xl"
+              onClick={() => {
+                setMobileTab("results");
+                setMobileDrawerOpen(true);
+              }}
+            >
+              <BarChart3 className="w-4 h-4 text-blue-500" />
+              Summary
+            </Button>
+          )}
+        </div>
+
+        {/* Mobile Slide-Up Drawer */}
+        <Sheet open={mobileDrawerOpen} onOpenChange={setMobileDrawerOpen}>
+          <SheetContent side="bottom" className="h-[82vh] max-h-[82vh] rounded-t-3xl p-0 flex flex-col z-[1200]">
+            <SheetHeader className="p-4 border-b shrink-0 flex flex-row items-center justify-between">
+              <SheetTitle className="text-base font-bold flex items-center gap-2">
+                {mobileTab === "params" ? (
+                  <>
+                    <Sliders className="w-4 h-4 text-primary" />
+                    Habitat Parameters & AHP Weights
+                  </>
+                ) : (
+                  <>
+                    <BarChart3 className="w-4 h-4 text-blue-500" />
+                    Suitability Summary & Class Areas
+                  </>
+                )}
+              </SheetTitle>
+            </SheetHeader>
+
+            <div className="flex-1 overflow-y-auto">
+              {mobileTab === "params" ? (
+                controlsContent
+              ) : (
+                <div className="p-5 space-y-4">
+                  {statsData?.class_areas_km2 && (
+                    <div className="bg-card border rounded-xl p-3 space-y-2">
+                      <p className="text-xs font-semibold text-foreground">Suitability Class Areas (km²)</p>
+                      <div className="space-y-1.5 text-xs">
+                        {Object.entries(statsData.class_areas_km2).map(([cls, km2]: [string, any]) => (
+                          <div key={cls} className="flex justify-between items-center py-1 border-b border-border/50 last:border-none">
+                            <span className="text-muted-foreground">{cls}</span>
+                            <span className="font-semibold">{Number(km2).toFixed(1)} km²</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <Button
+                    variant="outline"
+                    className="w-full gap-2 mt-2"
+                    onClick={() => setMobileTab("params")}
+                  >
+                    <Sliders className="w-4 h-4" /> Edit Parameters & AHP Weights
+                  </Button>
+                </div>
+              )}
+            </div>
+          </SheetContent>
+        </Sheet>
+      </div>
+    );
+  }
+
+  // Desktop View: Keep 100% original layout
+  return (
+    <div className="space-y-6 max-w-[1600px] mx-auto p-4 md:p-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">Crane Habitat Suitability</h1>
+          <p className="text-muted-foreground mt-2 max-w-3xl">
+            Multi-Criteria Evaluation (MCE) for Grey Crowned Cranes using the Analytical Hierarchy Process (AHP).
+          </p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+        <div className="lg:col-span-1">
+          <div className="bg-card border rounded-lg shadow-sm flex flex-col h-[calc(100vh-160px)] sticky top-20 overflow-hidden">
+            <h3 className="font-semibold text-lg flex items-center border-b p-5 shrink-0">
+              Configuration
+            </h3>
+            <div className="flex-1 overflow-y-auto min-h-0">
+              {controlsContent}
+            </div>
+          </div>
+        </div>
+
+        <div className="lg:col-span-3 flex flex-col h-[calc(100vh-160px)] sticky top-20">
+          {mainContent}
         </div>
       </div>
     </div>

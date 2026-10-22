@@ -166,6 +166,39 @@ function FlyTo({ center, zoom, bbox }: { center?: [number, number]; zoom: number
   return null;
 }
 
+/** Automatically calls map.invalidateSize() when container resizes or orientation changes */
+function MapResizeHandler() {
+  const map = useMap();
+  useEffect(() => {
+    const handleResize = () => {
+      map.invalidateSize();
+    };
+    window.addEventListener("resize", handleResize);
+    window.addEventListener("orientationchange", handleResize);
+
+    const container = map.getContainer();
+    let ro: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined" && container) {
+      ro = new ResizeObserver(() => {
+        map.invalidateSize();
+      });
+      ro.observe(container);
+    }
+
+    const timer = setTimeout(() => {
+      map.invalidateSize();
+    }, 250);
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+      window.removeEventListener("orientationchange", handleResize);
+      if (ro) ro.disconnect();
+      clearTimeout(timer);
+    };
+  }, [map]);
+  return null;
+}
+
 /** Leaflet scale bar (metric). */
 function ScaleBar() {
   const map = useMap();
@@ -388,6 +421,7 @@ export function DistrictMap({
         )}
         <FlyTo center={effectiveCenter} zoom={zoom} bbox={effectiveBbox as any} />
         <ScaleBar />
+        <MapResizeHandler />
       </MapContainer>
 
       {/* Map title */}

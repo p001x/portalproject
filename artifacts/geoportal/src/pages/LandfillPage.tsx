@@ -25,6 +25,14 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { Sliders, BarChart3 } from "lucide-react";
 
 const DISTRICTS = [
   "Bugesera","Burera","Gakenke","Gasabo","Gatsibo","Gicumbi","Gisagara",
@@ -508,22 +516,23 @@ export function LandfillPage() {
     year: "numeric", month: "long", day: "numeric",
   });
 
-  return (
-    <ResizablePanelGroup direction="horizontal" className="h-full items-stretch">
-      {/* ── Controls sidebar ─────────────────────────────────────── */}
-      <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
-        <aside className="h-full border-r bg-card flex flex-col gap-4 p-4 overflow-y-auto">
-        <div className="flex items-center gap-2 text-primary font-semibold text-base">
-          <Trash2 className="w-5 h-5" />
-          Landfill Suitability
-        </div>
-        <p className="text-xs text-muted-foreground leading-relaxed">
-          AHP-weighted overlay for landfill site selection using river distance, residential
-          distance, slope, road accessibility, and land cover.
-        </p>
+  const isMobile = useIsMobile();
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const [mobileTab, setMobileTab] = useState<"params" | "results">("params");
 
-        {/* District */}
-        <StudyAreaSelector value={aoi} onChange={setAoi} />
+  const controlsContent = (
+    <div className="flex flex-col gap-4 p-4 overflow-y-auto h-full">
+      <div className="flex items-center gap-2 text-primary font-semibold text-base">
+        <Trash2 className="w-5 h-5" />
+        Landfill Suitability
+      </div>
+      <p className="text-xs text-muted-foreground leading-relaxed">
+        AHP-weighted overlay for landfill site selection using river distance, residential
+        distance, slope, road accessibility, and land cover.
+      </p>
+
+      {/* District */}
+      <StudyAreaSelector value={aoi} onChange={setAoi} />
 
         {/* Classes */}
         
@@ -652,7 +661,10 @@ export function LandfillPage() {
 
         <Button
           className="w-full gap-2 mt-4"
-          onClick={handleAnalyze}
+          onClick={() => {
+            handleAnalyze();
+            if (isMobile) setMobileDrawerOpen(false);
+          }}
           disabled={isPending}
         >
           {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
@@ -662,36 +674,44 @@ export function LandfillPage() {
         {error && (
           <p className="text-xs text-destructive bg-destructive/10 rounded p-2">{error.message}</p>
         )}
-      </aside>
+      </div>
+  );
 
-      {/* ── Results ──────────────────────────────────────────────── */}
-      </ResizablePanel>
-      
-      <ResizableHandle withHandle />
-      
-      <ResizablePanel defaultSize={75}>
-        <main className="h-full overflow-y-auto p-6">
-        {!data && !isPending && (
-          <div className="h-full relative bg-muted/20 rounded-lg overflow-hidden border">
-            <DistrictMap aoi={aoi} customGeojson={aoi.type === "custom" && aoi.geojson ? JSON.parse(aoi.geojson) : undefined} basemap="satellite" />
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-4 z-[1000]">
-              <div className="bg-background/80 backdrop-blur-md p-6 rounded-2xl shadow-xl border border-primary/20 text-center max-w-sm pointer-events-none transition-all hover:scale-105 duration-300">
-                <h3 className="text-xl font-bold mb-2 text-foreground">Analysis Configuration</h3>
-                <p className="text-sm text-muted-foreground">
-                  Select a study area and parameters from the sidebar, then click run to visualize the results here.
-                </p>
-              </div>
+  const mainContent = (
+    <main className="h-full overflow-y-auto p-3 md:p-6 pb-20 md:pb-6">
+      {!data && !isPending && (
+        <div className="h-full relative bg-muted/20 rounded-lg overflow-hidden border min-h-[450px]">
+          <DistrictMap aoi={aoi} customGeojson={aoi.type === "custom" && aoi.geojson ? JSON.parse(aoi.geojson) : undefined} basemap="satellite" />
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-4 z-[1000]">
+            <div className="bg-background/85 backdrop-blur-md p-5 rounded-2xl shadow-xl border border-primary/20 text-center max-w-sm pointer-events-auto transition-all">
+              <h3 className="text-lg md:text-xl font-bold mb-2 text-foreground">Landfill Site Analysis</h3>
+              <p className="text-xs md:text-sm text-muted-foreground mb-4">
+                Select your area and AHP criteria weights, then run to assess candidate landfill locations.
+              </p>
+              {isMobile && (
+                <Button
+                  size="sm"
+                  className="gap-2 w-full"
+                  onClick={() => {
+                    setMobileTab("params");
+                    setMobileDrawerOpen(true);
+                  }}
+                >
+                  <Sliders className="w-4 h-4" /> Open Parameters
+                </Button>
+              )}
             </div>
           </div>
-        )}
+        </div>
+      )}
 
-        {isPending && (
-          <div className="h-full flex flex-col items-center justify-center gap-3 text-muted-foreground">
-            <Loader2 className="w-8 h-8 animate-spin text-primary" />
-            <p>Analyzing landfill suitability for {aoi.name || 'Custom'}…</p>
-            <p className="text-xs">GEE analysis typically takes 15–60 seconds.</p>
-          </div>
-        )}
+      {isPending && (
+        <div className="h-full flex flex-col items-center justify-center gap-3 text-muted-foreground min-h-[450px]">
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+          <p>Analyzing landfill suitability for {aoi.name || 'Custom'}…</p>
+          <p className="text-xs">GEE analysis typically takes 15–60 seconds.</p>
+        </div>
+      )}
 
         {data && (
           <Tabs defaultValue="map" className="h-full flex flex-col">
@@ -1055,6 +1075,134 @@ export function LandfillPage() {
           </Tabs>
         )}
       </main>
+  );
+
+  // On Mobile: Full-screen map with floating action bar & sliding drawer
+  if (isMobile) {
+    return (
+      <div className="relative w-full h-[calc(100vh-65px)] overflow-hidden flex flex-col bg-background">
+        <div className="flex-1 w-full h-full overflow-hidden">
+          {mainContent}
+        </div>
+
+        {/* Floating Mobile Bottom Navigation Bar */}
+        <div className="absolute bottom-3 left-3 right-3 z-[1100] flex items-center justify-between gap-2 p-2 rounded-2xl bg-card/95 backdrop-blur-md border border-border shadow-2xl">
+          <Button
+            variant="outline"
+            size="sm"
+            className="flex-1 gap-1.5 text-xs font-semibold h-10 rounded-xl"
+            onClick={() => {
+              setMobileTab("params");
+              setMobileDrawerOpen(true);
+            }}
+          >
+            <Sliders className="w-4 h-4 text-primary" />
+            Parameters
+          </Button>
+
+          <Button
+            size="sm"
+            className="flex-1 gap-1.5 text-xs font-semibold h-10 rounded-xl shadow-md"
+            onClick={handleAnalyze}
+            disabled={isPending}
+          >
+            {isPending ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Trash2 className="w-4 h-4" />
+            )}
+            {isPending ? "Computing..." : "Run Analysis"}
+          </Button>
+
+          {data && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1 gap-1.5 text-xs font-semibold h-10 rounded-xl"
+              onClick={() => {
+                setMobileTab("results");
+                setMobileDrawerOpen(true);
+              }}
+            >
+              <BarChart3 className="w-4 h-4 text-emerald-500" />
+              Summary
+            </Button>
+          )}
+        </div>
+
+        {/* Mobile Slide-Up Drawer */}
+        <Sheet open={mobileDrawerOpen} onOpenChange={setMobileDrawerOpen}>
+          <SheetContent side="bottom" className="h-[82vh] max-h-[82vh] rounded-t-3xl p-0 flex flex-col z-[1200]">
+            <SheetHeader className="p-4 border-b shrink-0 flex flex-row items-center justify-between">
+              <SheetTitle className="text-base font-bold flex items-center gap-2">
+                {mobileTab === "params" ? (
+                  <>
+                    <Sliders className="w-4 h-4 text-primary" />
+                    Landfill Siting Criteria & AHP Weights
+                  </>
+                ) : (
+                  <>
+                    <BarChart3 className="w-4 h-4 text-emerald-500" />
+                    Suitability Class Summary
+                  </>
+                )}
+              </SheetTitle>
+            </SheetHeader>
+
+            <div className="flex-1 overflow-y-auto">
+              {mobileTab === "params" ? (
+                controlsContent
+              ) : (
+                <div className="p-5 space-y-4">
+                  {data?.class_areas_km2 && (
+                    <div className="bg-card border rounded-xl p-3 space-y-2">
+                      <p className="text-xs font-semibold text-foreground">Suitability Class Areas (km²)</p>
+                      <div className="space-y-1.5 text-xs">
+                        {Object.entries(data.class_areas_km2).map(([cls, km2]) => (
+                          <div key={cls} className="flex justify-between items-center py-1 border-b border-border/50 last:border-none">
+                            <span className="text-muted-foreground">{cls}</span>
+                            <span className="font-semibold">{Number(km2).toFixed(1)} km²</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {data?.ahp_data && (
+                    <div className="rounded-xl bg-green-50 border border-green-200 p-3 text-xs text-green-800">
+                      <strong>AHP Consistency Ratio:</strong> CR = {data.ahp_data.cr.toFixed(2)} (Consistent)
+                    </div>
+                  )}
+
+                  <Button
+                    variant="outline"
+                    className="w-full gap-2 mt-2"
+                    onClick={() => setMobileTab("params")}
+                  >
+                    <Sliders className="w-4 h-4" /> Edit Criteria & Weights
+                  </Button>
+                </div>
+              )}
+            </div>
+          </SheetContent>
+        </Sheet>
+      </div>
+    );
+  }
+
+  // Desktop View: Keep 100% original ResizablePanelGroup layout
+  return (
+    <ResizablePanelGroup direction="horizontal" className="h-full items-stretch">
+      <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
+        <aside className="h-full border-r bg-card flex flex-col overflow-y-auto">
+          {controlsContent}
+        </aside>
+      </ResizablePanel>
+      
+      <ResizableHandle withHandle />
+      
+      <ResizablePanel defaultSize={75}>
+        {mainContent}
       </ResizablePanel>
     </ResizablePanelGroup>
   );

@@ -2,7 +2,9 @@ import { useState, useRef, useEffect } from "react";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Loader2, Box, Info, Map as MapIcon, Sliders, DollarSign, Calculator, Leaf, ArrowRight, ArrowDown } from "lucide-react";
+import { Loader2, Box, Info, Map as MapIcon, Sliders, DollarSign, Calculator, Leaf, ArrowRight, ArrowDown, BarChart3, FileText } from "lucide-react";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { MapContainer, TileLayer, FeatureGroup, LayersControl, Polygon, Marker, Popup, Tooltip, useMap, Polyline } from "react-leaflet";
 import L from "leaflet";
 import { EditControl } from "react-leaflet-draw";
@@ -25,6 +27,9 @@ function MapBoundsUpdater({ coords }: { coords: number[][] | null }) {
 }
 
 export default function EarthworkPage() {
+  const isMobile = useIsMobile();
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const [mobileTab, setMobileTab] = useState<"params" | "results">("params");
   const [polygonCoords, setPolygonCoords] = useState<number[][] | null>(null);
   const [zones, setZones] = useState<any[]>([]);
   const [isTerracing, setIsTerracing] = useState<boolean>(false);
@@ -252,6 +257,7 @@ export default function EarthworkPage() {
       setError("Please draw a polygon on the map first.");
       return;
     }
+    if (isMobile) setMobileDrawerOpen(false);
     setError(null);
     setIsPending(true);
     
@@ -475,7 +481,44 @@ export default function EarthworkPage() {
           </div>
         </div>
       )}
-      {/* Top Ribbon (ArcGIS Style) */}
+      {/* Mobile Top Header */}
+      {isMobile && (
+        <div className="flex items-center justify-between px-3 py-2 bg-[#1e293b] text-white shrink-0 z-[1000] border-b border-slate-700">
+          <div className="flex items-center gap-2 font-semibold text-xs">
+            <Box className="w-4 h-4 text-[#ff5a5f]" />
+            <span>Earthwork Pro</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <select 
+              value={industryMode} 
+              onChange={(e) => {
+                setIndustryMode(e.target.value as any);
+                setResult(null);
+                setIsTerracing(false);
+              }}
+              className="h-7 text-xs rounded bg-white/10 text-white font-medium px-2 border-0 focus:ring-0 outline-none cursor-pointer"
+            >
+              <option value="civil" className="text-black">🚧 Civil</option>
+              <option value="hydrology" className="text-black">💧 Hydrology</option>
+              <option value="mining" className="text-black">⛏️ Mining</option>
+            </select>
+            {result && (
+              <Button 
+                onClick={() => setShow3DViewer(!show3DViewer)} 
+                variant="outline" 
+                size="sm" 
+                className="h-7 w-7 p-0 border-[#007AC2] text-[#007AC2] bg-white/5" 
+                title="3D Viewer"
+              >
+                <Box className="w-3.5 h-3.5" />
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Top Ribbon (ArcGIS Style) - Desktop Only */}
+      {!isMobile && (
       <div className="flex flex-col border-b dark:border-slate-800 shadow-sm z-[1000] relative bg-[#f5f5f5] dark:bg-slate-900">
         
         {/* Top Header / Module Title */}
@@ -735,9 +778,10 @@ export default function EarthworkPage() {
            )}
         </div>
       </div>
+      )}
 
       {/* Main Content Area (Map + Floating Results) */}
-      <div className="flex-1 relative flex bg-gray-100">
+      <div className="flex-1 relative flex bg-gray-100 overflow-hidden">
          
          {/* Map Container */}
          <MapContainer center={[-1.9441, 30.0619]} zoom={11} className="w-full h-full z-[0]">
@@ -818,7 +862,7 @@ export default function EarthworkPage() {
          
          {/* Floating Cross-Section Profile (Bottom) */}
          {profileData && (
-          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 w-[600px] h-48 bg-white/95 backdrop-blur shadow-xl border rounded-lg z-[1000] flex flex-col overflow-hidden">
+          <div className={`absolute left-1/2 -translate-x-1/2 ${isMobile ? 'bottom-20 w-[94vw] h-40' : 'bottom-6 w-[600px] h-48'} bg-white/95 dark:bg-slate-900/95 backdrop-blur shadow-xl border rounded-lg z-[1000] flex flex-col overflow-hidden`}>
             <div className="flex items-center justify-between px-3 py-1.5 border-b bg-gray-50">
               <span className="text-xs font-bold text-gray-700 flex items-center gap-1.5"><Sliders className="w-3 h-3" /> Cross-Section Profile</span>
               <button className="text-gray-400 hover:text-red-500" onClick={() => setProfileData(null)}>âœ–</button>
@@ -838,8 +882,8 @@ export default function EarthworkPage() {
           </div>
          )}
 
-         {/* ArcGIS Dockable Contents Pane (Right Side) */}
-         {result && (
+         {/* ArcGIS Dockable Contents Pane (Right Side) - Desktop Only */}
+         {result && !isMobile && (
            <div className="absolute top-4 right-4 z-[1000] w-[320px] bg-card shadow-xl rounded-md border flex flex-col max-h-[calc(100%-2rem)] overflow-hidden">
              {/* Header */}
              <div className="px-3 py-2 border-b bg-gray-50 flex items-center justify-between shrink-0">
@@ -910,6 +954,311 @@ export default function EarthworkPage() {
            </div>
          )}
          
+         
+         {/* Floating Mobile Bottom Navigation Bar */}
+         {isMobile && (
+          <div className="absolute bottom-3 left-3 right-3 z-[1100] flex items-center justify-between gap-2 p-2 rounded-2xl bg-card/95 backdrop-blur-md border border-border shadow-2xl">
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1 gap-1.5 text-xs font-semibold h-10 rounded-xl"
+              onClick={() => {
+                setMobileTab("params");
+                setMobileDrawerOpen(true);
+              }}
+            >
+              <Sliders className="w-4 h-4 text-primary" />
+              Grading
+            </Button>
+
+            <Button
+              size="sm"
+              className="flex-1 gap-1.5 text-xs font-semibold h-10 rounded-xl shadow-md bg-[#007AC2] hover:bg-[#005a8f] text-white"
+              onClick={handleAnalyze}
+              disabled={isPending || (!polygonCoords && zones.length === 0)}
+            >
+              {isPending ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Calculator className="w-4 h-4" />
+              )}
+              {isPending ? "Computing..." : "Run Analysis"}
+            </Button>
+
+            {result && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="flex-1 gap-1.5 text-xs font-semibold h-10 rounded-xl"
+                onClick={() => {
+                  setMobileTab("results");
+                  setMobileDrawerOpen(true);
+                }}
+              >
+                <BarChart3 className="w-4 h-4 text-blue-500" />
+                Volumes
+              </Button>
+            )}
+          </div>
+         )}
+
+         {/* Mobile Slide-Up Drawer */}
+         {isMobile && (
+           <Sheet open={mobileDrawerOpen} onOpenChange={setMobileDrawerOpen}>
+             <SheetContent side="bottom" className="h-[84vh] max-h-[84vh] rounded-t-3xl p-0 flex flex-col z-[1200]">
+               <SheetHeader className="p-4 border-b shrink-0 flex flex-row items-center justify-between">
+                 <SheetTitle className="text-base font-bold flex items-center gap-2">
+                   {mobileTab === "params" ? (
+                     <>
+                       <Sliders className="w-4 h-4 text-primary" />
+                       Earthwork Grading & Design Parameters
+                     </>
+                   ) : (
+                     <>
+                       <Calculator className="w-4 h-4 text-[#007AC2]" />
+                       Volumetric Report & Strata Breakdown
+                     </>
+                   )}
+                 </SheetTitle>
+               </SheetHeader>
+
+               <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                 {mobileTab === "params" ? (
+                   <div className="space-y-4">
+                     {/* Boundary notice */}
+                     <div className="p-3 bg-muted/40 border rounded-xl text-xs flex justify-between items-center">
+                       <div>
+                         <p className="font-semibold text-foreground">Site Boundary</p>
+                         <p className="text-muted-foreground mt-0.5">
+                           {polygonCoords ? `${polygonCoords.length - 1} vertices digitized` : "Draw a polygon on map using toolbar on top-left"}
+                         </p>
+                       </div>
+                       <label className="flex items-center gap-1 font-bold text-[#007AC2] cursor-pointer">
+                         <input type="checkbox" checked={isTerracing} onChange={(e) => setIsTerracing(e.target.checked)} className="w-3 h-3 accent-[#007AC2]" />
+                         Terracing
+                       </label>
+                     </div>
+
+                     {/* Constraints based on mode */}
+                     {industryMode === "civil" && (
+                       <div className="bg-card border rounded-xl p-3.5 space-y-3">
+                         <div className="flex justify-between items-center border-b pb-2">
+                           <span className="text-xs font-bold text-foreground">Grading Constraints</span>
+                           <label className="flex items-center gap-1 text-xs font-bold text-[#ff5a5f] cursor-pointer">
+                             <input type="checkbox" checked={autoBalance} onChange={(e) => setAutoBalance(e.target.checked)} className="w-3 h-3 accent-[#ff5a5f]" />
+                             Auto-Balance
+                           </label>
+                         </div>
+                         <div className="grid grid-cols-2 gap-3">
+                           <div>
+                             <span className="text-[11px] text-muted-foreground">Target Elevation (m)</span>
+                             <input type="number" value={targetElevation} onChange={(e) => setTargetElevation(e.target.value === "" ? "" : Number(e.target.value))} disabled={autoBalance} className="w-full h-8 text-xs rounded-md border border-input bg-background px-2 mt-1 disabled:opacity-50" placeholder="Auto" />
+                           </div>
+                           <div>
+                             <span className="text-[11px] text-muted-foreground">Slope Grade (%)</span>
+                             <input type="number" step="0.5" value={slopeGrade} onChange={(e) => setSlopeGrade(Number(e.target.value))} className="w-full h-8 text-xs rounded-md border border-input bg-background px-2 mt-1" />
+                           </div>
+                           <div>
+                             <span className="text-[11px] text-muted-foreground">Azimuth (°)</span>
+                             <input type="number" value={slopeAngle} onChange={(e) => setSlopeAngle(Number(e.target.value))} className="w-full h-8 text-xs rounded-md border border-input bg-background px-2 mt-1" />
+                           </div>
+                           <div>
+                             <span className="text-[11px] text-muted-foreground">Batter Slope (H:1V)</span>
+                             <input type="number" step="0.5" value={batterRatio} onChange={(e) => setBatterRatio(Number(e.target.value))} className="w-full h-8 text-xs rounded-md border border-input bg-background px-2 mt-1 text-green-600 font-semibold" />
+                           </div>
+                         </div>
+                       </div>
+                     )}
+
+                     {industryMode === "hydrology" && (
+                       <div className="bg-card border rounded-xl p-3.5 space-y-3">
+                         <span className="text-xs font-bold text-foreground">Retention Basin / Pond</span>
+                         <div className="grid grid-cols-2 gap-3">
+                           <div>
+                             <span className="text-[11px] text-muted-foreground">Max Depth (m)</span>
+                             <input type="number" value={pondMaxDepth} onChange={(e) => setPondMaxDepth(Number(e.target.value))} className="w-full h-8 text-xs rounded-md border border-input bg-background px-2 mt-1" />
+                           </div>
+                           <div>
+                             <span className="text-[11px] text-muted-foreground">Side Slope (H:1V)</span>
+                             <input type="number" step="0.5" value={pondSideSlope} onChange={(e) => setPondSideSlope(Number(e.target.value))} className="w-full h-8 text-xs rounded-md border border-input bg-background px-2 mt-1" />
+                           </div>
+                         </div>
+                       </div>
+                     )}
+
+                     {industryMode === "mining" && (
+                       <div className="bg-card border rounded-xl p-3.5 space-y-3">
+                         <span className="text-xs font-bold text-foreground">Stockpile & Bench Design</span>
+                         <div className="grid grid-cols-2 gap-3">
+                           <div>
+                             <span className="text-[11px] text-muted-foreground">Angle of Repose (°)</span>
+                             <input type="number" value={stockpileReposeAngle} onChange={(e) => setStockpileReposeAngle(Number(e.target.value))} className="w-full h-8 text-xs rounded-md border border-input bg-background px-2 mt-1" />
+                           </div>
+                           <div>
+                             <span className="text-[11px] text-muted-foreground">Bench Width (m)</span>
+                             <input type="number" value={stockpileBenchWidth} onChange={(e) => setStockpileBenchWidth(Number(e.target.value))} className="w-full h-8 text-xs rounded-md border border-input bg-background px-2 mt-1" />
+                           </div>
+                         </div>
+                       </div>
+                     )}
+
+                     {/* Materials & Geotechnical */}
+                     <div className="bg-card border rounded-xl p-3.5 space-y-3">
+                       <span className="text-xs font-bold text-foreground">Soil & Bulking Properties</span>
+                       <div className="grid grid-cols-2 gap-3">
+                         <div>
+                           <span className="text-[11px] text-muted-foreground">Topsoil Stripping (m)</span>
+                           <input type="number" step="0.1" value={topsoilDepth} onChange={(e) => setTopsoilDepth(Number(e.target.value))} className="w-full h-8 text-xs rounded-md border border-input bg-background px-2 mt-1 text-orange-600 font-semibold" />
+                         </div>
+                         <div>
+                           <span className="text-[11px] text-muted-foreground">Soil Preset</span>
+                           <select 
+                             value={soilPreset} 
+                             onChange={(e) => {
+                               setSoilPreset(e.target.value);
+                               const preset = SOIL_PRESETS.find(p => p.name === e.target.value);
+                               if (preset && preset.name !== "Custom") {
+                                 setSwellFactor(preset.swell);
+                                 setShrinkFactor(preset.shrink);
+                               }
+                             }} 
+                             className="w-full h-8 text-xs rounded-md border border-input bg-background px-2 mt-1"
+                           >
+                             {SOIL_PRESETS.map(p => (
+                               <option key={p.name} value={p.name}>{p.name}</option>
+                             ))}
+                           </select>
+                         </div>
+                         <div>
+                           <span className="text-[11px] text-muted-foreground">Swell Factor</span>
+                           <input type="number" step="0.01" value={swellFactor} onChange={(e) => setSwellFactor(Number(e.target.value))} className="w-full h-8 text-xs rounded-md border border-input bg-background px-2 mt-1" />
+                         </div>
+                         <div>
+                           <span className="text-[11px] text-muted-foreground">Shrink Factor</span>
+                           <input type="number" step="0.01" value={shrinkFactor} onChange={(e) => setShrinkFactor(Number(e.target.value))} className="w-full h-8 text-xs rounded-md border border-input bg-background px-2 mt-1" />
+                         </div>
+                       </div>
+                     </div>
+
+                     {/* Unit Costs */}
+                     <div className="bg-card border rounded-xl p-3.5 space-y-3">
+                       <span className="text-xs font-bold text-foreground">Excavation Economics</span>
+                       <div className="grid grid-cols-2 gap-3">
+                         <div>
+                           <span className="text-[11px] text-muted-foreground">Cut Rate ($/m³)</span>
+                           <input type="number" value={costCut} onChange={(e) => setCostCut(Number(e.target.value))} className="w-full h-8 text-xs rounded-md border border-input bg-background px-2 mt-1 text-red-600 font-semibold" />
+                         </div>
+                         <div>
+                           <span className="text-[11px] text-muted-foreground">Fill Rate ($/m³)</span>
+                           <input type="number" value={costFill} onChange={(e) => setCostFill(Number(e.target.value))} className="w-full h-8 text-xs rounded-md border border-input bg-background px-2 mt-1 text-blue-600 font-semibold" />
+                         </div>
+                       </div>
+                     </div>
+
+                     <Button
+                       className="w-full gap-2 rounded-xl shadow-md bg-[#007AC2] hover:bg-[#005a8f] text-white h-11 text-sm font-bold"
+                       onClick={handleAnalyze}
+                       disabled={isPending || (!polygonCoords && zones.length === 0)}
+                     >
+                       {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Calculator className="w-4 h-4" />}
+                       {isPending ? "Computing Cut & Fill..." : "Calculate Earthwork Volumes"}
+                     </Button>
+                   </div>
+                 ) : (
+                   result && (
+                     <div className="space-y-4">
+                       {/* Cut & Fill Summary Cards */}
+                       <div className="grid grid-cols-2 gap-3">
+                         <div className="bg-red-500/10 border border-red-500/20 p-3.5 rounded-2xl flex flex-col items-center text-center">
+                           <span className="text-red-700 dark:text-red-400 font-bold text-[11px] uppercase tracking-wider">Total Cut</span>
+                           <span className="text-red-600 dark:text-red-400 font-mono text-xl font-bold mt-1">
+                             {result.adjusted_cut_m3.toLocaleString()} m³
+                           </span>
+                         </div>
+                         <div className="bg-blue-500/10 border border-blue-500/20 p-3.5 rounded-2xl flex flex-col items-center text-center">
+                           <span className="text-blue-700 dark:text-blue-400 font-bold text-[11px] uppercase tracking-wider">Total Fill</span>
+                           <span className="text-blue-600 dark:text-blue-400 font-mono text-xl font-bold mt-1">
+                             {result.adjusted_fill_m3.toLocaleString()} m³
+                           </span>
+                         </div>
+                       </div>
+
+                       {/* Net Balance & Cost */}
+                       <div className="bg-card border rounded-2xl p-4 space-y-2.5">
+                         <div className="flex justify-between items-center text-sm">
+                           <span className="text-muted-foreground font-medium">Net Balance:</span>
+                           <span className={`font-mono font-bold text-base ${result.net_balance_m3 > 0 ? "text-red-600" : "text-blue-600"}`}>
+                             {Math.abs(result.net_balance_m3).toLocaleString()} m³ {result.net_balance_m3 > 0 ? "(Export)" : "(Import)"}
+                           </span>
+                         </div>
+                         <div className="flex justify-between items-center text-sm border-t pt-2">
+                           <span className="text-muted-foreground font-medium">Estimated Cost:</span>
+                           <span className="font-mono font-bold text-base text-primary">
+                             ${result.costs?.total_cost?.toLocaleString() || "0"}
+                           </span>
+                         </div>
+                       </div>
+
+                       {/* Strata breakdown */}
+                       {result.strata_breakdown && (
+                         <div className="bg-card border rounded-2xl p-4 space-y-2">
+                           <p className="text-xs font-bold text-foreground uppercase tracking-wider">Geological Strata</p>
+                           <div className="space-y-1.5 text-xs">
+                             {Object.entries(result.strata_breakdown).map(([layer, vol]: any) => (
+                               <div key={layer} className="flex justify-between items-center py-1 border-b border-border/50 last:border-none">
+                                 <span className="text-muted-foreground capitalize">{layer}</span>
+                                 <span className="font-mono font-semibold">{vol.toLocaleString()} m³</span>
+                               </div>
+                             ))}
+                           </div>
+                         </div>
+                       )}
+
+                       {/* Logistics */}
+                       {result.logistics && result.logistics.haul_distance_m > 0 && (
+                         <div className="bg-card border rounded-2xl p-4 space-y-2">
+                           <p className="text-xs font-bold text-foreground uppercase tracking-wider">Mass Haul Logistics</p>
+                           <div className="flex justify-between items-center text-xs">
+                             <span className="text-muted-foreground">Avg Haul Distance:</span>
+                             <span className="font-mono font-semibold">{result.logistics.haul_distance_m.toLocaleString()} m</span>
+                           </div>
+                           <div className="flex justify-between items-center text-xs">
+                             <span className="text-muted-foreground">Haul Effort:</span>
+                             <span className="font-mono font-semibold">{result.logistics.haul_effort_m3_km.toLocaleString()} m³·km</span>
+                           </div>
+                         </div>
+                       )}
+
+                       {/* Action buttons */}
+                       <div className="flex flex-col gap-2 pt-2">
+                         <Button
+                           className="w-full gap-2 rounded-xl h-11 bg-gradient-to-r from-primary to-blue-600 text-white font-bold shadow-md"
+                           onClick={() => {
+                             setMobileDrawerOpen(false);
+                             setShow3DViewer(true);
+                           }}
+                         >
+                           <Box className="w-4 h-4" /> Open 3D Topographic Mesh
+                         </Button>
+
+                         <Button
+                           variant="outline"
+                           className="w-full gap-2 rounded-xl h-10"
+                           onClick={handleGenerateReport}
+                           disabled={isReportPending}
+                         >
+                           {isReportPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
+                           Export PDF Engineering Report
+                         </Button>
+                       </div>
+                     </div>
+                   )
+                 )}
+               </div>
+             </SheetContent>
+           </Sheet>
+         )}
+
          {/* 3D Viewer Popup */}
          {show3DViewer && polygonCoords && (
           <div className="absolute inset-0 z-[2000] bg-background/80 backdrop-blur-sm flex items-center justify-center p-8">

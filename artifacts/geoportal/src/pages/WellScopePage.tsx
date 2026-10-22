@@ -4,14 +4,13 @@ import { useMutation } from "@tanstack/react-query";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
 } from "recharts";
-import { Loader2, Waves, FileText, Printer, AlertTriangle, Info, Download, Image as ImageIcon , Play, Tag, RotateCcw} from "lucide-react";
+import { Loader2, Waves, FileText, Printer, AlertTriangle, Info, Download, Image as ImageIcon , Play, Tag, RotateCcw, Sliders, BarChart3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
-
   Select,
   SelectContent,
   SelectItem,
@@ -24,6 +23,8 @@ import { DistrictMap, LegendItem } from "@/components/DistrictMap";
 import { ReportDownloadButton } from "@/components/ReportDownloadButton";
 import { StudyAreaSelector } from "@/components/StudyAreaSelector";
 import { MapExportControls } from "@/components/MapExportControls";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 
 const PALETTES = [
@@ -451,6 +452,10 @@ function printReport(data: any, analysisDate: string) {
   const [activeTab, setActiveTab] = useState("map");
   const [activeExportLayer, setActiveExportLayer] = useState<"continuous" | "classified" | FactorKey>("continuous");
 
+  const isMobile = useIsMobile();
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const [mobileTab, setMobileTab] = useState<"params" | "results">("params");
+
   const effectiveDistrictName = aoi.name || "Custom Study Area";
   
   const [weights, setWeights] = useState<Record<FactorKey, number>>(() => loadWeights(effectiveDistrictName));
@@ -603,10 +608,8 @@ function printReport(data: any, analysisDate: string) {
     ? mapData.classify.panels[0].tile_url 
     : mapData?.tile_url;
 
-  return (
-    <ResizablePanelGroup direction="horizontal" className="h-[calc(100vh-80px)] items-stretch">
-      <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
-        <aside className="h-full w-full md:border-b md:border-b-0 md:border-r bg-card flex flex-col p-5 md:overflow-y-auto">
+  const controlsContent = (
+    <div className="flex flex-col p-5">
           <div className="flex items-center gap-2 text-primary font-semibold text-lg mb-2">
             <Waves className="w-5 h-5 text-blue-500" />
             WellScope
@@ -776,13 +779,11 @@ function printReport(data: any, analysisDate: string) {
             {isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="w-4 h-4" />}
             {isPending ? "Calculating..." : "Run Suitability Model"}
           </Button>
-        </aside>
-      </ResizablePanel>
+    </div>
+  );
 
-      <ResizableHandle withHandle />
-
-      <ResizablePanel defaultSize={75}>
-        <main className="h-full flex flex-col flex-1 md:overflow-y-auto p-4 md:p-6 bg-background">
+  const mainContent = (
+    <main className="h-full flex flex-col flex-1 overflow-y-auto p-4 md:p-6 bg-background">
           {error ? (
              <div className="h-full border rounded-lg flex flex-col items-center justify-center bg-destructive/10 text-destructive p-6 text-center">
                <Info className="w-10 h-10 mb-4" />
@@ -1036,7 +1037,135 @@ function printReport(data: any, analysisDate: string) {
               </div>
             </div>
           )}
-        </main>
+    </main>
+  );
+
+  if (isMobile) {
+    return (
+      <div className="relative w-full h-[calc(100vh-65px)] overflow-hidden flex flex-col bg-background">
+        <div className="flex-1 w-full h-full relative overflow-hidden">
+          {mainContent}
+        </div>
+
+        {/* Floating Mobile Bottom Action Bar */}
+        <div className="absolute bottom-4 left-4 right-4 z-[1000] flex items-center gap-2 bg-background/95 backdrop-blur-md p-2 rounded-2xl border shadow-xl">
+          <Button
+            variant="outline"
+            size="sm"
+            className="flex-1 gap-1.5 text-xs font-semibold h-10 rounded-xl"
+            onClick={() => {
+              setMobileTab("params");
+              setMobileDrawerOpen(true);
+            }}
+          >
+            <Sliders className="w-4 h-4 text-primary" />
+            Parameters
+          </Button>
+
+          <Button
+            size="sm"
+            className="flex-1 gap-1.5 text-xs font-semibold h-10 rounded-xl bg-primary text-primary-foreground shadow-md"
+            onClick={runAnalysis}
+            disabled={isPending}
+          >
+            {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Waves className="w-4 h-4" />}
+            {isPending ? "Calculating…" : "Run Model"}
+          </Button>
+
+          {anyData && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1 gap-1.5 text-xs font-semibold h-10 rounded-xl"
+              onClick={() => {
+                setMobileTab("results");
+                setMobileDrawerOpen(true);
+              }}
+            >
+              <BarChart3 className="w-4 h-4 text-blue-500" />
+              Summary
+            </Button>
+          )}
+        </div>
+
+        {/* Mobile Slide-Up Drawer */}
+        <Sheet open={mobileDrawerOpen} onOpenChange={setMobileDrawerOpen}>
+          <SheetContent side="bottom" className="h-[82vh] max-h-[82vh] rounded-t-3xl p-0 flex flex-col z-[1200]">
+            <SheetHeader className="p-4 border-b shrink-0 flex flex-row items-center justify-between">
+              <SheetTitle className="text-base font-bold flex items-center gap-2">
+                {mobileTab === "params" ? (
+                  <>
+                    <Sliders className="w-4 h-4 text-primary" />
+                    WellScope Hydrogeology Weights
+                  </>
+                ) : (
+                  <>
+                    <BarChart3 className="w-4 h-4 text-blue-500" />
+                    Groundwater Potential Summary
+                  </>
+                )}
+              </SheetTitle>
+            </SheetHeader>
+
+            <div className="flex-1 overflow-y-auto">
+              {mobileTab === "params" ? (
+                controlsContent
+              ) : (
+                <div className="p-5 space-y-4">
+                  {statsData?.ahp_data && (
+                    <div className="bg-muted/40 border rounded-xl p-3 space-y-1">
+                      <p className="text-[11px] text-muted-foreground">AHP Consistency Ratio (CR)</p>
+                      <p className="text-lg font-bold text-primary">{statsData.ahp_data.cr?.toFixed(3) ?? "—"}</p>
+                      <p className="text-[10px] text-muted-foreground">{statsData.ahp_data.consistent ? "Consistent model (CR < 0.10)" : "Inconsistent model"}</p>
+                    </div>
+                  )}
+
+                  {activeAreas && (
+                    <div className="bg-card border rounded-xl p-3 space-y-2">
+                      <p className="text-xs font-semibold text-foreground">Potential Class Areas (km²)</p>
+                      <div className="space-y-1.5 text-xs">
+                        {Object.entries(activeAreas).map(([cls, km2]: [string, any], i) => (
+                          <div key={cls} className="flex justify-between items-center py-1 border-b border-border/50 last:border-none">
+                            <span className="flex items-center gap-1.5 text-muted-foreground">
+                              <span className="w-2.5 h-2.5 rounded-xs" style={{ background: activeColors[i % activeColors.length] }} />
+                              {cls}
+                            </span>
+                            <span className="font-semibold">{Number(km2).toFixed(1)} km²</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <Button
+                    variant="outline"
+                    className="w-full gap-2 mt-2"
+                    onClick={() => setMobileTab("params")}
+                  >
+                    <Sliders className="w-4 h-4" /> Edit Parameters & Weights
+                  </Button>
+                </div>
+              )}
+            </div>
+          </SheetContent>
+        </Sheet>
+      </div>
+    );
+  }
+
+  // Desktop View: Keep 100% original ResizablePanelGroup layout
+  return (
+    <ResizablePanelGroup direction="horizontal" className="h-[calc(100vh-80px)] items-stretch">
+      <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
+        <aside className="h-full w-full border-r bg-card flex flex-col overflow-y-auto">
+          {controlsContent}
+        </aside>
+      </ResizablePanel>
+      
+      <ResizableHandle withHandle />
+      
+      <ResizablePanel defaultSize={75}>
+        {mainContent}
       </ResizablePanel>
     </ResizablePanelGroup>
   );

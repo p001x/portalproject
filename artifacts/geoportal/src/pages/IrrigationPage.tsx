@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Loader2, Droplet, FileText, Info, Play, Tag, RotateCcw } from "lucide-react";
+import { Loader2, Droplet, FileText, Info, Play, Tag, RotateCcw, Sliders, BarChart3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -16,6 +16,8 @@ import type { IrrigationMapResult, IrrigationStatsResult, IrrigationExportResult
 import { DistrictMap, LegendItem } from "@/components/DistrictMap";
 import { StudyAreaSelector } from "@/components/StudyAreaSelector";
 import { MapExportControls } from "@/components/MapExportControls";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
 const DEFAULT_PRESETS: Record<number, string[]> = {
   1: ["Uniform / Full Area"],
@@ -78,6 +80,10 @@ export function IrrigationPage() {
   const [method, setMethod] = useState("natural_breaks");
   const [layerMode, setLayerMode] = useState<"classified" | "continuous">("classified");
   const [customClassNames, setCustomClassNames] = useState<string[]>(() => getDefaultLabels(5));
+
+  const isMobile = useIsMobile();
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const [mobileTab, setMobileTab] = useState<"params" | "results">("params");
 
   useEffect(() => {
     setCustomClassNames(prev => {
@@ -169,32 +175,13 @@ export function IrrigationPage() {
     }));
   }, [isContinuous, activeNClasses, activeColors, customClassNames]);
 
-  return (
-    <div className="space-y-4 max-w-[1600px] mx-auto h-[calc(100vh-80px)] flex flex-col overflow-hidden">
-      <div className="flex items-center justify-between shrink-0 mb-4">
-        <div>
-          <h1 className="text-3xl font-bold">Irrigation Scheduling Advisor</h1>
-          <p className="text-muted-foreground mt-2 max-w-3xl">
-            Calculates irrigation requirements by balancing Crop Evapotranspiration (ETc) against Precipitation.
-          </p>
+  const controlsContent = (
+    <div className="flex flex-col gap-5 p-5">
+      <div className="space-y-5">
+        <div className="space-y-3">
+          <Label>Study Area</Label>
+          <StudyAreaSelector value={aoi} onChange={setAoi} />
         </div>
-      </div>
-
-      <ResizablePanelGroup direction="horizontal" className="flex-1 min-h-0 items-stretch">
-        {/* Left Sidebar: Controls */}
-        <ResizablePanel defaultSize={25} minSize={20} maxSize={40} className="pr-4">
-          <div className="bg-card border rounded-lg shadow-sm flex flex-col h-full overflow-hidden">
-            <h3 className="font-semibold text-lg flex items-center border-b p-5 shrink-0 gap-2">
-              <Droplet className="w-5 h-5 text-blue-500" />
-              Configuration
-            </h3>
-            
-            <div className="flex-1 overflow-y-auto p-5">
-              <div className="space-y-5">
-                <div className="space-y-3">
-                  <Label>Study Area</Label>
-                  <StudyAreaSelector value={aoi} onChange={setAoi} />
-                </div>
 
                 <div className="space-y-3">
                   <Label>Crop Type</Label>
@@ -338,21 +325,18 @@ export function IrrigationPage() {
                   </>
                 )}
               </div>
-            </div>
 
-            <div className="p-5 border-t shrink-0">
+            <div className="pt-4 shrink-0">
               <Button onClick={runAnalysis} disabled={isPending} className="w-full h-11 text-base">
                 {isPending && <Loader2 className="mr-2 h-5 w-5 animate-spin" />}
                 {isPending ? "Analyzing..." : "Calculate Requirement"}
               </Button>
             </div>
-          </div>
-        </ResizablePanel>
-        
-        <ResizableHandle withHandle className="mx-2" />
-        
-        <ResizablePanel defaultSize={75} className="pl-4">
-          <div className="flex flex-col h-full p-2 rounded">
+    </div>
+  );
+
+  const mainContent = (
+    <div className="flex flex-col h-full w-full overflow-y-auto p-2">
           {error ? (
              <div className="h-full border rounded-lg flex flex-col items-center justify-center bg-red-50 text-red-500 p-6 text-center">
                <Info className="w-10 h-10 mb-4" />
@@ -640,7 +624,151 @@ export function IrrigationPage() {
               <p className="text-sm mt-1">Select a study area, crop type, and date range.</p>
             </div>
           )}
+    </div>
+  );
+
+  if (isMobile) {
+    return (
+      <div className="relative w-full h-[calc(100vh-65px)] overflow-hidden flex flex-col bg-background">
+        <div className="flex-1 w-full h-full relative overflow-hidden">
+          {mainContent}
+        </div>
+
+        {/* Floating Mobile Bottom Action Bar */}
+        <div className="absolute bottom-4 left-4 right-4 z-[1000] flex items-center gap-2 bg-background/95 backdrop-blur-md p-2 rounded-2xl border shadow-xl">
+          <Button
+            variant="outline"
+            size="sm"
+            className="flex-1 gap-1.5 text-xs font-semibold h-10 rounded-xl"
+            onClick={() => {
+              setMobileTab("params");
+              setMobileDrawerOpen(true);
+            }}
+          >
+            <Sliders className="w-4 h-4 text-primary" />
+            Parameters
+          </Button>
+
+          <Button
+            size="sm"
+            className="flex-1 gap-1.5 text-xs font-semibold h-10 rounded-xl bg-primary text-primary-foreground shadow-md"
+            onClick={runAnalysis}
+            disabled={isPending}
+          >
+            {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Droplet className="w-4 h-4" />}
+            {isPending ? "Analyzing…" : "Calculate"}
+          </Button>
+
+          {anyData && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1 gap-1.5 text-xs font-semibold h-10 rounded-xl"
+              onClick={() => {
+                setMobileTab("results");
+                setMobileDrawerOpen(true);
+              }}
+            >
+              <BarChart3 className="w-4 h-4 text-blue-500" />
+              Summary
+            </Button>
+          )}
+        </div>
+
+        {/* Mobile Slide-Up Drawer */}
+        <Sheet open={mobileDrawerOpen} onOpenChange={setMobileDrawerOpen}>
+          <SheetContent side="bottom" className="h-[82vh] max-h-[82vh] rounded-t-3xl p-0 flex flex-col z-[1200]">
+            <SheetHeader className="p-4 border-b shrink-0 flex flex-row items-center justify-between">
+              <SheetTitle className="text-base font-bold flex items-center gap-2">
+                {mobileTab === "params" ? (
+                  <>
+                    <Sliders className="w-4 h-4 text-primary" />
+                    Crop & Irrigation Configuration
+                  </>
+                ) : (
+                  <>
+                    <BarChart3 className="w-4 h-4 text-blue-500" />
+                    Irrigation Deficit Summary
+                  </>
+                )}
+              </SheetTitle>
+            </SheetHeader>
+
+            <div className="flex-1 overflow-y-auto">
+              {mobileTab === "params" ? (
+                controlsContent
+              ) : (
+                <div className="p-5 space-y-4">
+                  {statsData?.stats && (
+                    <div className="grid grid-cols-2 gap-3">
+                      {Object.entries(statsData.stats).map(([lbl, val]: [string, any]) => (
+                        <div key={lbl} className="bg-muted/40 border rounded-xl p-3">
+                          <p className="text-[11px] text-muted-foreground">{lbl}</p>
+                          <p className="text-xl font-bold text-primary mt-0.5">{typeof val === "number" ? val.toFixed(1) : String(val)}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {activeAreas && (
+                    <div className="bg-card border rounded-xl p-3 space-y-2">
+                      <p className="text-xs font-semibold text-foreground">Deficit Class Areas (km²)</p>
+                      <div className="space-y-1.5 text-xs">
+                        {Object.entries(activeAreas).map(([cls, km2]: [string, any]) => (
+                          <div key={cls} className="flex justify-between items-center py-1 border-b border-border/50 last:border-none">
+                            <span className="text-muted-foreground">{cls}</span>
+                            <span className="font-semibold">{Number(km2).toFixed(1)} km²</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <Button
+                    variant="outline"
+                    className="w-full gap-2 mt-2"
+                    onClick={() => setMobileTab("params")}
+                  >
+                    <Sliders className="w-4 h-4" /> Edit Parameters & Crop
+                  </Button>
+                </div>
+              )}
+            </div>
+          </SheetContent>
+        </Sheet>
+      </div>
+    );
+  }
+
+  // Desktop View: Keep 100% original layout
+  return (
+    <div className="space-y-4 max-w-[1600px] mx-auto h-[calc(100vh-80px)] flex flex-col overflow-hidden p-4 md:p-6">
+      <div className="flex items-center justify-between shrink-0 mb-4">
+        <div>
+          <h1 className="text-3xl font-bold">Irrigation Scheduling Advisor</h1>
+          <p className="text-muted-foreground mt-2 max-w-3xl">
+            Calculates irrigation requirements by balancing Crop Evapotranspiration (ETc) against Precipitation.
+          </p>
+        </div>
+      </div>
+
+      <ResizablePanelGroup direction="horizontal" className="flex-1 min-h-0 items-stretch">
+        <ResizablePanel defaultSize={25} minSize={20} maxSize={40} className="pr-4">
+          <div className="bg-card border rounded-lg shadow-sm flex flex-col h-full overflow-hidden">
+            <h3 className="font-semibold text-lg flex items-center border-b p-5 shrink-0 gap-2">
+              <Droplet className="w-5 h-5 text-blue-500" />
+              Configuration
+            </h3>
+            <div className="flex-1 overflow-y-auto min-h-0">
+              {controlsContent}
+            </div>
           </div>
+        </ResizablePanel>
+        
+        <ResizableHandle withHandle className="mx-2" />
+        
+        <ResizablePanel defaultSize={75} className="pl-4">
+          {mainContent}
         </ResizablePanel>
       </ResizablePanelGroup>
     </div>

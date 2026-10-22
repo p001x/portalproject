@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import { useMutation } from "@tanstack/react-query";
-import { Loader2, Droplet, FileText, Info , Play} from "lucide-react";
+import { Loader2, Droplet, FileText, Info , Play, Sliders, BarChart3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -14,6 +14,8 @@ import { StudyAreaSelector } from "@/components/StudyAreaSelector";
 import { MapExportControls } from "@/components/MapExportControls";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ReportDownloadButton } from "@/components/ReportDownloadButton";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -36,6 +38,10 @@ export function WaterHarvestingPage() {
   const [householdSize, setHouseholdSize] = useState<number>(5);
   const [dailyWaterUse, setDailyWaterUse] = useState<number>(50);
   const [activeTab, setActiveTab] = useState("map");
+
+  const isMobile = useIsMobile();
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const [mobileTab, setMobileTab] = useState<"params" | "results">("params");
 
   const effectiveDistrictName = aoi.name || "Custom Study Area";
 
@@ -69,11 +75,8 @@ export function WaterHarvestingPage() {
   
   const error = mapMutation.error || statsMutation.error || exportMutation.error;
 
-  return (
-    <ResizablePanelGroup direction="horizontal" className="h-[calc(100vh-80px)] items-stretch">
-      {/* ── Controls sidebar ─────────────────────────────────────── */}
-      <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
-        <aside className="h-full w-full md:border-b md:border-b-0 md:border-r bg-card flex flex-col gap-5 p-5 md:overflow-y-auto">
+  const controlsContent = (
+    <div className="flex flex-col gap-5 p-5">
           <div className="flex items-center gap-2 text-primary font-semibold text-lg">
             <Droplet className="w-5 h-5" />
             Water Harvesting
@@ -193,14 +196,11 @@ export function WaterHarvestingPage() {
               {error.message}
             </p>
           )}
-        </aside>
-      </ResizablePanel>
+    </div>
+  );
 
-      <ResizableHandle withHandle />
-
-      {/* ── Results ──────────────────────────────────────────────── */}
-      <ResizablePanel defaultSize={75}>
-        <main className="h-full flex flex-col flex-1 md:overflow-y-auto p-4 md:p-6 bg-background">
+  const mainContent = (
+    <main className="h-full flex flex-col flex-1 overflow-y-auto p-4 md:p-6 bg-background">
           {!anyData && !isPending && (
             <div className="h-full relative bg-muted/20 rounded-lg overflow-hidden border">
               <DistrictMap aoi={aoi} basemap="satellite" />
@@ -373,7 +373,131 @@ export function WaterHarvestingPage() {
               </TabsContent>
             </Tabs>
           )}
-        </main>
+    </main>
+  );
+
+  if (isMobile) {
+    return (
+      <div className="relative w-full h-[calc(100vh-65px)] overflow-hidden flex flex-col bg-background">
+        <div className="flex-1 w-full h-full relative overflow-hidden">
+          {mainContent}
+        </div>
+
+        {/* Floating Mobile Bottom Action Bar */}
+        <div className="absolute bottom-4 left-4 right-4 z-[1000] flex items-center gap-2 bg-background/95 backdrop-blur-md p-2 rounded-2xl border shadow-xl">
+          <Button
+            variant="outline"
+            size="sm"
+            className="flex-1 gap-1.5 text-xs font-semibold h-10 rounded-xl"
+            onClick={() => {
+              setMobileTab("params");
+              setMobileDrawerOpen(true);
+            }}
+          >
+            <Sliders className="w-4 h-4 text-primary" />
+            Parameters
+          </Button>
+
+          <Button
+            size="sm"
+            className="flex-1 gap-1.5 text-xs font-semibold h-10 rounded-xl bg-primary text-primary-foreground shadow-md"
+            onClick={runAnalysis}
+            disabled={isPending}
+          >
+            {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Droplet className="w-4 h-4" />}
+            {isPending ? "Calculating…" : "Calculate"}
+          </Button>
+
+          {anyData && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1 gap-1.5 text-xs font-semibold h-10 rounded-xl"
+              onClick={() => {
+                setMobileTab("results");
+                setMobileDrawerOpen(true);
+              }}
+            >
+              <BarChart3 className="w-4 h-4 text-blue-500" />
+              Summary
+            </Button>
+          )}
+        </div>
+
+        {/* Mobile Slide-Up Drawer */}
+        <Sheet open={mobileDrawerOpen} onOpenChange={setMobileDrawerOpen}>
+          <SheetContent side="bottom" className="h-[82vh] max-h-[82vh] rounded-t-3xl p-0 flex flex-col z-[1200]">
+            <SheetHeader className="p-4 border-b shrink-0 flex flex-row items-center justify-between">
+              <SheetTitle className="text-base font-bold flex items-center gap-2">
+                {mobileTab === "params" ? (
+                  <>
+                    <Sliders className="w-4 h-4 text-primary" />
+                    Water Harvesting Parameters
+                  </>
+                ) : (
+                  <>
+                    <BarChart3 className="w-4 h-4 text-blue-500" />
+                    Harvesting & Tank Recommendation
+                  </>
+                )}
+              </SheetTitle>
+            </SheetHeader>
+
+            <div className="flex-1 overflow-y-auto">
+              {mobileTab === "params" ? (
+                controlsContent
+              ) : (
+                <div className="p-5 space-y-4">
+                  {statsData && (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="bg-muted/40 border rounded-xl p-3">
+                        <p className="text-[11px] text-muted-foreground">Annual Harvest</p>
+                        <p className="text-xl font-bold text-primary mt-0.5">{statsData.annual_volume_liters?.toLocaleString() ?? "—"} L</p>
+                      </div>
+                      <div className="bg-muted/40 border rounded-xl p-3">
+                        <p className="text-[11px] text-muted-foreground">Household Demand</p>
+                        <p className="text-xl font-bold text-primary mt-0.5">{statsData.annual_demand_liters?.toLocaleString() ?? "—"} L</p>
+                      </div>
+                      <div className="bg-muted/40 border rounded-xl p-3">
+                        <p className="text-[11px] text-muted-foreground">Recommended Tank</p>
+                        <p className="text-xl font-bold text-primary mt-0.5">{statsData.recommended_tank_liters?.toLocaleString() ?? "—"} L</p>
+                      </div>
+                      <div className="bg-muted/40 border rounded-xl p-3">
+                        <p className="text-[11px] text-muted-foreground">Autonomy Reliability</p>
+                        <p className="text-xl font-bold text-primary mt-0.5">{statsData.months_of_autonomy ?? "—"} Months</p>
+                      </div>
+                    </div>
+                  )}
+
+                  <Button
+                    variant="outline"
+                    className="w-full gap-2 mt-2"
+                    onClick={() => setMobileTab("params")}
+                  >
+                    <Sliders className="w-4 h-4" /> Edit Parameters
+                  </Button>
+                </div>
+              )}
+            </div>
+          </SheetContent>
+        </Sheet>
+      </div>
+    );
+  }
+
+  // Desktop View: Keep 100% original ResizablePanelGroup layout
+  return (
+    <ResizablePanelGroup direction="horizontal" className="h-[calc(100vh-80px)] items-stretch">
+      <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
+        <aside className="h-full w-full border-r bg-card flex flex-col overflow-y-auto">
+          {controlsContent}
+        </aside>
+      </ResizablePanel>
+      
+      <ResizableHandle withHandle />
+      
+      <ResizablePanel defaultSize={75}>
+        {mainContent}
       </ResizablePanel>
     </ResizablePanelGroup>
   );

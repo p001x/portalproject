@@ -9,7 +9,7 @@ import {
   ResponsiveContainer,
   Cell,
 } from "recharts";
-import { Loader2, Navigation, FileText , Tag, RotateCcw } from "lucide-react";
+import { Loader2, Navigation, FileText , Tag, RotateCcw, Sliders, BarChart3, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
@@ -28,6 +28,8 @@ import { DistrictMap } from "@/components/DistrictMap";
 import { ReportDownloadButton } from "@/components/ReportDownloadButton";
 import { MapExportControls } from "@/components/MapExportControls";
 import { StudyAreaSelector } from "@/components/StudyAreaSelector";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
 import {
   ResizableHandle,
@@ -138,8 +140,13 @@ export function AccessibilityPage() {
     mutationFn: () => api.accessibility.export(getReq()),
   });
 
+  const isMobile = useIsMobile();
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const [mobileTab, setMobileTab] = useState<"params" | "results">("params");
+
   const handleAnalyze = () => {
     if (selectedAmenities.length === 0) return;
+    if (isMobile) setMobileDrawerOpen(false);
     mapMutation.mutate();
     statsMutation.mutate();
     classifyMutation.mutate();
@@ -185,11 +192,8 @@ export function AccessibilityPage() {
 
 
 
-  return (
-    <ResizablePanelGroup direction="horizontal" className="h-full items-stretch">
-      {/* ── Controls sidebar ─────────────────────────────────────── */}
-      <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
-        <aside className="h-full border-r bg-card flex flex-col gap-5 p-5 overflow-y-auto">
+  const controlsContent = (
+    <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full">
         <div className="flex items-center gap-2 text-primary font-semibold text-lg">
           <Navigation className="w-5 h-5" />
           Accessibility
@@ -354,33 +358,44 @@ export function AccessibilityPage() {
           </div>
         </div>
 
-        <Button
-          className="w-full gap-2"
-          onClick={handleAnalyze}
-          disabled={isPending || selectedAmenities.length === 0}
-        >
-          {isPending ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
-          ) : (
-            <Navigation className="w-4 h-4" />
+        <div className="pt-2">
+          {isMobile && (
+            <Button 
+              variant="outline"
+              onClick={() => {
+                setMobileTab("params");
+                setMobileDrawerOpen(true);
+              }}
+              className="w-full gap-2 rounded-xl shadow-md mb-2"
+            >
+              <Sliders className="w-4 h-4" /> Open Parameters
+            </Button>
           )}
-          {isPending ? "Computing…" : "Analyze Accessibility"}
-        </Button>
+          <Button
+            className="w-full gap-2 rounded-xl shadow-md"
+            onClick={handleAnalyze}
+            disabled={isPending || selectedAmenities.length === 0}
+          >
+            {isPending ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Navigation className="w-4 h-4" />
+            )}
+            {isPending ? "Computing…" : "Analyze Accessibility"}
+          </Button>
+        </div>
 
         {error && (
           <p className="text-xs text-destructive bg-destructive/10 rounded p-2">
             {error.message}
           </p>
         )}
-      </aside>
+      
+    </div>
+  );
 
-      {/* ── Results ──────────────────────────────────────────────── */}
-      </ResizablePanel>
-      
-      <ResizableHandle withHandle />
-      
-      <ResizablePanel defaultSize={75}>
-        <main className="h-full overflow-y-auto p-6">
+  const mainContent = (
+    <main className="h-full overflow-y-auto p-4 md:p-6 flex-1 bg-background">
         {!anyData && !isPending && (
           <div className="h-full rounded-lg overflow-hidden border relative">
             <DistrictMap 
@@ -414,7 +429,7 @@ export function AccessibilityPage() {
 
         {anyData && (
           <Tabs defaultValue="map" className="h-full flex flex-col">
-            <TabsList className="mb-4 self-start">
+            <TabsList className="mb-4 self-start flex-wrap h-auto gap-1">
               <TabsTrigger value="map">Map</TabsTrigger>
               <TabsTrigger value="stats">Statistics</TabsTrigger>
               <TabsTrigger value="static-map">Static Maps</TabsTrigger>
@@ -688,9 +703,144 @@ export function AccessibilityPage() {
             </TabsContent>
           </Tabs>
         )}
-      </main>
+      
+    </main>
+  );
+
+  // On Mobile: Full-screen map with floating action bar & sliding drawer
+  if (isMobile) {
+    return (
+      <div className="relative w-full h-[calc(100vh-65px)] overflow-hidden flex flex-col bg-background">
+        <div className="flex-1 w-full h-full overflow-hidden">
+          {mainContent}
+        </div>
+
+        {/* Floating Mobile Bottom Navigation Bar */}
+        <div className="absolute bottom-3 left-3 right-3 z-[1100] flex items-center justify-between gap-2 p-2 rounded-2xl bg-card/95 backdrop-blur-md border border-border shadow-2xl">
+          <Button
+            variant="outline"
+            size="sm"
+            className="flex-1 gap-1.5 text-xs font-semibold h-10 rounded-xl"
+            onClick={() => {
+              setMobileTab("params");
+              setMobileDrawerOpen(true);
+            }}
+          >
+            <Sliders className="w-4 h-4 text-primary" />
+            Parameters
+          </Button>
+
+          <Button
+            size="sm"
+            className="flex-1 gap-1.5 text-xs font-semibold h-10 rounded-xl shadow-md"
+            onClick={handleAnalyze}
+            disabled={isPending || selectedAmenities.length === 0}
+          >
+            {isPending ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Navigation className="w-4 h-4" />
+            )}
+            {isPending ? "Computing..." : "Run Analysis"}
+          </Button>
+
+          {anyData && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1 gap-1.5 text-xs font-semibold h-10 rounded-xl"
+              onClick={() => {
+                setMobileTab("results");
+                setMobileDrawerOpen(true);
+              }}
+            >
+              <BarChart3 className="w-4 h-4 text-blue-500" />
+              Summary
+            </Button>
+          )}
+        </div>
+
+        {/* Mobile Slide-Up Drawer */}
+        <Sheet open={mobileDrawerOpen} onOpenChange={setMobileDrawerOpen}>
+          <SheetContent side="bottom" className="h-[82vh] max-h-[82vh] rounded-t-3xl p-0 flex flex-col z-[1200]">
+            <SheetHeader className="p-4 border-b shrink-0 flex flex-row items-center justify-between">
+              <SheetTitle className="text-base font-bold flex items-center gap-2">
+                {mobileTab === "params" ? (
+                  <>
+                    <Sliders className="w-4 h-4 text-primary" />
+                    Accessibility Parameters & Routing
+                  </>
+                ) : (
+                  <>
+                    <BarChart3 className="w-4 h-4 text-blue-500" />
+                    Travel Time Summary
+                  </>
+                )}
+              </SheetTitle>
+            </SheetHeader>
+
+            <div className="flex-1 overflow-y-auto">
+              {mobileTab === "params" ? (
+                controlsContent
+              ) : (
+                <div className="p-5 space-y-4">
+                  {statsData?.stats && (
+                    <div className="grid grid-cols-2 gap-3">
+                      {Object.entries(statsData.stats).map(([lbl, val]) => (
+                        <div key={lbl} className="bg-muted/40 border rounded-xl p-3">
+                          <p className="text-[11px] text-muted-foreground capitalize">{lbl.replace(/_/g, " ")}</p>
+                          <p className="text-xl font-bold text-primary mt-0.5">
+                            {typeof val === "number" ? val.toFixed(1) : String(val)}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {activeAreas && (
+                    <div className="bg-card border rounded-xl p-3 space-y-2">
+                      <p className="text-xs font-semibold text-foreground">Travel Time Class Areas (km²)</p>
+                      <div className="space-y-1.5 text-xs">
+                        {Object.entries(activeAreas).map(([cls, km2]) => (
+                          <div key={cls} className="flex justify-between items-center py-1 border-b border-border/50 last:border-none">
+                            <span className="text-muted-foreground">{cls}</span>
+                            <span className="font-semibold">{Number(km2).toFixed(1)} km²</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <Button
+                    variant="outline"
+                    className="w-full gap-2 mt-2"
+                    onClick={() => setMobileTab("params")}
+                  >
+                    <Sliders className="w-4 h-4" /> Edit Routing & Amenities
+                  </Button>
+                </div>
+              )}
+            </div>
+          </SheetContent>
+        </Sheet>
+      </div>
+    );
+  }
+
+  // Desktop View
+  return (
+    <ResizablePanelGroup direction="horizontal" className="h-full items-stretch">
+      <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
+        <aside className="h-full border-r bg-card flex flex-col overflow-y-auto">
+          {controlsContent}
+        </aside>
+      </ResizablePanel>
+      
+      <ResizableHandle withHandle />
+      
+      <ResizablePanel defaultSize={75}>
+        {mainContent}
       </ResizablePanel>
     </ResizablePanelGroup>
   );
 }
-

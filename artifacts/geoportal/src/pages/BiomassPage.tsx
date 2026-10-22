@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import { useMutation } from "@tanstack/react-query";
-import { Flame, Loader2, Info , Play} from "lucide-react";
+import { Flame, Loader2, Info , Play, Sliders, BarChart3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
@@ -15,6 +15,8 @@ import { ReportDownloadButton } from "@/components/ReportDownloadButton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Download, ImageIcon, FileText, Printer, Map as MapIcon } from "lucide-react";
 import { useEffect } from "react";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 
 const RISK_LEGEND: LegendItem[] = [
   { color: "#ff0000", label: "High Risk (>75)" },
@@ -224,6 +226,10 @@ export function BiomassPage() {
   const [bufferKm, setBufferKm] = useState(3.0);
   const [activeTab, setActiveTab] = useState("map");
 
+  const isMobile = useIsMobile();
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const [mobileTab, setMobileTab] = useState<"params" | "results">("params");
+
   const effectiveDistrictName = aoi.type === "district" ? aoi.name : "Custom Area";
 
   const getReq = () => ({
@@ -268,44 +274,41 @@ export function BiomassPage() {
   
   const error = mapMutation.error || statsMutation.error || classifyMutation.error || exportMutation.error;
 
-  return (
-    <ResizablePanelGroup direction="horizontal" className="h-full items-stretch">
-      {/* Sidebar */}
-      <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
-        <aside className="h-full w-full md:border-b md:border-b-0 md:border-r bg-card flex flex-col gap-5 p-5 md:overflow-y-auto">
-          <div className="flex items-center gap-2 text-primary font-semibold text-lg">
-            <Flame className="w-5 h-5" />
-            Biomass Tracker
-          </div>
-          <p className="text-xs text-muted-foreground leading-relaxed">
-            Monitor forest cover change and analyze biomass depletion risk zones.
-          </p>
+  const controlsContent = (
+    <div className="flex flex-col gap-5 p-5">
+      <div className="flex items-center gap-2 text-primary font-semibold text-lg">
+        <Flame className="w-5 h-5" />
+        Biomass Tracker
+      </div>
+      <p className="text-xs text-muted-foreground leading-relaxed">
+        Monitor forest cover change and analyze biomass depletion risk zones.
+      </p>
 
-          <StudyAreaSelector value={aoi} onChange={setAoi} />
+      <StudyAreaSelector value={aoi} onChange={setAoi} />
 
-          <div className="space-y-1">
-            <Label>Analysis Buffer (km)</Label>
-            <p className="text-[11px] text-muted-foreground leading-relaxed mb-2">
-              Search radius from settlements to detect extraction activity.
-            </p>
-            <div className="flex justify-between items-center p-2 rounded-lg border bg-muted/30 text-sm">
-              <span className="font-medium text-muted-foreground">Radius</span>
-              <span className="font-bold text-primary">{bufferKm} km</span>
-            </div>
-            <Slider value={[bufferKm]} min={1} max={10} step={0.5} onValueChange={(v) => setBufferKm(v[0])} className="py-4" />
-          </div>
+      <div className="space-y-1">
+        <Label>Analysis Buffer (km)</Label>
+        <p className="text-[11px] text-muted-foreground leading-relaxed mb-2">
+          Search radius from settlements to detect extraction activity.
+        </p>
+        <div className="flex justify-between items-center p-2 rounded-lg border bg-muted/30 text-sm">
+          <span className="font-medium text-muted-foreground">Radius</span>
+          <span className="font-bold text-primary">{bufferKm} km</span>
+        </div>
+        <Slider value={[bufferKm]} min={1} max={10} step={0.5} onValueChange={(v) => setBufferKm(v[0])} className="py-4" />
+      </div>
 
-          <div className="mt-auto pt-4 flex gap-2">
-            <Button onClick={runAnalysis} disabled={isPending} className="w-full gap-2">
-              {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-              {isPending ? "Processing..." : "Generate Analysis"}
-            </Button>
-          </div>
-        </aside>
-      </ResizablePanel>
-      <ResizableHandle withHandle />
-      <ResizablePanel defaultSize={75}>
-        <div className="h-full flex flex-col relative bg-muted/10">
+      <div className="mt-auto pt-4 flex gap-2">
+        <Button onClick={runAnalysis} disabled={isPending} className="w-full gap-2">
+          {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+          {isPending ? "Processing..." : "Generate Analysis"}
+        </Button>
+      </div>
+    </div>
+  );
+
+  const mainContent = (
+    <div className="h-full flex flex-col relative bg-muted/10 overflow-hidden">
           {error ? (
             <div className="h-full flex flex-col items-center justify-center text-destructive p-8 text-center">
               <Info className="w-10 h-10 mb-4" />
@@ -528,6 +531,134 @@ export function BiomassPage() {
             </div>
           )}
         </div>
+  );
+
+  if (isMobile) {
+    return (
+      <div className="relative w-full h-[calc(100vh-65px)] overflow-hidden flex flex-col bg-background">
+        <div className="flex-1 w-full h-full relative overflow-hidden">
+          {mainContent}
+        </div>
+
+        {/* Floating Mobile Bottom Action Bar */}
+        <div className="absolute bottom-4 left-4 right-4 z-[1000] flex items-center gap-2 bg-background/95 backdrop-blur-md p-2 rounded-2xl border shadow-xl">
+          <Button
+            variant="outline"
+            size="sm"
+            className="flex-1 gap-1.5 text-xs font-semibold h-10 rounded-xl"
+            onClick={() => {
+              setMobileTab("params");
+              setMobileDrawerOpen(true);
+            }}
+          >
+            <Sliders className="w-4 h-4 text-primary" />
+            Parameters
+          </Button>
+
+          <Button
+            size="sm"
+            className="flex-1 gap-1.5 text-xs font-semibold h-10 rounded-xl bg-primary text-primary-foreground shadow-md"
+            onClick={runAnalysis}
+            disabled={isPending}
+          >
+            {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Flame className="w-4 h-4" />}
+            {isPending ? "Processing…" : "Analyze"}
+          </Button>
+
+          {anyData && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1 gap-1.5 text-xs font-semibold h-10 rounded-xl"
+              onClick={() => {
+                setMobileTab("results");
+                setMobileDrawerOpen(true);
+              }}
+            >
+              <BarChart3 className="w-4 h-4 text-blue-500" />
+              Summary
+            </Button>
+          )}
+        </div>
+
+        {/* Mobile Slide-Up Drawer */}
+        <Sheet open={mobileDrawerOpen} onOpenChange={setMobileDrawerOpen}>
+          <SheetContent side="bottom" className="h-[82vh] max-h-[82vh] rounded-t-3xl p-0 flex flex-col z-[1200]">
+            <SheetHeader className="p-4 border-b shrink-0 flex flex-row items-center justify-between">
+              <SheetTitle className="text-base font-bold flex items-center gap-2">
+                {mobileTab === "params" ? (
+                  <>
+                    <Sliders className="w-4 h-4 text-primary" />
+                    Biomass Parameters & Buffer
+                  </>
+                ) : (
+                  <>
+                    <BarChart3 className="w-4 h-4 text-blue-500" />
+                    Biomass Depletion Risk Summary
+                  </>
+                )}
+              </SheetTitle>
+            </SheetHeader>
+
+            <div className="flex-1 overflow-y-auto">
+              {mobileTab === "params" ? (
+                controlsContent
+              ) : (
+                <div className="p-5 space-y-4">
+                  {statsData?.stats && (
+                    <div className="grid grid-cols-2 gap-3">
+                      {Object.entries(statsData.stats).map(([lbl, val]) => (
+                        <div key={lbl} className="bg-muted/40 border rounded-xl p-3">
+                          <p className="text-[11px] text-muted-foreground">{lbl}</p>
+                          <p className="text-xl font-bold text-primary mt-0.5">{typeof val === "number" ? val.toFixed(2) : String(val)}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {classifyData?.panels?.[0]?.areas && (
+                    <div className="bg-card border rounded-xl p-3 space-y-2">
+                      <p className="text-xs font-semibold text-foreground">Risk Zone Areas (km²)</p>
+                      <div className="space-y-1.5 text-xs">
+                        {Object.entries(classifyData.panels[0].areas).map(([cls, km2]: [string, any]) => (
+                          <div key={cls} className="flex justify-between items-center py-1 border-b border-border/50 last:border-none">
+                            <span className="text-muted-foreground">{cls}</span>
+                            <span className="font-semibold">{Number(km2).toFixed(1)} km²</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <Button
+                    variant="outline"
+                    className="w-full gap-2 mt-2"
+                    onClick={() => setMobileTab("params")}
+                  >
+                    <Sliders className="w-4 h-4" /> Edit Parameters
+                  </Button>
+                </div>
+              )}
+            </div>
+          </SheetContent>
+        </Sheet>
+      </div>
+    );
+  }
+
+  // Desktop View: Keep 100% original ResizablePanelGroup layout
+  return (
+    <ResizablePanelGroup direction="horizontal" className="h-full items-stretch">
+      <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
+        <aside className="h-full w-full border-r bg-card flex flex-col overflow-y-auto">
+          {controlsContent}
+        </aside>
+      </ResizablePanel>
+      
+      <ResizableHandle withHandle />
+      
+      <ResizablePanel defaultSize={75}>
+        {mainContent}
       </ResizablePanel>
     </ResizablePanelGroup>
   );

@@ -34,6 +34,14 @@ import {
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { Sliders, BarChart3 } from "lucide-react";
 
 const DISTRICTS = [
   "Bugesera","Burera","Gakenke","Gasabo","Gatsibo","Gicumbi","Gisagara",
@@ -200,19 +208,20 @@ export function NDVIPage() {
   const continuousTileUrl = data?.tile_url;
   const activeTileUrl = (layerMode === "classified" && !isContinuous) ? classifiedTileUrl : continuousTileUrl;
 
-  return (
-    <ResizablePanelGroup direction="horizontal" className="h-full items-stretch">
-      {/* ── Controls sidebar ─────────────────────────────────────── */}
-      <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
-        <aside className="h-full w-full md:border-b md:border-b-0 md:border-r bg-card flex flex-col gap-5 p-5 md:overflow-y-auto">
-        <div className="flex items-center gap-2 text-primary font-semibold text-lg">
-          <Leaf className="w-5 h-5" />
-          NDVI Analysis
-        </div>
-        <p className="text-xs text-muted-foreground leading-relaxed">
-          Normalized Difference Vegetation Index from Sentinel-2 SR 10 m imagery.
-          Cloud-masked median composite over the selected period.
-        </p>
+  const isMobile = useIsMobile();
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const [mobileTab, setMobileTab] = useState<"params" | "results">("params");
+
+  const controlsContent = (
+    <div className="flex flex-col gap-5 p-5 overflow-y-auto h-full">
+      <div className="flex items-center gap-2 text-primary font-semibold text-lg">
+        <Leaf className="w-5 h-5" />
+        NDVI Analysis
+      </div>
+      <p className="text-xs text-muted-foreground leading-relaxed">
+        Normalized Difference Vegetation Index from Sentinel-2 SR 10 m imagery.
+        Cloud-masked median composite over the selected period.
+      </p>
 
         <StudyAreaSelector value={aoi} onChange={setAoi} />
 
@@ -361,7 +370,10 @@ export function NDVIPage() {
 
         <Button
           className="w-full gap-2"
-          onClick={() => mutate()}
+          onClick={() => {
+            mutate();
+            if (isMobile) setMobileDrawerOpen(false);
+          }}
           disabled={isPending}
         >
           {isPending ? (
@@ -377,28 +389,36 @@ export function NDVIPage() {
             {error.message}
           </p>
         )}
-      </aside>
+      </div>
+  );
 
-      {/* ── Results ──────────────────────────────────────────────── */}
-      </ResizablePanel>
-      
-      <ResizableHandle withHandle />
-      
-      <ResizablePanel defaultSize={75}>
-        <main id="report-container" className="h-full flex flex-col flex-1 md:overflow-y-auto p-4 md:p-6 bg-background">
-        {!data && !isPending && (
-          <div className="h-full relative bg-muted/20 rounded-lg overflow-hidden border">
-            <DistrictMap aoi={aoi} customGeojson={aoi.type === "custom" && aoi.geojson ? JSON.parse(aoi.geojson) : undefined} basemap="satellite" />
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-4 z-[1000]">
-              <div className="bg-background/80 backdrop-blur-md p-6 rounded-2xl shadow-xl border border-primary/20 text-center max-w-sm pointer-events-none transition-all hover:scale-105 duration-300">
-                <h3 className="text-xl font-bold mb-2 text-foreground">Analysis Configuration</h3>
-                <p className="text-sm text-muted-foreground">
-                  Select a study area and parameters from the sidebar, then click run to visualize the results here.
-                </p>
-              </div>
+  const mainContent = (
+    <main id="report-container" className="h-full flex flex-col flex-1 overflow-y-auto p-3 md:p-6 pb-20 md:pb-6 bg-background">
+      {!data && !isPending && (
+        <div className="h-full relative bg-muted/20 rounded-lg overflow-hidden border min-h-[450px]">
+          <DistrictMap aoi={aoi} customGeojson={aoi.type === "custom" && aoi.geojson ? JSON.parse(aoi.geojson) : undefined} basemap="satellite" />
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-4 z-[1000]">
+            <div className="bg-background/85 backdrop-blur-md p-5 rounded-2xl shadow-xl border border-primary/20 text-center max-w-sm pointer-events-auto transition-all">
+              <h3 className="text-lg md:text-xl font-bold mb-2 text-foreground">Analysis Configuration</h3>
+              <p className="text-xs md:text-sm text-muted-foreground mb-4">
+                Select a study area and parameters, then run to compute vegetation indices.
+              </p>
+              {isMobile && (
+                <Button
+                  size="sm"
+                  className="gap-2 w-full"
+                  onClick={() => {
+                    setMobileTab("params");
+                    setMobileDrawerOpen(true);
+                  }}
+                >
+                  <Sliders className="w-4 h-4" /> Open Parameters
+                </Button>
+              )}
             </div>
           </div>
-        )}
+        </div>
+      )}
 
         {isPending && (
           <div className="h-full flex flex-col items-center justify-center gap-3 text-muted-foreground">
@@ -718,6 +738,139 @@ export function NDVIPage() {
           </Tabs>
         )}
       </main>
+  );
+
+  // On Mobile: Full-screen map with floating action bar & sliding drawer
+  if (isMobile) {
+    return (
+      <div className="relative w-full h-[calc(100vh-65px)] overflow-hidden flex flex-col bg-background">
+        <div className="flex-1 w-full h-full overflow-hidden">
+          {mainContent}
+        </div>
+
+        {/* Floating Mobile Bottom Navigation Bar */}
+        <div className="absolute bottom-3 left-3 right-3 z-[1100] flex items-center justify-between gap-2 p-2 rounded-2xl bg-card/95 backdrop-blur-md border border-border shadow-2xl">
+          <Button
+            variant="outline"
+            size="sm"
+            className="flex-1 gap-1.5 text-xs font-semibold h-10 rounded-xl"
+            onClick={() => {
+              setMobileTab("params");
+              setMobileDrawerOpen(true);
+            }}
+          >
+            <Sliders className="w-4 h-4 text-primary" />
+            Parameters
+          </Button>
+
+          <Button
+            size="sm"
+            className="flex-1 gap-1.5 text-xs font-semibold h-10 rounded-xl shadow-md"
+            onClick={() => mutate()}
+            disabled={isPending}
+          >
+            {isPending ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Leaf className="w-4 h-4" />
+            )}
+            {isPending ? "Computing..." : "Calculate NDVI"}
+          </Button>
+
+          {data && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1 gap-1.5 text-xs font-semibold h-10 rounded-xl"
+              onClick={() => {
+                setMobileTab("results");
+                setMobileDrawerOpen(true);
+              }}
+            >
+              <BarChart3 className="w-4 h-4 text-emerald-500" />
+              Summary
+            </Button>
+          )}
+        </div>
+
+        {/* Mobile Slide-Up Drawer */}
+        <Sheet open={mobileDrawerOpen} onOpenChange={setMobileDrawerOpen}>
+          <SheetContent side="bottom" className="h-[82vh] max-h-[82vh] rounded-t-3xl p-0 flex flex-col z-[1200]">
+            <SheetHeader className="p-4 border-b shrink-0 flex flex-row items-center justify-between">
+              <SheetTitle className="text-base font-bold flex items-center gap-2">
+                {mobileTab === "params" ? (
+                  <>
+                    <Sliders className="w-4 h-4 text-primary" />
+                    NDVI Parameters
+                  </>
+                ) : (
+                  <>
+                    <BarChart3 className="w-4 h-4 text-emerald-500" />
+                    NDVI Statistics & Areas
+                  </>
+                )}
+              </SheetTitle>
+            </SheetHeader>
+
+            <div className="flex-1 overflow-y-auto">
+              {mobileTab === "params" ? (
+                controlsContent
+              ) : (
+                <div className="p-5 space-y-4">
+                  {data?.stats && (
+                    <div className="grid grid-cols-2 gap-3">
+                      {Object.entries(data.stats).map(([lbl, val]) => (
+                        <div key={lbl} className="bg-muted/40 border rounded-xl p-3">
+                          <p className="text-[11px] text-muted-foreground capitalize">{lbl}</p>
+                          <p className="text-xl font-bold text-primary mt-0.5">{typeof val === "number" ? val.toFixed(3) : val}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {activeAreas && (
+                    <div className="bg-card border rounded-xl p-3 space-y-2">
+                      <p className="text-xs font-semibold text-foreground">Class Areas (km²)</p>
+                      <div className="space-y-1.5 text-xs">
+                        {Object.entries(activeAreas).map(([cls, km2]) => (
+                          <div key={cls} className="flex justify-between items-center py-1 border-b border-border/50 last:border-none">
+                            <span className="text-muted-foreground">{cls}</span>
+                            <span className="font-semibold">{Number(km2).toFixed(1)} km²</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <Button
+                    variant="outline"
+                    className="w-full gap-2 mt-2"
+                    onClick={() => setMobileTab("params")}
+                  >
+                    <Sliders className="w-4 h-4" /> Edit Parameters
+                  </Button>
+                </div>
+              )}
+            </div>
+          </SheetContent>
+        </Sheet>
+      </div>
+    );
+  }
+
+  // Desktop View: Keep 100% original ResizablePanelGroup layout
+  return (
+    <ResizablePanelGroup direction="horizontal" className="h-full items-stretch">
+      <ResizablePanel defaultSize={25} minSize={20} maxSize={40}>
+        <aside className="h-full w-full border-r bg-card flex flex-col overflow-y-auto">
+          {controlsContent}
+        </aside>
+      </ResizablePanel>
+      
+      <ResizableHandle withHandle />
+      
+      <ResizablePanel defaultSize={75}>
+        {mainContent}
       </ResizablePanel>
     </ResizablePanelGroup>
   );

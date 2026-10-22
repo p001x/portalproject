@@ -27,6 +27,7 @@ import {
   Cloud,
   MapPin,
   Maximize2,
+  Minimize2,
   FileText,
   Square,
   Activity,
@@ -347,6 +348,7 @@ export function SampleDigitizationPage() {
   const [isReadinessModalOpen, setIsReadinessModalOpen] = useState(false);
   const [tocFilter, setTocFilter] = useState("");
   const [isSamplesLayerExpanded, setIsSamplesLayerExpanded] = useState(true);
+  const [isFullMapMode, setIsFullMapMode] = useState(false);
   const studyAreaGroupRef = useRef<any>(null);
   const aoiBoundsRef = useRef<number[] | null>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
@@ -1720,10 +1722,347 @@ export function SampleDigitizationPage() {
     });
   };
 
+  // Keyboard shortcut: Escape to exit Full Map View (only if no dialog/modal is open)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && isFullMapMode) {
+        if (
+          isStudyAreaModalOpen ||
+          isClassPaletteModalOpen ||
+          isReadinessModalOpen ||
+          isSaveModalOpen ||
+          isShareModalOpen ||
+          isAddDataModalOpen ||
+          document.querySelector('[role="dialog"]') ||
+          document.querySelector('[data-state="open"]')
+        ) {
+          return;
+        }
+        setIsFullMapMode(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [
+    isFullMapMode,
+    isStudyAreaModalOpen,
+    isClassPaletteModalOpen,
+    isReadinessModalOpen,
+    isSaveModalOpen,
+    isShareModalOpen,
+    isAddDataModalOpen,
+  ]);
+
+  // Recalculate Leaflet map canvas dimensions when entering/exiting full map mode or toggling TOC
+  useEffect(() => {
+    const t1 = setTimeout(() => {
+      mapInstanceRef.current?.invalidateSize();
+    }, 120);
+    const t2 = setTimeout(() => {
+      mapInstanceRef.current?.invalidateSize();
+    }, 350);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [isFullMapMode, isLeftPanelOpen]);
+
   return (
-    <div className="flex flex-col h-full bg-background overflow-hidden relative">
-      {/* Unified Top Master Command Bar - Sleek Minimalist */}
-      <div className="flex flex-wrap items-center justify-between px-6 py-2 border-b border-border/60 bg-card/90 backdrop-blur-md z-[50] gap-3">
+    <div className={`flex flex-col h-full bg-background overflow-hidden relative ${
+      isFullMapMode ? "fixed inset-0 z-[100] w-screen h-screen" : ""
+    }`}>
+      {/* Top Header: In Full Map Mode, dedicated streamlined training bar. Otherwise, full master command bar */}
+      {isFullMapMode ? (
+        <div className="flex-none flex flex-wrap items-center justify-between px-4 py-2 border-b border-border/80 bg-card/95 backdrop-blur-md z-[50] gap-2 shadow-sm">
+          {/* Left: Return to Mother Page + TOC Toggle */}
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              onClick={() => setIsFullMapMode(false)}
+              className="h-8 gap-1.5 text-xs font-semibold px-3 bg-foreground text-background hover:bg-foreground/90 transition-all shadow-xs cursor-pointer active:scale-95"
+              title="Return to Mother Page (Full Studio with Attribute Table, Timelapse, Spectral & Asset tools)"
+            >
+              <ChevronLeft className="w-4 h-4" />
+              <span>Return to Mother Page</span>
+            </Button>
+
+            <Badge variant="outline" className="text-[10px] font-mono border-sky-500/40 text-sky-300 bg-sky-500/10 py-0.5 h-6 hidden lg:inline-flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse" />
+              Full Map Training
+            </Badge>
+
+            <div className="h-4 w-[1px] bg-border/60 mx-0.5 hidden sm:block" />
+
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setIsLeftPanelOpen((p) => !p)}
+              className="h-8 px-2.5 text-xs font-medium gap-1.5 text-muted-foreground hover:text-foreground border-border/60 bg-muted/20"
+              title={isLeftPanelOpen ? "Hide Samples Table of Contents" : "Show Samples Table of Contents"}
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">{isLeftPanelOpen ? "Hide Samples" : "Show Samples"}</span>
+            </Button>
+          </div>
+
+          {/* Center: Essential Training & Digitizing Tools */}
+          <div className="flex items-center gap-2 flex-wrap justify-center">
+            {/* 1. Define AOI */}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setIsStudyAreaModalOpen(true)}
+              className={`h-8 gap-1.5 text-xs font-medium px-2.5 transition-all shadow-2xs ${
+                !studyArea
+                  ? "border-sky-500/70 bg-sky-500/15 text-sky-200 hover:bg-sky-500/25 ring-1 ring-sky-500/30"
+                  : "border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"
+              }`}
+              title={!studyArea ? "Prerequisite: Define or Upload Study Area (AOI) to unlock training tools" : "Study Area Defined"}
+            >
+              {!studyArea ? (
+                <>
+                  <Crosshair className="w-3.5 h-3.5 text-sky-400" />
+                  <span>1. Define AOI</span>
+                  <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-sky-500/25 text-sky-300">Req</span>
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>AOI: Defined</span>
+                </>
+              )}
+            </Button>
+
+            {/* 2. Select Class */}
+            <button
+              type="button"
+              onClick={() => setIsClassPaletteModalOpen(true)}
+              className="flex items-center gap-1.5 hover:bg-muted/50 px-2.5 py-1 h-8 rounded-md text-xs font-medium transition-all border border-border/60 bg-muted/20 shadow-2xs text-foreground cursor-pointer"
+              title="Open Land Cover Class Palette Studio"
+            >
+              <span className="w-2.5 h-2.5 rounded-full inline-block shadow-2xs shrink-0" style={{ backgroundColor: getRefinedColor(color, classLabel) }} />
+              <span className="max-w-[110px] truncate">{classLabel || "Select Class"}</span>
+              <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 font-mono text-muted-foreground border-border/50 bg-muted/40">
+                {groupedSamples[classLabel]?.items.length || 0}
+              </Badge>
+              <Palette className="w-3 h-3 text-muted-foreground ml-0.5" />
+            </button>
+
+            {/* 3. Vector Drawing Tools */}
+            <div className="flex items-center gap-0.5 bg-muted/30 p-0.5 rounded-lg border border-border/50">
+              <button
+                type="button"
+                title="Pan Mode (Navigation)"
+                onClick={() => { cancelDrawMode(); setDrawMode("pan"); }}
+                className={`p-1.5 rounded-md transition-all flex items-center justify-center cursor-pointer ${
+                  drawMode === "pan" ? "bg-foreground text-background shadow-xs font-medium" : "hover:bg-muted/50 text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <Hand className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                title={!studyArea ? "Study Area (AOI) required before drawing points" : "Point Feature (Single coordinate sample)"}
+                onClick={() => {
+                  if (!studyArea) {
+                    toast({ title: "Study Area Required", description: "Define AOI first", variant: "destructive" });
+                    return;
+                  }
+                  setDrawMode("point");
+                  autoStartDrawMode("point", isEditing);
+                }}
+                className={`p-1.5 rounded-md transition-all flex items-center justify-center ${
+                  !studyArea ? "opacity-30 cursor-not-allowed text-muted-foreground/40" : drawMode === "point" ? "bg-foreground text-background shadow-xs cursor-pointer font-semibold" : "hover:bg-muted/50 text-muted-foreground hover:text-foreground cursor-pointer"
+                }`}
+              >
+                <MapPin className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                title={!studyArea ? "Study Area (AOI) required before drawing lines" : "Polyline Feature (Linear sample / transect)"}
+                onClick={() => {
+                  if (!studyArea) {
+                    toast({ title: "Study Area Required", description: "Define AOI first", variant: "destructive" });
+                    return;
+                  }
+                  setDrawMode("polyline");
+                  autoStartDrawMode("polyline", isEditing);
+                }}
+                className={`p-1.5 rounded-md transition-all flex items-center justify-center ${
+                  !studyArea ? "opacity-30 cursor-not-allowed text-muted-foreground/40" : drawMode === "polyline" ? "bg-foreground text-background shadow-xs cursor-pointer font-semibold" : "hover:bg-muted/50 text-muted-foreground hover:text-foreground cursor-pointer"
+                }`}
+              >
+                <Activity className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                title={!studyArea ? "Study Area (AOI) required before drawing polygons" : "Polygon Feature (Area polygon sample)"}
+                onClick={() => {
+                  if (!studyArea) {
+                    toast({ title: "Study Area Required", description: "Define AOI first", variant: "destructive" });
+                    return;
+                  }
+                  setDrawMode("polygon");
+                  autoStartDrawMode("polygon", isEditing);
+                }}
+                className={`p-1.5 rounded-md transition-all flex items-center justify-center ${
+                  !studyArea ? "opacity-30 cursor-not-allowed text-muted-foreground/40" : drawMode === "polygon" ? "bg-foreground text-background shadow-xs cursor-pointer font-semibold" : "hover:bg-muted/50 text-muted-foreground hover:text-foreground cursor-pointer"
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                title={!studyArea ? "Study Area (AOI) required before drawing rectangles" : "Rectangle Box Feature"}
+                onClick={() => {
+                  if (!studyArea) {
+                    toast({ title: "Study Area Required", description: "Define AOI first", variant: "destructive" });
+                    return;
+                  }
+                  setDrawMode("rectangle");
+                  autoStartDrawMode("rectangle", isEditing);
+                }}
+                className={`p-1.5 rounded-md transition-all flex items-center justify-center ${
+                  !studyArea ? "opacity-30 cursor-not-allowed text-muted-foreground/40" : drawMode === "rectangle" ? "bg-foreground text-background shadow-xs cursor-pointer font-semibold" : "hover:bg-muted/50 text-muted-foreground hover:text-foreground cursor-pointer"
+                }`}
+              >
+                <Square className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                title={!studyArea ? "Study Area (AOI) required before drawing circular buffers" : "Circle Buffer Feature"}
+                onClick={() => {
+                  if (!studyArea) {
+                    toast({ title: "Study Area Required", description: "Define AOI first", variant: "destructive" });
+                    return;
+                  }
+                  setDrawMode("circle");
+                  autoStartDrawMode("circle", isEditing);
+                }}
+                className={`p-1.5 rounded-md transition-all flex items-center justify-center ${
+                  !studyArea ? "opacity-30 cursor-not-allowed text-muted-foreground/40" : drawMode === "circle" ? "bg-foreground text-background shadow-xs cursor-pointer font-semibold" : "hover:bg-muted/50 text-muted-foreground hover:text-foreground cursor-pointer"
+                }`}
+              >
+                <Circle className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* 4. Start / Stop Draw */}
+            {!isEditing ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!studyArea}
+                onClick={() => {
+                  if (!studyArea) return;
+                  setIsEditing(true);
+                  setSessionSamples([]);
+                  toast({ title: "Edit Session Started", description: `Digitizing '${classLabel}'. Click on map to add features.` });
+                  setTimeout(() => autoStartDrawMode(drawMode === "pan" ? "point" : drawMode, true), 300);
+                }}
+                className={`font-semibold gap-1.5 text-xs shadow-2xs h-8 px-2.5 transition-all ${
+                  !studyArea
+                    ? "opacity-40 cursor-not-allowed border-dashed"
+                    : "bg-foreground text-background hover:bg-foreground/90 cursor-pointer"
+                }`}
+                title={!studyArea ? "Define AOI first to start drawing features" : "Start digitizing samples on the map"}
+              >
+                <Edit className="w-3.5 h-3.5" />
+                <span>Start Draw</span>
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                variant="destructive"
+                className="font-medium gap-1 text-xs shadow-2xs h-8 px-2.5 animate-pulse cursor-pointer"
+                onClick={handleStopSession}
+                title="Halt active digitization session"
+              >
+                <StopCircle className="w-3.5 h-3.5" />
+                <span>Stop Draw</span>
+              </Button>
+            )}
+
+            {/* 5. Readiness Status */}
+            <button
+              type="button"
+              onClick={() => setIsReadinessModalOpen(true)}
+              className="px-2 h-8 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 border border-border/60 bg-muted/20 hover:bg-muted/50 text-muted-foreground hover:text-foreground shadow-2xs cursor-pointer"
+              title="Inspect Dataset Readiness & Sample Quality Balance"
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${classBalanceMetrics.status === "healthy" ? "bg-emerald-400" : "bg-amber-400"}`} />
+              <span className="hidden xl:inline">Readiness:</span>
+              <span>{classBalanceMetrics.status === "healthy" ? "Healthy" : classBalanceMetrics.status === "imbalanced" ? "Imbalanced" : "Low Samples"}</span>
+            </button>
+          </div>
+
+          {/* Right: Classifier Execution + Batch Save + Exit Full View */}
+          <div className="flex items-center gap-2">
+            {sessionSamples.length > 0 && (
+              <Button
+                size="sm"
+                onClick={() => {
+                  setDatasetNameInput(`Training_Session_${new Date().toISOString().slice(0, 10)}`);
+                  setIsSaveModalOpen(true);
+                }}
+                className="h-8 gap-1.5 text-xs font-medium px-2.5 bg-secondary hover:bg-secondary/80 text-secondary-foreground border border-border/60 shadow-2xs cursor-pointer"
+                title="SAVE: Commit buffered features to dataset"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>Save ({sessionSamples.length})</span>
+              </Button>
+            )}
+
+            {/* RUN CLASSIFIER */}
+            <Button
+              size="sm"
+              onClick={() => {
+                if (allCombinedSamples.length === 0) {
+                  toast({
+                    variant: "destructive",
+                    title: "Training Samples Required",
+                    description: "Please digitize at least 2 training samples before running supervised classification.",
+                  });
+                  return;
+                }
+                trainSupervisedClassifierDirectly();
+              }}
+              disabled={classifyMut.isPending || allCombinedSamples.length === 0}
+              className={`h-8 gap-1.5 text-xs font-semibold px-3.5 shadow-2xs transition-all active:scale-95 ${
+                allCombinedSamples.length === 0
+                  ? "opacity-40 cursor-not-allowed border border-dashed border-border/40 text-muted-foreground/40 bg-muted/10 shadow-none"
+                  : "bg-emerald-600 hover:bg-emerald-500 text-white font-medium cursor-pointer shadow-xs"
+              }`}
+              title="RUN: Execute Random Forest Supervised Classifier on digitized training samples"
+            >
+              {classifyMut.isPending ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : allCombinedSamples.length === 0 ? (
+                <Lock className="w-3.5 h-3.5 text-muted-foreground/40" />
+              ) : (
+                <Play className="w-3.5 h-3.5 fill-current" />
+              )}
+              <span>
+                {classifyMut.isPending
+                  ? "Training..."
+                  : `Run Classifier (${allCombinedSamples.length})`}
+              </span>
+            </Button>
+
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setIsFullMapMode(false)}
+              className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground cursor-pointer"
+              title="Exit Full-Screen Map (Return to Studio)"
+            >
+              <Minimize2 className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+      ) : (
+        /* Unified Top Master Command Bar - Sleek Minimalist */
+        <div className="flex flex-wrap items-center justify-between px-6 py-2 border-b border-border/60 bg-card/90 backdrop-blur-md z-[50] gap-3">
         <div className="flex items-center gap-5 flex-wrap">
           {/* Brand & Studio Title */}
           <div className="flex items-center gap-2.5">
@@ -1894,6 +2233,21 @@ export function SampleDigitizationPage() {
               <span>Reset</span>
             </Button>
 
+            {/* 8. FULL MAP MODE TOGGLE */}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setActiveTab("map");
+                setIsFullMapMode(true);
+              }}
+              className="h-8 gap-1.5 text-xs font-semibold px-3 bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 border-sky-500/30 transition-all active:scale-95 shadow-2xs cursor-pointer"
+              title="FULL MAP: Expand to full-screen map with dedicated training & digitizing tools"
+            >
+              <Maximize2 className="w-3.5 h-3.5" />
+              <span>Full Map View</span>
+            </Button>
+
             {/* Real-time Status Badge */}
             <div className="h-4 w-[1px] bg-border/60 mx-1" />
             <div className="px-2 text-[11px] font-mono flex items-center gap-1.5">
@@ -1944,6 +2298,7 @@ export function SampleDigitizationPage() {
           </TabsList>
         </Tabs>
       </div>
+      )}
 
       {/* Top Timelapse Ribbon Dock (Option 1 Integration) */}
       {isTimelapseDockOpen && (
@@ -2159,20 +2514,31 @@ export function SampleDigitizationPage() {
                 </div>
                 <div>
                   <h3 className="font-semibold text-xs uppercase tracking-wider text-foreground/90">
-                    Table of Contents
+                    {isFullMapMode ? "Training Samples (TOC)" : "Table of Contents"}
                   </h3>
                   <span className="text-[10px] text-muted-foreground font-mono">
-                    Feature Layers &amp; Basemap
+                    {isFullMapMode ? "Classes & Ground Truth Only" : "Feature Layers & Basemap"}
                   </span>
                 </div>
               </div>
               <div className="flex items-center gap-1">
+                {isFullMapMode && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setIsClassPaletteModalOpen(true)}
+                    className="h-6 px-1.5 text-[10px] font-medium text-sky-400 hover:text-sky-300 hover:bg-sky-500/10 gap-0.5 cursor-pointer"
+                    title="Add or manage classes"
+                  >
+                    + Class
+                  </Button>
+                )}
                 <Button
                   size="sm"
                   variant="ghost"
                   onClick={() => setIsLeftPanelOpen(false)}
-                  className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
-                  title="Collapse Table of Contents (Full Map View)"
+                  className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground cursor-pointer"
+                  title="Collapse Table of Contents"
                 >
                   <ChevronLeft className="w-3.5 h-3.5" />
                 </Button>
@@ -2193,38 +2559,44 @@ export function SampleDigitizationPage() {
                   <button
                     type="button"
                     onClick={() => setShowAllSamples(!showAllSamples)}
-                    className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors"
+                    className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
                     title={showAllSamples ? "Hide All Layers" : "Show All Layers"}
                   >
                     {showAllSamples ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setIsAddDataModalOpen(true)}
-                    className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors"
-                    title="Add Data Layer"
-                  >
-                    <Upload className="w-3 h-3" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setIsClassPaletteModalOpen(true)}
-                    className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors"
-                    title="Class Palette Studio"
-                  >
-                    <Palette className="w-3 h-3" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab("samples")}
-                    className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors"
-                    title="Open Attribute Table"
-                  >
-                    <Table className="w-3 h-3" />
-                  </button>
+                  {!isFullMapMode && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setIsAddDataModalOpen(true)}
+                        className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                        title="Add Data Layer"
+                      >
+                        <Upload className="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIsClassPaletteModalOpen(true)}
+                        className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                        title="Class Palette Studio"
+                      >
+                        <Palette className="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab("samples")}
+                        className="p-1 rounded text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                        title="Open Attribute Table"
+                      >
+                        <Table className="w-3 h-3" />
+                      </button>
+                    </>
+                  )}
                 </div>
 
-                <span className="text-[10px] font-mono text-muted-foreground/80">Drawing Order</span>
+                <span className="text-[10px] font-mono text-muted-foreground/80">
+                  {isFullMapMode ? `${allCombinedSamples.length} Samples` : "Drawing Order"}
+                </span>
               </div>
 
               {/* Layer Filter Search */}
@@ -2409,148 +2781,181 @@ export function SampleDigitizationPage() {
 
 
 
-              {/* ── 3. Model Layer: Supervised Classification Raster (if active) ── */}
-              {classifyResult?.tile_url && (
-                <div className="rounded-lg border border-border/60 bg-muted/20 p-2 text-xs shadow-2xs space-y-1.5 animate-in fade-in">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <input
-                        type="checkbox"
-                        checked={showClassifyResult}
-                        onChange={(e) => setShowClassifyResult(e.target.checked)}
-                        className="h-3.5 w-3.5 rounded border-border/60 cursor-pointer shrink-0"
-                        title="Toggle classification raster overlay"
-                      />
-                      <div className="w-3.5 h-3.5 rounded-xs bg-muted border border-border shrink-0 shadow-2xs" />
-                      <span className="font-medium text-foreground truncate">Supervised Map</span>
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      {classifyResult.accuracy?.is_evaluated && typeof classifyResult.accuracy.overall_accuracy === "number" && (
-                        <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 font-mono border-border/60 text-muted-foreground bg-muted/40">
-                          {(classifyResult.accuracy.overall_accuracy * 100).toFixed(0)}% Acc
-                        </Badge>
-                      )}
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => setClassifyResult(null)}
-                        className="h-5 w-5 p-0 text-muted-foreground hover:text-destructive"
-                        title="Clear classification raster"
-                      >
-                        <X className="w-3 h-3" />
-                      </Button>
+            {!isFullMapMode && (
+              <>
+                {/* ── 3. Model Layer: Supervised Classification Raster (if active) ── */}
+                {classifyResult?.tile_url && (
+                  <div className="rounded-lg border border-border/60 bg-muted/20 p-2 text-xs shadow-2xs space-y-1.5 animate-in fade-in">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <input
+                          type="checkbox"
+                          checked={showClassifyResult}
+                          onChange={(e) => setShowClassifyResult(e.target.checked)}
+                          className="h-3.5 w-3.5 rounded border-border/60 cursor-pointer shrink-0"
+                          title="Toggle classification raster overlay"
+                        />
+                        <div className="w-3.5 h-3.5 rounded-xs bg-muted border border-border shrink-0 shadow-2xs" />
+                        <span className="font-medium text-foreground truncate">Supervised Map</span>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {classifyResult.accuracy?.is_evaluated && typeof classifyResult.accuracy.overall_accuracy === "number" && (
+                          <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 font-mono border-border/60 text-muted-foreground bg-muted/40">
+                            {(classifyResult.accuracy.overall_accuracy * 100).toFixed(0)}% Acc
+                          </Badge>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setClassifyResult(null)}
+                          className="h-5 w-5 p-0 text-muted-foreground hover:text-destructive"
+                          title="Clear classification raster"
+                        >
+                          <X className="w-3 h-3" />
+                        </Button>
+                      </div>
                     </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              {/* ── 4. Remote Sensing Layer: Timelapse / Satellite Imagery (if active) ── */}
-              {timelapseTileUrl && (
-                <div className="rounded-lg border border-border/60 bg-muted/20 p-2 text-xs shadow-2xs space-y-1.5 animate-in fade-in">
+                {/* ── 4. Remote Sensing Layer: Timelapse / Satellite Imagery (if active) ── */}
+                {timelapseTileUrl && (
+                  <div className="rounded-lg border border-border/60 bg-muted/20 p-2 text-xs shadow-2xs space-y-1.5 animate-in fade-in">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <input
+                          type="checkbox"
+                          checked={!!timelapseTileUrl}
+                          onChange={() => {
+                            if (timelapseTileUrl) setTimelapseTileUrl(null);
+                            else loadTimelapseTile();
+                          }}
+                          className="h-3.5 w-3.5 rounded border-border/60 cursor-pointer shrink-0"
+                          title="Toggle satellite timelapse imagery"
+                        />
+                        <Satellite className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                        <span className="font-medium text-foreground truncate">
+                          {tlSource === "sentinel2" ? "Sentinel-2" : tlSource === "landsat" ? "Landsat-8" : "GEDI LiDAR"}
+                        </span>
+                      </div>
+                      <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 font-mono border-border/60 text-muted-foreground bg-muted/40">
+                        {tlYear} ({Math.round(tlOpacity * 100)}%)
+                      </Badge>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── 5. Analytical Layer: Spatial Sampling Bias (1km Rings) ── */}
+                <div className="rounded-lg border border-border/50 bg-card/40 p-2 text-xs shadow-2xs">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-1.5 min-w-0">
                       <input
                         type="checkbox"
-                        checked={!!timelapseTileUrl}
-                        onChange={() => {
-                          if (timelapseTileUrl) setTimelapseTileUrl(null);
-                          else loadTimelapseTile();
-                        }}
+                        checked={showCoverageBuffers}
+                        onChange={(e) => setShowCoverageBuffers(e.target.checked)}
                         className="h-3.5 w-3.5 rounded border-border/60 cursor-pointer shrink-0"
-                        title="Toggle satellite timelapse imagery"
+                        title="Toggle 1km spatial sampling bias coverage rings"
                       />
-                      <Satellite className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                      <span className="font-medium text-foreground truncate">
-                        {tlSource === "sentinel2" ? "Sentinel-2" : tlSource === "landsat" ? "Landsat-8" : "GEDI LiDAR"}
-                      </span>
+                      <div className="w-3.5 h-3.5 rounded-full border border-dashed border-muted-foreground/60 shrink-0" />
+                      <span className="font-medium text-foreground truncate">1km Bias Rings</span>
                     </div>
-                    <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 font-mono border-border/60 text-muted-foreground bg-muted/40">
-                      {tlYear} ({Math.round(tlOpacity * 100)}%)
+                    <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 font-mono text-muted-foreground border-border/50">
+                      Buffer
                     </Badge>
                   </div>
                 </div>
-              )}
 
-              {/* ── 5. Analytical Layer: Spatial Sampling Bias (1km Rings) ── */}
-              <div className="rounded-lg border border-border/50 bg-card/40 p-2 text-xs shadow-2xs">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <input
-                      type="checkbox"
-                      checked={showCoverageBuffers}
-                      onChange={(e) => setShowCoverageBuffers(e.target.checked)}
-                      className="h-3.5 w-3.5 rounded border-border/60 cursor-pointer shrink-0"
-                      title="Toggle 1km spatial sampling bias coverage rings"
-                    />
-                    <div className="w-3.5 h-3.5 rounded-full border border-dashed border-muted-foreground/60 shrink-0" />
-                    <span className="font-medium text-foreground truncate">1km Bias Rings</span>
+                {/* ── 6. Basemap Layer ── */}
+                <div className="rounded-lg border border-border/50 bg-card/40 p-2 text-xs shadow-2xs space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <input
+                        type="checkbox"
+                        checked={mapStyle !== "none"}
+                        onChange={(e) => setMapStyle(e.target.checked ? "satellite" : "none")}
+                        className="h-3.5 w-3.5 rounded border-border/60 cursor-pointer shrink-0"
+                        title="Toggle basemap"
+                      />
+                      <Layers className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                      <span className="font-medium text-foreground truncate">Basemap</span>
+                    </div>
+                    <select
+                      value={mapStyle}
+                      onChange={(e) => setMapStyle(e.target.value as any)}
+                      className="bg-muted/50 text-[10px] px-1.5 py-0.5 rounded border border-border/50 font-medium h-6 focus:outline-none text-foreground"
+                    >
+                      <option value="satellite">Esri Satellite</option>
+                      <option value="osm">OpenStreetMap</option>
+                      <option value="none">Blank</option>
+                    </select>
                   </div>
-                  <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 font-mono text-muted-foreground border-border/50">
-                    Buffer
-                  </Badge>
                 </div>
-              </div>
+              </>
+            )}
+            </div>
 
-              {/* ── 6. Basemap Layer ── */}
-              <div className="rounded-lg border border-border/50 bg-card/40 p-2 text-xs shadow-2xs space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <input
-                      type="checkbox"
-                      checked={mapStyle !== "none"}
-                      onChange={(e) => setMapStyle(e.target.checked ? "satellite" : "none")}
-                      className="h-3.5 w-3.5 rounded border-border/60 cursor-pointer shrink-0"
-                      title="Toggle basemap"
-                    />
-                    <Layers className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                    <span className="font-medium text-foreground truncate">Basemap</span>
+            {/* Contents Pane Footer: Dataset Readiness & Quality Diagnostics (or Focused Mode switcher) */}
+            {isFullMapMode ? (
+              <div className="mt-auto pt-3 border-t border-border/60 space-y-2">
+                <div className="p-2.5 rounded-lg border border-border/60 bg-muted/30 text-xs space-y-1.5 shadow-2xs">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-[11px] text-foreground flex items-center gap-1">
+                      <Info className="w-3 h-3 text-sky-400" />
+                      Focused Training TOC
+                    </span>
+                    <Badge variant="outline" className="text-[9px] font-mono px-1.5 py-0 h-4 border-border/50 text-muted-foreground">
+                      {allCombinedSamples.length} Samples
+                    </Badge>
                   </div>
-                  <select
-                    value={mapStyle}
-                    onChange={(e) => setMapStyle(e.target.value as any)}
-                    className="bg-muted/50 text-[10px] px-1.5 py-0.5 rounded border border-border/50 font-medium h-6 focus:outline-none text-foreground"
+                  <p className="text-[10px] text-muted-foreground leading-snug">
+                    All digitized samples and trained models are continuously synchronized live. To add external data layers or inspect attribute tables, return to the mother page.
+                  </p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setIsFullMapMode(false)}
+                    className="w-full h-7 text-xs border-border/60 hover:bg-muted text-foreground gap-1.5 mt-1 cursor-pointer"
                   >
-                    <option value="satellite">Esri Satellite</option>
-                    <option value="osm">OpenStreetMap</option>
-                    <option value="none">Blank</option>
-                  </select>
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                    <span>Return to Mother Page</span>
+                  </Button>
                 </div>
               </div>
-            </div>
+            ) : (
+              <div className="mt-auto pt-3 border-t border-border/60 space-y-2">
+                <button
+                  type="button"
+                  onClick={() => setIsReadinessModalOpen(true)}
+                  className="w-full p-2.5 rounded-lg border border-border/60 bg-muted/30 hover:bg-muted/50 text-left transition-colors shadow-2xs"
+                  title="Click to inspect ML Dataset Readiness &amp; Quality Diagnostics"
+                >
+                  <div className="flex items-center justify-between text-xs mb-1">
+                    <span className="font-semibold uppercase tracking-wider text-[10px] flex items-center gap-1.5 text-foreground/90">
+                      <span className={`w-1.5 h-1.5 rounded-full ${classBalanceMetrics.status === "healthy" ? "bg-emerald-400" : "bg-amber-400"}`} />
+                      Dataset Health
+                    </span>
+                    <Badge variant="outline" className="text-[9px] font-mono px-1.5 py-0 h-4 border-border/50 text-muted-foreground bg-muted/40">
+                      {classBalanceMetrics.status === "healthy" ? "Healthy" : classBalanceMetrics.status === "imbalanced" ? "Imbalanced" : "Low Samples"}
+                    </Badge>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground leading-snug line-clamp-2">
+                    {classBalanceMetrics.message}
+                  </p>
+                </button>
 
-            {/* Contents Pane Footer: Dataset Readiness & Quality Diagnostics */}
-            <div className="mt-auto pt-3 border-t border-border/60 space-y-2">
-              <button
-                type="button"
-                onClick={() => setIsReadinessModalOpen(true)}
-                className="w-full p-2.5 rounded-lg border border-border/60 bg-muted/30 hover:bg-muted/50 text-left transition-colors shadow-2xs"
-                title="Click to inspect ML Dataset Readiness &amp; Quality Diagnostics"
-              >
-                <div className="flex items-center justify-between text-xs mb-1">
-                  <span className="font-semibold uppercase tracking-wider text-[10px] flex items-center gap-1.5 text-foreground/90">
-                    <span className={`w-1.5 h-1.5 rounded-full ${classBalanceMetrics.status === "healthy" ? "bg-emerald-400" : "bg-amber-400"}`} />
-                    Dataset Health
-                  </span>
-                  <Badge variant="outline" className="text-[9px] font-mono px-1.5 py-0 h-4 border-border/50 text-muted-foreground bg-muted/40">
-                    {classBalanceMetrics.status === "healthy" ? "Healthy" : classBalanceMetrics.status === "imbalanced" ? "Imbalanced" : "Low Samples"}
-                  </Badge>
+                <div className="flex items-center justify-between text-[10px] font-mono text-muted-foreground px-1">
+                  <span>{Object.keys(groupedSamples).length} Classes &bull; {allCombinedSamples.length} Samples</span>
+                  <span className="font-medium text-muted-foreground">{isEditing ? "● Digitizing" : "○ Ready"}</span>
                 </div>
-                <p className="text-[11px] text-muted-foreground leading-snug line-clamp-2">
-                  {classBalanceMetrics.message}
-                </p>
-              </button>
-
-              <div className="flex items-center justify-between text-[10px] font-mono text-muted-foreground px-1">
-                <span>{Object.keys(groupedSamples).length} Classes &bull; {allCombinedSamples.length} Samples</span>
-                <span className="font-medium text-muted-foreground">{isEditing ? "● Digitizing" : "○ Ready"}</span>
               </div>
-            </div>
+            )}
           </div>
           
           {/* Right Main Panel: Map area with Docked Top Sub-Bar (Option 1) */}
           <div className="flex-1 flex flex-col h-full overflow-hidden">
-            {/* Docked Map Top Sub-Bar */}
-            <div className="flex-none bg-card/90 backdrop-blur-md border-b border-border/60 px-3 py-2 z-10 flex flex-wrap items-center justify-between gap-2 shadow-2xs">
+            {/* Docked Map Top Sub-Bar (Hidden in Full Map Mode since tools are in top bar) */}
+            {!isFullMapMode && (
+              <div className="flex-none bg-card/90 backdrop-blur-md border-b border-border/60 px-3 py-2 z-10 flex flex-wrap items-center justify-between gap-2 shadow-2xs">
               {/* Left: Sidebar Toggle, Study Area, Class Palette, Readiness, Vector Draw & Session */}
               <div className="flex items-center gap-2 flex-wrap">
                 {/* Left Sidebar Toggle Button */}
@@ -2827,6 +3232,7 @@ export function SampleDigitizationPage() {
                   )}
                 </div>
               </div>
+            )}
 
               {/* Contextual Status Banners (Docked directly beneath sub-bar) */}
               {!studyArea && !isDrawingStudyArea && (
@@ -3039,18 +3445,20 @@ export function SampleDigitizationPage() {
                     <option value="none">Blank Canvas</option>
                   </select>
 
-                  {/* Add Data */}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setIsAddDataModalOpen(true)}
-                    className={`text-xs h-7 flex items-center gap-1.5 border border-border/60 bg-muted/30 hover:bg-muted/60 text-muted-foreground hover:text-foreground px-2 rounded-md transition-colors shadow-2xs ${uploadBusy ? 'opacity-50 pointer-events-none' : ''}`}
-                    title="Upload Shapefile, GeoJSON, or GeoTIFF"
-                  >
-                    {uploadBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-                    <span>{uploadBusy ? 'Uploading...' : 'Add Data'}</span>
-                  </Button>
+                  {/* Add Data (Only in Mother Page Studio mode) */}
+                  {!isFullMapMode && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setIsAddDataModalOpen(true)}
+                      className={`text-xs h-7 flex items-center gap-1.5 border border-border/60 bg-muted/30 hover:bg-muted/60 text-muted-foreground hover:text-foreground px-2 rounded-md transition-colors shadow-2xs cursor-pointer ${uploadBusy ? 'opacity-50 pointer-events-none' : ''}`}
+                      title="Upload Shapefile, GeoJSON, or GeoTIFF"
+                    >
+                      {uploadBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                      <span>{uploadBusy ? 'Uploading...' : 'Add Data'}</span>
+                    </Button>
+                  )}
 
                   <div className="h-4 w-[1px] bg-border/60 mx-0.5" />
 
@@ -3058,7 +3466,7 @@ export function SampleDigitizationPage() {
                   <button
                     type="button"
                     onClick={() => setShowAllSamples(!showAllSamples)}
-                    className={`px-2 h-7 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 border border-border/60 shadow-2xs ${
+                    className={`px-2 h-7 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 border border-border/60 shadow-2xs cursor-pointer ${
                       showAllSamples ? "bg-muted/60 text-foreground" : "bg-muted/20 text-muted-foreground hover:bg-muted/50"
                     }`}
                     title="Toggle visibility of all sample markers on the map"
@@ -3077,7 +3485,7 @@ export function SampleDigitizationPage() {
                   <button
                     type="button"
                     onClick={() => setShowCoverageBuffers(!showCoverageBuffers)}
-                    className={`px-2 h-7 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 border border-border/60 shadow-2xs ${
+                    className={`px-2 h-7 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 border border-border/60 shadow-2xs cursor-pointer ${
                       showCoverageBuffers 
                         ? "bg-muted/70 text-foreground font-medium" 
                         : "bg-muted/20 text-muted-foreground hover:text-foreground hover:bg-muted/50"
@@ -3087,6 +3495,41 @@ export function SampleDigitizationPage() {
                     <Compass className="w-3.5 h-3.5 text-muted-foreground" />
                     <span>{showCoverageBuffers ? "1km Bias Rings (Active)" : "1km Bias Rings"}</span>
                   </button>
+
+                  <div className="h-4 w-[1px] bg-border/60 mx-0.5" />
+
+                  {/* Full Map / Mother Page Mode Toggle */}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (isFullMapMode) {
+                        setIsFullMapMode(false);
+                      } else {
+                        setActiveTab("map");
+                        setIsFullMapMode(true);
+                      }
+                    }}
+                    className={`h-7 px-2 text-xs font-semibold gap-1.5 border shadow-2xs cursor-pointer transition-all active:scale-95 ${
+                      isFullMapMode
+                        ? "bg-sky-500/15 border-sky-500/40 text-sky-300 hover:bg-sky-500/25"
+                        : "border-border/60 bg-muted/30 hover:bg-muted/60 text-foreground"
+                    }`}
+                    title={isFullMapMode ? "Return to Mother Page (Full Studio)" : "Expand to Full Map Mode"}
+                  >
+                    {isFullMapMode ? (
+                      <>
+                        <ChevronLeft className="w-3.5 h-3.5 text-sky-400" />
+                        <span className="text-sky-300 font-semibold">Mother Page</span>
+                      </>
+                    ) : (
+                      <>
+                        <Maximize2 className="w-3.5 h-3.5 text-muted-foreground" />
+                        <span className="hidden sm:inline">Full Map</span>
+                      </>
+                    )}
+                  </Button>
                 </div>
 
                 <MapContainer center={[-1.94, 29.87]} zoom={9} style={{ height: "100%", width: "100%" }} scrollWheelZoom>
