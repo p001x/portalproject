@@ -93,6 +93,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       return await res.json();
     } catch {
+      if (res.status === 503 || res.status === 502 || res.status === 504) {
+        return { detail: "Backend server is waking up from hibernation (Render free-tier cold start). Please wait ~15 seconds and try again." };
+      }
       return { detail: `${fallback} (Server returned ${res.status}: ${res.statusText || "No response body"})` };
     }
   };
@@ -180,11 +183,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (email: string, password?: string) => {
     setIsLoading(true);
     try {
-      const res = await fetch(`${BASE}/auth/login`, {
+      let res = await fetch(`${BASE}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password })
       });
+      if (res.status === 503 || res.status === 502) {
+        await new Promise((r) => setTimeout(r, 2500));
+        res = await fetch(`${BASE}/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password })
+        });
+      }
       const data = await safeJson(res, "Login failed");
       if (!res.ok) {
         const info = data?.detail || data;
