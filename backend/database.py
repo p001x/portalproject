@@ -2,7 +2,7 @@ import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, scoped_session
 from pathlib import Path
-from models import Base
+from models import Base, User, UserActivity, UserAppeal, OTP, GeeUsage
 
 _HERE = Path(__file__).resolve().parent
 # Default to SQLite for local development if DATABASE_URL is not provided

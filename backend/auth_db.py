@@ -106,35 +106,73 @@ from models import OTP
 import random
 from datetime import timedelta
 
+_IN_MEMORY_OTPS = {}
+
 def save_otp(email: str, expires_in_minutes: int = 10) -> str:
     # Generate cryptographically secure 6-digit code (100000 - 999999)
     code = f"{secrets.randbelow(900000) + 100000:06d}"
-    expires_at = (datetime.now(timezone.utc) + timedelta(minutes=expires_in_minutes)).isoformat()
+    expires_dt = datetime.now(timezone.utc) + timedelta(minutes=expires_in_minutes)
+    expires_at = expires_dt.isoformat()
     email_clean = email.strip().lower()
-    with SessionLocal() as db:
-        # Invalidate old OTPs
-        db.query(OTP).filter(func.lower(OTP.email) == email_clean, OTP.used == False).update({"used": True}, synchronize_session=False)
-        
-        new_otp = OTP(email=email_clean, code=code, expires_at=expires_at, used=False)
-        db.add(new_otp)
-        db.commit()
+    
+    # Store in memory fallback
+    _IN_MEMORY_OTPS[email_clean] = {"code": code, "expires_at": expires_dt, "used": False}
+    
+    try:
+        from database import engine
+        from models import Base
+        Base.metadata.create_all(bind=engine)
+        with SessionLocal() as db:
+            # Invalidate old OTPs
+            db.query(OTP).filter(func.lower(OTP.email) == email_clean, OTP.used == False).update({"used": True}, synchronize_session=False)
+            new_otp = OTP(email=email_clean, code=code, expires_at=expires_at, used=False)
+            db.add(new_otp)
+            db.commit()
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Could not save OTP to SQL database (using memory fallback): {e}")
+
     return code
 
 def verify_otp(email: str, code: str) -> bool:
     email_clean = email.strip().lower()
-    with SessionLocal() as db:
-        otp = db.query(OTP).filter(func.lower(OTP.email) == email_clean, OTP.code == code.strip(), OTP.used == False).order_by(OTP.id.desc()).first()
-        if not otp:
-            return False
-            
-        # Check expiration
-        expiry = datetime.fromisoformat(otp.expires_at)
-        if datetime.now(timezone.utc) > expiry:
-            return False
-            
-        otp.used = True
-        db.commit()
-        return True
+    code_clean = (code or "").strip()
+    now = datetime.now(timezone.utc)
+    
+    # Check in-memory first for ultra-fast and resilient verification
+    mem_otp = _IN_MEMORY_OTPS.get(email_clean)
+    if mem_otp and not mem_otp.get("used"):
+        if mem_otp.get("code") == code_clean and now <= mem_otp.get("expires_at"):
+            mem_otp["used"] = True
+            try:
+                with SessionLocal() as db:
+                    otp = db.query(OTP).filter(func.lower(OTP.email) == email_clean, OTP.code == code_clean, OTP.used == False).order_by(OTP.id.desc()).first()
+                    if otp:
+                        otp.used = True
+                        db.commit()
+            except Exception:
+                pass
+            return True
+
+    # Check SQL DB
+    try:
+        with SessionLocal() as db:
+            otp = db.query(OTP).filter(func.lower(OTP.email) == email_clean, OTP.code == code_clean, OTP.used == False).order_by(OTP.id.desc()).first()
+            if not otp:
+                return False
+                
+            # Check expiration
+            expiry = datetime.fromisoformat(otp.expires_at)
+            if now > expiry:
+                return False
+                
+            otp.used = True
+            db.commit()
+            return True
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Error checking OTP in database: {e}")
+        return False
 
 def update_user_password(email: str, password_hash: str) -> None:
     if not email:

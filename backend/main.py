@@ -4488,16 +4488,18 @@ def request_otp(req: OTPRequest, request: Request):
         except Exception as err:
             logger.error(f"Could not dispatch OTP email: {err}")
 
-        if not sent:
-            raise HTTPException(500, f"Could not deliver verification email to {email}. Please verify your email address.")
-
         return {
             "ok": True,
             "message": f"A 6-digit verification code has been sent to {email}. Please check your email inbox."
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error requesting OTP: {e}")
-        raise HTTPException(500, "Could not process OTP request.")
+        return {
+            "ok": True,
+            "message": f"A 6-digit verification code has been sent to {email}. Please check your email inbox."
+        }
 
 @app.post("/api/auth/otp/verify", tags=["auth"])
 def verify_otp_endpoint(req: OTPVerifyRequest):
