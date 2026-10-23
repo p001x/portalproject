@@ -46,7 +46,7 @@ async function createJwtToken(payload, secret) {
   const fullPayload = {
     ...payload,
     iat: payload.iat || nowSec,
-    exp: payload.exp || (nowSec + 24 * 3600) // 24 hours default
+    exp: payload.exp || (nowSec + 365 * 24 * 3600) // 1 year session persistence
   };
   const encodedPayload = base64Url(JSON.stringify(fullPayload));
   const data = enc.encode(`${encodedHeader}.${encodedPayload}`);
@@ -391,20 +391,15 @@ export default {
         const role = ADMIN_EMAILS.has(email) ? "admin" : "user";
         REGISTERED_USERS.set(email, { name, email, password, role });
 
-        const token = await createJwtToken({ sub: email, name, role }, JWT_SECRET);
+        const backendOrigin = (env.BACKEND_ORIGIN || env.CLOUD_RUN_ORIGIN || DEFAULT_BACKEND_ORIGIN).replace(/\/$/, "");
+        let backendUser = null;
+        let backendToken = null;
+        let backendErrorMsg = null;
 
-        const userDict = {
-          id: email,
-          email,
-          name,
-          role
-        };
-
-        // Forward to Render with X-Worker-Verified header so the user account is created in the database
-        ctx.waitUntil((async () => {
+        // Synchronously forward to backend to ensure user is permanently written to the SQL database
+        for (let attempt = 0; attempt < 3; attempt++) {
           try {
-            const backendOrigin = (env.BACKEND_ORIGIN || env.CLOUD_RUN_ORIGIN || DEFAULT_BACKEND_ORIGIN).replace(/\/$/, "");
-            await fetch(`${backendOrigin}/api/auth/register`, {
+            const resp = await fetch(`${backendOrigin}/api/auth/register`, {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
@@ -413,16 +408,63 @@ export default {
               },
               body: JSON.stringify({ name, email, password, code })
             });
-          } catch (_) {}
-        })());
+
+            const respData = await resp.json().catch(() => null);
+            if (resp.ok && respData && respData.user) {
+              backendUser = respData.user;
+              backendToken = respData.token;
+              break;
+            } else if (resp.status === 400 || resp.status === 409) {
+              // Informative validation error (e.g. Email already registered)
+              backendErrorMsg = (respData && (respData.detail || respData.message)) || "Registration failed.";
+              break;
+            }
+          } catch (e) {
+            console.error(`Attempt ${attempt + 1} forwarding register to backend error:`, e);
+          }
+          if (attempt < 2) {
+            await new Promise((r) => setTimeout(r, 1200));
+          }
+        }
+
+        if (backendErrorMsg) {
+          return new Response(JSON.stringify({ detail: backendErrorMsg }), {
+            status: 400,
+            headers: { "Content-Type": "application/json" }
+          });
+        }
+
+        // If backend returned the created user, use it; otherwise fallback to local user + background sync
+        const finalUser = backendUser || { id: email, email, name, role };
+        const finalToken = backendToken || (await createJwtToken({ sub: email, name, role }, JWT_SECRET));
+
+        if (!backendUser) {
+          ctx.waitUntil((async () => {
+            for (let retry = 0; retry < 5; retry++) {
+              try {
+                const retryResp = await fetch(`${backendOrigin}/api/auth/register`, {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                    "X-Worker-Verified": "true",
+                    "X-Worker-Secret": JWT_SECRET
+                  },
+                  body: JSON.stringify({ name, email, password, code })
+                });
+                if (retryResp.ok) break;
+              } catch (_) {}
+              await new Promise((r) => setTimeout(r, 3000));
+            }
+          })());
+        }
 
         const headers = new Headers({ "Content-Type": "application/json" });
         headers.set("Set-Cookie", `__spetro_otp=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
 
         return new Response(JSON.stringify({
           ok: true,
-          token,
-          user: userDict
+          token: finalToken,
+          user: finalUser
         }), {
           status: 200,
           headers: headers

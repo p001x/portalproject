@@ -21,7 +21,13 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button } from "@/components/ui/button";
 
 export function AuthPage() {
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(() => {
+    try {
+      return localStorage.getItem("spetro_remembered_email") || "";
+    } catch {
+      return "";
+    }
+  });
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -77,6 +83,11 @@ export function AuthPage() {
       }
       try {
         await register(name, email, password, code);
+        try {
+          if (rememberMe) {
+            localStorage.setItem("spetro_remembered_email", email.trim().toLowerCase());
+          }
+        } catch (_) {}
       } catch (err: any) {
         setError(err.message || "Invalid or expired verification code. Please check your email.");
       }
@@ -117,6 +128,13 @@ export function AuthPage() {
         setSuccess(forgotRes?.message || "Password reset instructions have been sent to your email. Check your inbox or spam folder.");
       } else {
         await login(email, password);
+        try {
+          if (rememberMe) {
+            localStorage.setItem("spetro_remembered_email", email.trim().toLowerCase());
+          } else {
+            localStorage.removeItem("spetro_remembered_email");
+          }
+        } catch (_) {}
       }
     } catch (err: any) {
       setError(err.message || "Authentication failed. Please check your credentials.");
@@ -344,6 +362,7 @@ export function AuthPage() {
                         id="name"
                         type="text"
                         required
+                        autoComplete="name"
                         value={name}
                         onChange={(e) => setName(e.target.value)}
                         placeholder="e.g. John Doe"
@@ -364,6 +383,7 @@ export function AuthPage() {
                       id="email"
                       type="email"
                       required
+                      autoComplete="username email"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       placeholder="name@example.com"
@@ -395,6 +415,7 @@ export function AuthPage() {
                         id="password"
                         type={showPassword ? "text" : "password"}
                         required
+                        autoComplete={mode === "register" ? "new-password" : "current-password"}
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
                         placeholder="••••••••"
@@ -424,6 +445,7 @@ export function AuthPage() {
                         id="confirmPassword"
                         type={showConfirmPassword ? "text" : "password"}
                         required
+                        autoComplete="new-password"
                         value={confirmPassword}
                         onChange={(e) => setConfirmPassword(e.target.value)}
                         placeholder="••••••••"

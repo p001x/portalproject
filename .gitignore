@@ -7,7 +7,9 @@
 /coverage
 .cursor/rules/nx-rules.mdc
 # dependencies
-dist
+/dist/
+!artifacts/geoportal/dist/
+!artifacts/geoportal/dist/**
 .DS_Store
 .expo
 .expo-shared

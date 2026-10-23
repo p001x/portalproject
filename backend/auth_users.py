@@ -30,7 +30,9 @@ _ENV_FILE = _HERE / ".env"
 # ── JWT Configuration ────────────────────────────────────────────────────────
 
 _JWT_ALGORITHM = "HS256"
-_JWT_EXPIRE_HOURS = 24
+_JWT_EXPIRE_HOURS = 24 * 365  # 1 year expiration to keep user logged in until independent logout
+
+DEFAULT_JWT_SECRET = "jdvzqsCm2OlT-11073Aoq1wWVnyn7UTYERwt6ZyMeqNvd5aUv8PMS00Iy9ZDOvHk"
 
 
 def _get_jwt_secret() -> str:
@@ -51,11 +53,9 @@ def _get_jwt_secret() -> str:
         except Exception:
             pass
 
-    # In development/fallback, generate a cryptographically strong random secret if missing
-    secret = secrets.token_hex(32)
-    os.environ["JWT_SECRET"] = secret
-    logger.warning("JWT_SECRET was not set in environment. Generated an ephemeral secure key.")
-    return secret
+    # Use stable shared secret matching cloudflare worker so user sessions and edge sync persist seamlessly across restarts
+    os.environ["JWT_SECRET"] = DEFAULT_JWT_SECRET
+    return DEFAULT_JWT_SECRET
 
 
 # ── Password Validation ──────────────────────────────────────────────────────

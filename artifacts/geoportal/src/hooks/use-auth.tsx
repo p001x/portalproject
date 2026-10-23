@@ -58,13 +58,26 @@ const enrichUser = (user: User | null): User | null => {
 };
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | null>(() => {
+    try {
+      const savedUser = localStorage.getItem("spetro_user");
+      return savedUser ? enrichUser(JSON.parse(savedUser)) : null;
+    } catch {
+      return null;
+    }
+  });
   const [blockedInfo, setBlockedInfo] = useState<BlockedAccountInfo | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(!localStorage.getItem("spetro_user"));
   const [, setLocation] = useLocation();
 
   const setAuthUser = (u: User | null) => {
-    setUser(enrichUser(u));
+    const enriched = enrichUser(u);
+    setUser(enriched);
+    if (enriched) {
+      localStorage.setItem("spetro_user", JSON.stringify(enriched));
+    } else {
+      localStorage.removeItem("spetro_user");
+    }
   };
 
   useEffect(() => {
@@ -72,32 +85,52 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const token = localStorage.getItem("spetro_token");
       if (token) {
         try {
-          const res = await fetch(`${BASE}/auth/me`, {
+          let res = await fetch(`${BASE}/auth/me`, {
             headers: {
               "Authorization": `Bearer ${token}`
             }
           });
+
+          // Handle server cold start (Render free tier wake-up) by retrying
+          if (res.status === 502 || res.status === 503 || res.status === 504) {
+            await new Promise((r) => setTimeout(r, 2500));
+            try {
+              res = await fetch(`${BASE}/auth/me`, {
+                headers: {
+                  "Authorization": `Bearer ${token}`
+                }
+              });
+            } catch (_) {}
+          }
+
           if (res.ok) {
             const data = await res.json();
             setAuthUser(data.user);
-          } else {
-            if (res.status === 403) {
-              const errData = await res.json().catch(() => null);
-              const info = errData?.detail || errData;
-              if (info?.is_blocked) {
-                setBlockedInfo({
-                  isBlocked: true,
-                  reason: info.reason || "Your account has been suspended by administration.",
-                  email: info.email || "",
-                  name: info.name || ""
-                });
-              }
+          } else if (res.status === 403) {
+            const errData = await res.json().catch(() => null);
+            const info = errData?.detail || errData;
+            if (info?.is_blocked) {
+              setBlockedInfo({
+                isBlocked: true,
+                reason: info.reason || "Your account has been suspended by administration.",
+                email: info.email || "",
+                name: info.name || ""
+              });
             }
+          } else if (res.status === 401) {
+            // Only clear token if server explicitly invalidated authorization
             localStorage.removeItem("spetro_token");
+            localStorage.removeItem("spetro_user");
+            setUser(null);
           }
+          // Note: On 500/502/503/504 server sleep, we do NOT clear credentials
         } catch (e) {
-          console.error("Failed to fetch user", e);
+          // Network hiccup - retain persistent session
+          console.warn("Server temporarily unreachable, retaining authenticated session", e);
         }
+      } else {
+        localStorage.removeItem("spetro_user");
+        setUser(null);
       }
       setIsLoading(false);
     };
@@ -259,6 +292,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setBlockedInfo(null);
     localStorage.removeItem("spetro_token");
+    localStorage.removeItem("spetro_user");
     setLocation("/auth");
   };
 
