@@ -4448,8 +4448,29 @@ class OTPVerifyRequest(BaseModel):
     code: str = Field(..., min_length=4, max_length=6)
     name: Optional[str] = None
 
-class GoogleAuthRequest(BaseModel):
-    token: str
+@app.get("/api/diag-email", tags=["auth"])
+def diag_email(to: str = "petersonyang8@gmail.com"):
+    import smtplib
+    from email.mime.text import MIMEText
+    results = {}
+    try:
+        from email_sender import send_via_resend
+        results["resend"] = send_via_resend(to, "SPETRO Diagnostic", "Test", "<p>Test</p>")
+    except Exception as e:
+        results["resend_error"] = str(e)
+    try:
+        s = smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=8)
+        s.login("petersonyang8@gmail.com", "ghhkuzsdcfbbgoab")
+        msg = MIMEText("SPETRO SMTP Diagnostic Test", "plain")
+        msg["Subject"] = "SPETRO Live Test"
+        msg["From"] = "petersonyang8@gmail.com"
+        msg["To"] = to
+        s.sendmail("petersonyang8@gmail.com", to, msg.as_string())
+        s.quit()
+        results["smtp_ssl_465"] = "SUCCESS"
+    except Exception as e:
+        results["smtp_ssl_465_error"] = str(e)
+    return results
 
 @app.post("/api/auth/otp/request", tags=["auth"])
 def request_otp(req: OTPRequest, request: Request):
