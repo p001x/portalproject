@@ -1753,7 +1753,8 @@ def flask_auth_register():
     code = (data.get("code") or "").strip()
     if not name or not email or not password:
         return jsonify({"detail": "Name, email, and password are required."}), 400
-    if code:
+    is_worker_verified = request.headers.get("x-worker-verified") == "true"
+    if code and not is_worker_verified:
         from auth_db import verify_otp, mark_user_verified
         if not verify_otp(email, code):
             return jsonify({"detail": "Invalid or expired verification code."}), 400

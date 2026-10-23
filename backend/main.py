@@ -332,16 +332,24 @@ class ChangePasswordRequest(BaseModel):
 
 
 @app.post("/api/auth/register", tags=["auth"])
-def register(req: RegisterRequest):
+def register(req: RegisterRequest, request: Request):
     email = req.email.strip().lower()
     name = req.name.strip()
     code = (req.code or "").strip()
     
-    if not code:
-        raise HTTPException(400, "Please enter the 6-digit verification code.")
-    from auth_db import verify_otp
-    if not verify_otp(email, code):
-        raise HTTPException(400, "Invalid or expired verification code.")
+    # Allow edge worker that already verified the OTP code to complete registration
+    from auth_users import _get_jwt_secret
+    is_worker_verified = (
+        request.headers.get("x-worker-verified") == "true" and 
+        request.headers.get("x-worker-secret") == _get_jwt_secret()
+    )
+
+    if not is_worker_verified:
+        if not code:
+            raise HTTPException(400, "Please enter the 6-digit verification code.")
+        from auth_db import verify_otp
+        if not verify_otp(email, code):
+            raise HTTPException(400, "Invalid or expired verification code.")
 
     try:
         user = create_new_user(name, email, req.password)

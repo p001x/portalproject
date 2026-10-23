@@ -5,12 +5,14 @@
  *    traffic directly to the FastAPI backend (Render or Google Cloud Run).
  * 2. Edge Direct Email Delivery: Uses Cloudflare Sockets (Port 465 SMTPS) to send
  *    real verification emails via Gmail directly to ANY email recipient (0% bounce, no firewall blocks).
- * 3. Resilient Auth & OTP: Handles OTP generation, verification, and registration at the edge.
- * 4. Zero-CORS: Browser makes same-origin requests to /api/ on Cloudflare.
- * 5. Edge Tile Caching: Automatically caches GEE & Native Raster map tiles
- *    for 7 days across Cloudflare's global edge network (330+ datacenters).
- * 6. Static Asset Delivery: Serves Vite React SPA directly via Cloudflare Assets (ASSETS binding).
- * 7. WebSocket Upgrades: Seamlessly proxies WebSocket connections for community chat.
+ * 3. Globally-Distributed OTP Verification: Cryptographic HMAC challenge cookies ensure
+ *    verification succeeds across all 330+ Cloudflare edge datacenters worldwide.
+ * 4. Automatic Database User Creation: Forward verified accounts with X-Worker-Verified to Render.
+ * 5. Zero-CORS: Browser makes same-origin requests to /api/ on Cloudflare.
+ * 6. Edge Tile Caching: Automatically caches GEE & Native Raster map tiles
+ *    for 7 days across Cloudflare's global edge network.
+ * 7. Static Asset Delivery: Serves Vite React SPA directly via Cloudflare Assets (ASSETS binding).
+ * 8. WebSocket Upgrades: Seamlessly proxies WebSocket connections for community chat.
  */
 
 import { connect } from 'cloudflare:sockets';
@@ -43,8 +45,8 @@ async function createJwtToken(payload, secret) {
   const nowSec = Math.floor(Date.now() / 1000);
   const fullPayload = {
     ...payload,
-    iat: nowSec,
-    exp: nowSec + 24 * 3600 // 24 hours
+    iat: payload.iat || nowSec,
+    exp: payload.exp || (nowSec + 24 * 3600) // 24 hours default
   };
   const encodedPayload = base64Url(JSON.stringify(fullPayload));
   const data = enc.encode(`${encodedHeader}.${encodedPayload}`);
@@ -65,6 +67,47 @@ async function createJwtToken(payload, secret) {
 }
 
 /**
+ * WebCrypto HMAC-SHA256 JWT Verifier & Decoder
+ */
+async function decodeAndVerifyJwt(token, secret) {
+  try {
+    const parts = (token || "").trim().split('.');
+    if (parts.length !== 3) return null;
+    const [headerB64, payloadB64, sigB64] = parts;
+    
+    const enc = new TextEncoder();
+    const data = enc.encode(`${headerB64}.${payloadB64}`);
+    
+    function base64UrlDecode(str) {
+      let base64 = str.replace(/-/g, '+').replace(/_/g, '/');
+      while (base64.length % 4) base64 += '=';
+      return atob(base64);
+    }
+
+    const key = await crypto.subtle.importKey(
+      "raw",
+      enc.encode(secret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["verify"]
+    );
+
+    const sigStr = base64UrlDecode(sigB64);
+    const sigBytes = new Uint8Array(sigStr.length);
+    for (let i = 0; i < sigStr.length; i++) {
+      sigBytes[i] = sigStr.charCodeAt(i);
+    }
+
+    const isValid = await crypto.subtle.verify("HMAC", key, sigBytes, data);
+    if (!isValid) return null;
+
+    return JSON.parse(base64UrlDecode(payloadB64));
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
  * Read multi-line SMTP responses (handles "250-..." continuation and "250 ..." terminal lines)
  */
 async function readSmtpResponse(reader, decoder) {
@@ -75,7 +118,6 @@ async function readSmtpResponse(reader, decoder) {
     text += decoder.decode(value, { stream: true });
     const lines = text.trimEnd().split('\n');
     const lastLine = lines[lines.length - 1].trim();
-    // SMTP terminal reply has a 3-digit code followed by space (not hyphen)
     if (/^\d{3}\s/.test(lastLine)) {
       break;
     }
@@ -85,7 +127,7 @@ async function readSmtpResponse(reader, decoder) {
 
 /**
  * Direct Gmail SMTP TLS delivery via Port 465 (cloudflare:sockets)
- * Delivers directly to ANY inbox (menb85255@gmail.com, Yahoo, Outlook, etc.)
+ * Delivers directly to ANY inbox (Gmail, Yahoo, Outlook, custom school/company domains, etc.)
  */
 async function sendGmailSmtp(toEmail, code) {
   const encoder = new TextEncoder();
@@ -223,7 +265,7 @@ export default {
 
     // --- DIAGNOSTIC ENDPOINT: Test Edge SMTP Delivery ---
     if (path === "/api/test-edge-smtp") {
-      const to = url.searchParams.get("to") || GMAIL_USER;
+      const to = (url.searchParams.get("to") || GMAIL_USER).trim().toLowerCase();
       const testCode = "999888";
       const smtpRes = await sendGmailSmtp(to, testCode);
       return new Response(JSON.stringify({ to, result: smtpRes }), {
@@ -237,20 +279,27 @@ export default {
       try {
         const body = await request.clone().json();
         const email = (body.email || "").trim().toLowerCase();
-        if (!email || !email.includes("@")) {
-          return new Response(JSON.stringify({ detail: "Please provide a valid email address." }), {
+        
+        // Universal email format validation
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!email || !emailRegex.test(email)) {
+          return new Response(JSON.stringify({ detail: "Please provide a valid email address (e.g. name@example.com)." }), {
             status: 400,
             headers: { "Content-Type": "application/json" }
           });
         }
 
-        // Generate 6-digit OTP code (100000 - 999999)
+        // Generate cryptographically secure 6-digit OTP code (100000 - 999999)
         const randArr = new Uint32Array(1);
         crypto.getRandomValues(randArr);
         const code = (100000 + (randArr[0] % 900000)).toString();
         const expiresAt = Date.now() + 10 * 60 * 1000;
 
+        // Save in local isolate map
         OTP_STORE.set(email, { code, expiresAt });
+
+        // Generate cryptographic challenge token for globally distributed edge validation
+        const chalToken = await createJwtToken({ email, code, exp: Math.floor(expiresAt / 1000) }, JWT_SECRET);
 
         // Dispatch email directly over TLS Port 465 (Gmail) + Resend fallback
         ctx.waitUntil((async () => {
@@ -268,7 +317,7 @@ export default {
               console.error("[Edge Resend error]:", e);
             }
           }
-          // Best-effort background sync to Render backend
+          // Best-effort sync to Render backend
           try {
             const backendOrigin = (env.BACKEND_ORIGIN || env.CLOUD_RUN_ORIGIN || DEFAULT_BACKEND_ORIGIN).replace(/\/$/, "");
             await fetch(`${backendOrigin}/api/auth/otp/request`, {
@@ -279,12 +328,15 @@ export default {
           } catch (_) {}
         })());
 
+        const headers = new Headers({ "Content-Type": "application/json" });
+        headers.set("Set-Cookie", `__spetro_otp=${chalToken}; Path=/; HttpOnly; SameSite=Lax; Max-Age=600`);
+
         return new Response(JSON.stringify({
           ok: true,
           message: `A 6-digit verification code has been sent to ${email}. Please check your email inbox.`
         }), {
           status: 200,
-          headers: { "Content-Type": "application/json" }
+          headers: headers
         });
       } catch (err) {
         return new Response(JSON.stringify({ detail: `Could not process OTP request: ${err.message}` }), {
@@ -310,9 +362,21 @@ export default {
           });
         }
 
-        // Verify OTP code
+        // Verify OTP code: 1. check isolate Map, 2. check global signed challenge cookie
+        let isValid = false;
         const stored = OTP_STORE.get(email);
-        const isValid = (stored && stored.code === code && Date.now() <= stored.expiresAt);
+        if (stored && stored.code === code && Date.now() <= stored.expiresAt) {
+          isValid = true;
+        } else {
+          const cookieHeader = request.headers.get("Cookie") || "";
+          const match = cookieHeader.match(/__spetro_otp=([^;]+)/);
+          if (match) {
+            const chal = await decodeAndVerifyJwt(match[1], JWT_SECRET);
+            if (chal && chal.email === email && chal.code === code && (chal.exp * 1000) >= Date.now()) {
+              isValid = true;
+            }
+          }
+        }
 
         if (!isValid) {
           return new Response(JSON.stringify({ detail: "Invalid or expired verification code. Please check your email." }), {
@@ -336,17 +400,24 @@ export default {
           role
         };
 
-        // Also attempt best-effort registration on Render in background
+        // Forward to Render with X-Worker-Verified header so the user account is created in the database
         ctx.waitUntil((async () => {
           try {
             const backendOrigin = (env.BACKEND_ORIGIN || env.CLOUD_RUN_ORIGIN || DEFAULT_BACKEND_ORIGIN).replace(/\/$/, "");
             await fetch(`${backendOrigin}/api/auth/register`, {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
+              headers: {
+                "Content-Type": "application/json",
+                "X-Worker-Verified": "true",
+                "X-Worker-Secret": JWT_SECRET
+              },
               body: JSON.stringify({ name, email, password, code })
             });
           } catch (_) {}
         })());
+
+        const headers = new Headers({ "Content-Type": "application/json" });
+        headers.set("Set-Cookie", `__spetro_otp=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
 
         return new Response(JSON.stringify({
           ok: true,
@@ -354,7 +425,7 @@ export default {
           user: userDict
         }), {
           status: 200,
-          headers: { "Content-Type": "application/json" }
+          headers: headers
         });
       } catch (err) {
         return new Response(JSON.stringify({ detail: `Registration error: ${err.message}` }), {
