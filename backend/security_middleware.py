@@ -38,17 +38,34 @@ SPAM_PHRASES = [
     r"(?i)hot singles",
 ]
 
+ZERO_WIDTH_CHARS = {'\u200b', '\u200c', '\u200d', '\ufeff', '\u200e', '\u200f', '\u2060'}
+
 def strip_zero_width(text: str) -> str:
-    """Removes zero-width characters and hidden unicode tricks."""
-    # Remove characters categorized as formatting or control (e.g. zero-width joiners)
-    return ''.join(c for c in text if unicodedata.category(c)[0] not in ['C', 'Z'] or c == ' ')
+    """Removes zero-width characters and hidden unicode tricks while preserving newlines and tabs."""
+    filtered = []
+    for c in text:
+        if c in ('\n', '\r', '\t', ' '):
+            filtered.append(c)
+        elif c in ZERO_WIDTH_CHARS:
+            continue
+        elif unicodedata.category(c)[0] in ['C']:
+            # Strip unprintable control characters, but newlines/tabs already preserved above
+            continue
+        else:
+            filtered.append(c)
+    return ''.join(filtered)
 
 def check_symbol_ratio(text: str) -> bool:
-    """Returns True if the text has an unusually high amount of symbols/punctuation."""
+    """Returns True if the text has an unusually high amount of symbols/punctuation (anti-spam)."""
     if not text:
         return False
+    # Allow higher symbol density for technical content, coordinates, markdown, and code blocks
+    if "```" in text or "`" in text or "{" in text or "[" in text or "http" in text:
+        threshold = 0.75
+    else:
+        threshold = 0.60
     symbols = sum(1 for c in text if not c.isalnum() and not c.isspace())
-    if len(text) > 20 and (symbols / len(text)) > 0.4:
+    if len(text) > 30 and (symbols / len(text)) > threshold:
         return True
     return False
 

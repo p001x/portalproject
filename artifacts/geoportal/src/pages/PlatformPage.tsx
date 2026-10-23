@@ -1,18 +1,12 @@
 import { Link } from "wouter";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useAuth } from "@/hooks/use-auth";
-import { 
-  ArrowUpRight, 
-  Mail, 
-  Send 
-} from "lucide-react";
+import { ArrowUpRight } from "lucide-react";
 import { EarthAnalyticsEmblem } from "@/components/EarthAnalyticsEmblem";
 import { DataVaultEmblem } from "@/components/DataVaultEmblem";
 import { DataHarvesterEmblem } from "@/components/DataHarvesterEmblem";
 import { SampleDigitizerEmblem } from "@/components/SampleDigitizerEmblem";
 import { ExpertConsultationEmblem } from "@/components/ExpertConsultationEmblem";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
 import { SiteBrand } from "@/components/SiteBrand";
 
 const MODULES = [
@@ -65,18 +59,18 @@ export function PlatformPage() {
         <div className="flex items-center gap-8">
           <SiteBrand size="normal" hideSubtitleOnMobile />
           
-          <nav className="hidden md:flex items-center gap-6">
+          <nav className="hidden md:flex items-center gap-7 lg:gap-8">
             <Link href="/">
-              <span className="text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer">Home</span>
+              <span className="text-sm md:text-base font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer py-1">Home</span>
             </Link>
             <Link href="/about">
-              <span className="text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer">About</span>
+              <span className="text-sm md:text-base font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer py-1">About</span>
             </Link>
             <Link href="/services">
-              <span className="text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer">Services</span>
+              <span className="text-sm md:text-base font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer py-1">Services</span>
             </Link>
             <Link href="/contact">
-              <span className="text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer">Contact</span>
+              <span className="text-sm md:text-base font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer py-1">Contact</span>
             </Link>
           </nav>
         </div>
@@ -141,33 +135,7 @@ export function PlatformPage() {
         </div>
       </main>
 
-      {/* Newsletter Section */}
-      <section className="bg-primary/5 border-t border-border py-16 px-6">
-        <div className="max-w-4xl mx-auto text-center space-y-6">
-          <div className="w-12 h-12 bg-primary/20 text-primary rounded-full flex items-center justify-center mx-auto mb-4">
-            <Mail className="w-6 h-6" />
-          </div>
-          <h2 className="text-2xl md:text-3xl font-bold tracking-tight">Stay Updated on Geospatial Tech</h2>
-          <p className="text-muted-foreground text-lg max-w-2xl mx-auto">
-            Get the latest case studies, new module announcements, and tips for analyzing satellite data delivered right to your inbox.
-          </p>
-          <div className="flex flex-col sm:flex-row max-w-md mx-auto gap-3 pt-4">
-            <Input 
-              type="email" 
-              placeholder="Enter your email address" 
-              className="bg-background"
-            />
-            <Button className="gap-2 w-full sm:w-auto">
-              Subscribe <Send className="w-4 h-4" />
-            </Button>
-          </div>
-          <p className="text-xs text-muted-foreground pt-2">
-            We promise not to spam you. Unsubscribe at any time.
-          </p>
-        </div>
-      </section>
-
-      {/* Global Footer (Esri-style Fat Footer) */}
+      {/* Global Footer (Fat Footer) */}
       <footer className="bg-card border-t border-border mt-auto w-full py-16 px-6">
         <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-12">
           
@@ -175,7 +143,7 @@ export function PlatformPage() {
           <div className="flex flex-col gap-4 md:col-span-1">
             <SiteBrand size="normal" hideSubtitleOnMobile={false} />
             <p className="text-sm text-muted-foreground mt-2">
-              Empowering environmental analysis with advanced geospatial intelligence.
+              Comprehensive Earth observation and spatial analytics platform.
             </p>
             <div className="text-xs font-medium text-muted-foreground mt-6">
               &copy; {new Date().getFullYear()} SPETRO. All rights reserved.

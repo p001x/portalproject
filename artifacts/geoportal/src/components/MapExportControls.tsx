@@ -245,17 +245,17 @@ export function MapExportControls({ tileUrl, thumbUrl, district, title, classAre
   return (
     <div className="flex flex-col gap-6">
       {/* Mode Switcher Header */}
-      <div className="flex items-center justify-between p-4 border rounded-xl bg-card shadow-sm">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 border rounded-xl bg-card shadow-sm">
         <div className="flex items-center gap-2">
-          <Layers className="w-5 h-5 text-primary" />
+          <Layers className="w-5 h-5 text-primary shrink-0" />
           <h3 className="font-semibold text-base">Cartography & Map Export Mode</h3>
         </div>
-        <div className="flex items-center gap-2 bg-muted p-1 rounded-lg">
+        <div className="flex items-center gap-2 bg-muted p-1 rounded-lg w-full sm:w-auto">
           <Button
             size="sm"
             variant={mode === "static" ? "default" : "ghost"}
             onClick={() => setMode("static")}
-            className="text-xs gap-1.5"
+            className="text-xs gap-1.5 flex-1 sm:flex-initial"
           >
             <Eye className="w-3.5 h-3.5" />
             Professional Static Map
@@ -264,7 +264,7 @@ export function MapExportControls({ tileUrl, thumbUrl, district, title, classAre
             size="sm"
             variant={mode === "canva" ? "default" : "ghost"}
             onClick={() => setMode("canva")}
-            className="text-xs gap-1.5"
+            className="text-xs gap-1.5 flex-1 sm:flex-initial"
           >
             <Sparkles className="w-3.5 h-3.5" />
             Canva Drag & Drop Mode
@@ -275,36 +275,38 @@ export function MapExportControls({ tileUrl, thumbUrl, district, title, classAre
       {mode === "canva" ? (
         <div className="space-y-4">
           <div className="p-4 border rounded-xl bg-card shadow-sm space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
               <Label className="text-sm font-semibold flex items-center gap-2">
-                <Palette className="w-4 h-4 text-primary" />
+                <Palette className="w-4 h-4 text-primary shrink-0" />
                 Live Color Palette Customization
               </Label>
-              {isGenerating && (
-                <span className="text-xs text-muted-foreground flex items-center gap-1.5 animate-pulse">
-                  <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" /> Updating Canva Map Colors...
-                </span>
-              )}
-              <Button 
-                variant="outline" 
-                size="sm" 
-                className="gap-2"
-                onClick={() => {
-                  sessionStorage.setItem("canvaState", JSON.stringify({
-                    title, 
-                    thumbUrl: previewBlobUrl || thumbUrl || tileUrl, 
-                    tileUrl,
-                    district, 
-                    classAreas, 
-                    palette: resolvedPalette || customColors, 
-                    bbox
-                  }));
-                  window.open("/export-editor", "_blank");
-                }}
-              >
-                <ExternalLink className="w-4 h-4" />
-                Open Full Page
-              </Button>
+              <div className="flex items-center gap-2 justify-between sm:justify-end w-full sm:w-auto">
+                {isGenerating && (
+                  <span className="text-xs text-muted-foreground flex items-center gap-1.5 animate-pulse">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" /> Updating Canva Map Colors...
+                  </span>
+                )}
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="gap-2 shrink-0 ml-auto sm:ml-0"
+                  onClick={() => {
+                    sessionStorage.setItem("canvaState", JSON.stringify({
+                      title, 
+                      thumbUrl: previewBlobUrl || thumbUrl || tileUrl, 
+                      tileUrl,
+                      district, 
+                      classAreas, 
+                      palette: resolvedPalette || customColors, 
+                      bbox
+                    }));
+                    window.open("/export-editor", "_blank");
+                  }}
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  Open Full Page
+                </Button>
+              </div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Select value={selectedPalette} onValueChange={setSelectedPalette}>

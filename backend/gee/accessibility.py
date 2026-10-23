@@ -238,6 +238,16 @@ def fetch_local_points(amenities: list[str], bbox: list[float]) -> tuple[list[ee
 
 
 def _build_accessibility_images(aoi_config: dict, amenities: list[str], dest_amenities: list[str] = None, n_classes: int = 4, service_threshold_mins: int = 30, proposed_facilities: list = None, transport_mode: str = "walking"):
+    # Enforce Rwanda study areas only (Accessibility uses local CROM geodatabase and Rwandan road networks)
+    aoi_type = (aoi_config.get("type") or "").lower()
+    aoi_country = (aoi_config.get("country") or "").lower()
+    
+    if aoi_type in ("world", "global") or (aoi_country and aoi_country != "rwanda" and aoi_type.startswith("gaul")):
+        raise ValueError(
+            "Accessibility analysis uses local Rwandan vector data and infrastructure geodatabases. "
+            "Only Rwanda study areas (National, Province, District, Sector, or Cell) are supported."
+        )
+
     from gee.aoi_utils import get_aoi_geometry
     aoi = get_aoi_geometry(aoi_config)
 
@@ -249,6 +259,13 @@ def _build_accessibility_images(aoi_config: dict, amenities: list[str], dest_ame
     lons = [p[0] for p in bounds]
     lats = [p[1] for p in bounds]
     bbox = [min(lons), min(lats), max(lons), max(lats)]
+
+    # Validate that bbox overlaps Rwanda bounds: [28.5, -3.2, 31.2, -0.8]
+    if bbox[2] < 28.5 or bbox[0] > 31.2 or bbox[3] < -3.2 or bbox[1] > -0.8:
+        raise ValueError(
+            "Selected study area is outside Rwanda. Accessibility analysis relies on local Rwandan infrastructure geodatabases. "
+            "Please select a study area within Rwanda."
+        )
     
     # 1. Fetch amenities
     # If dest_amenities are provided, we route TO them (they are the sources). The origins are `amenities`.

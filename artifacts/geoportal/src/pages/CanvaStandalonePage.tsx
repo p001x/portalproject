@@ -50,23 +50,23 @@ export function CanvaStandalonePage() {
   return (
     <div className="h-screen w-screen bg-background text-foreground flex flex-col overflow-hidden">
       {/* Top Header/Navbar */}
-      <header className="h-14 bg-card text-card-foreground border-b flex items-center px-6 shrink-0 justify-between">
-        <div className="flex items-center gap-4">
-          <h1 className="font-bold text-lg text-primary">Map Canva Editor</h1>
-          <span className="text-sm text-muted-foreground bg-muted px-2 py-0.5 rounded">
-            {state.title || "Untitled Map"} • {state.district}
+      <header className="h-auto sm:h-14 py-2 sm:py-0 bg-card text-card-foreground border-b flex flex-wrap sm:flex-nowrap items-center px-3 sm:px-6 shrink-0 justify-between gap-2">
+        <div className="flex items-center gap-2 sm:gap-4 truncate">
+          <h1 className="font-bold text-base sm:text-lg text-primary shrink-0">Map Canva Editor</h1>
+          <span className="text-xs sm:text-sm text-muted-foreground bg-muted px-2 py-0.5 rounded truncate max-w-[170px] sm:max-w-none">
+            {state.title || "Untitled Map"} {state.district ? `• ${state.district}` : ""}
           </span>
         </div>
         <button
           onClick={() => window.close()}
-          className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+          className="text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0 ml-auto"
         >
           Close Editor
         </button>
       </header>
 
       {/* Main Canvas Area */}
-      <div className="flex-1 overflow-hidden p-6">
+      <div className="flex-1 overflow-hidden p-2 sm:p-4 lg:p-6">
         <InteractiveMapEditor
           tileUrl={state.tileUrl}
           thumbUrl={state.thumbUrl}

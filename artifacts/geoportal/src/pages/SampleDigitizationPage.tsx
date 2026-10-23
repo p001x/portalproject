@@ -28,6 +28,8 @@ import {
   MapPin,
   Maximize2,
   Minimize2,
+  Maximize,
+  Minimize,
   FileText,
   Square,
   Activity,
@@ -844,6 +846,70 @@ export function SampleDigitizationPage() {
   const handleDeleted = useCallback(() => {
     setPendingFeature(null);
     toast({ title: "Shape removed" });
+  }, [toast]);
+
+  // Mobile Field Ground-Truthing: GPS Location Sample Capture
+  const [isLocatingUser, setIsLocatingUser] = useState(false);
+
+  const recordCurrentLocationSample = useCallback(() => {
+    if (!navigator.geolocation) {
+      toast({ variant: "destructive", title: "GPS Unavailable", description: "Your device or browser does not support geolocation." });
+      return;
+    }
+    const state = drawStateRef.current;
+    if (!state.classLabel) {
+      toast({ variant: "destructive", title: "Select a Class First", description: "Please pick a land-cover class (e.g. Forest, Water) before capturing." });
+      return;
+    }
+    setIsLocatingUser(true);
+    toast({ title: "Acquiring GPS Fix...", description: "Connecting to satellite location sensor." });
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setIsLocatingUser(false);
+        const { latitude, longitude, accuracy } = pos.coords;
+        const ptGeoJson = {
+          type: "Point",
+          coordinates: [Number(longitude.toFixed(6)), Number(latitude.toFixed(6))]
+        };
+
+        if (state.studyArea) {
+          const isInside = validateWithinStudyArea(state.studyArea, ptGeoJson);
+          if (!isInside) {
+            toast({ 
+              variant: "destructive", 
+              title: "Location Outside Study Area", 
+              description: `GPS coordinates (${latitude.toFixed(4)}, ${longitude.toFixed(4)}) fall outside the defined study area boundary.` 
+            });
+            return;
+          }
+        }
+
+        const draft = {
+          id: "draft_gps_" + Math.random().toString(36).substring(2, 9),
+          geometry: ptGeoJson,
+          class_label: state.classLabel.trim() || "Field Sample",
+          class_value: state.classValue || 1,
+          color: state.color || "#0F6E4F",
+          creator: state.creator.trim() || "field_gps",
+          created_at: new Date().toISOString(),
+        };
+
+        setSessionSamples((prev) => [...prev, draft]);
+        if (mapInstanceRef.current) {
+          mapInstanceRef.current.setView([latitude, longitude], 17);
+        }
+        toast({ 
+          title: `GPS Sample Captured (${accuracy ? `±${Math.round(accuracy)}m` : ""})`, 
+          description: `Saved at [${latitude.toFixed(5)}, ${longitude.toFixed(5)}] as '${draft.class_label}'` 
+        });
+      },
+      (err) => {
+        setIsLocatingUser(false);
+        toast({ variant: "destructive", title: "GPS Location Error", description: err.message || "Failed to acquire location." });
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
   }, [toast]);
 
   // Class Visibility & Sampling Bias Evaluation State
@@ -1739,6 +1805,7 @@ export function SampleDigitizationPage() {
           return;
         }
         setIsFullMapMode(false);
+        setIsLeftPanelOpen(true);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -1753,19 +1820,52 @@ export function SampleDigitizationPage() {
     isAddDataModalOpen,
   ]);
 
-  // Recalculate Leaflet map canvas dimensions when entering/exiting full map mode or toggling TOC
+  const mapContainerDivRef = useRef<HTMLDivElement>(null);
+  const [isBrowserFullscreen, setIsBrowserFullscreen] = useState(false);
+
   useEffect(() => {
-    const t1 = setTimeout(() => {
-      mapInstanceRef.current?.invalidateSize();
-    }, 120);
-    const t2 = setTimeout(() => {
-      mapInstanceRef.current?.invalidateSize();
-    }, 350);
+    const handleFsChange = () => {
+      setIsBrowserFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener("fullscreenchange", handleFsChange);
+    return () => document.removeEventListener("fullscreenchange", handleFsChange);
+  }, []);
+
+  const toggleBrowserFullscreen = useCallback(() => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(() => {});
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      }
+    }
+  }, []);
+
+  // Recalculate Leaflet map canvas dimensions across multiple render frames when entering/exiting full map mode or toggling TOC
+  useEffect(() => {
+    const invalidate = () => mapInstanceRef.current?.invalidateSize();
+    invalidate();
+    const t1 = setTimeout(invalidate, 60);
+    const t2 = setTimeout(invalidate, 180);
+    const t3 = setTimeout(invalidate, 350);
+    const t4 = setTimeout(invalidate, 600);
     return () => {
       clearTimeout(t1);
       clearTimeout(t2);
+      clearTimeout(t3);
+      clearTimeout(t4);
     };
   }, [isFullMapMode, isLeftPanelOpen]);
+
+  // High-performance ResizeObserver on map wrapper for 100% full viewport canvas filling
+  useEffect(() => {
+    if (!mapContainerDivRef.current) return;
+    const ro = new ResizeObserver(() => {
+      mapInstanceRef.current?.invalidateSize();
+    });
+    ro.observe(mapContainerDivRef.current);
+    return () => ro.disconnect();
+  }, []);
 
   return (
     <div className={`flex flex-col h-full bg-background overflow-hidden relative ${
@@ -1773,62 +1873,70 @@ export function SampleDigitizationPage() {
     }`}>
       {/* Top Header: In Full Map Mode, dedicated streamlined training bar. Otherwise, full master command bar */}
       {isFullMapMode ? (
-        <div className="flex-none flex flex-wrap items-center justify-between px-4 py-2 border-b border-border/80 bg-card/95 backdrop-blur-md z-[50] gap-2 shadow-sm">
-          {/* Left: Return to Mother Page + TOC Toggle */}
-          <div className="flex items-center gap-2">
+        <div className="flex-none flex items-center justify-between px-3 sm:px-4 py-1.5 border-b border-border/80 bg-card/95 backdrop-blur-md z-[50] gap-2 shadow-sm overflow-x-auto no-scrollbar">
+          {/* Left: Return to Mother Page + TOC Toggle + Browser Fullscreen */}
+          <div className="flex items-center gap-1.5 shrink-0">
             <Button
               size="sm"
-              onClick={() => setIsFullMapMode(false)}
-              className="h-8 gap-1.5 text-xs font-semibold px-3 bg-foreground text-background hover:bg-foreground/90 transition-all shadow-xs cursor-pointer active:scale-95"
+              onClick={() => {
+                setIsFullMapMode(false);
+                setIsLeftPanelOpen(true);
+              }}
+              className="h-8 gap-1.5 text-xs font-semibold px-2.5 sm:px-3 bg-foreground text-background hover:bg-foreground/90 transition-all shadow-xs cursor-pointer active:scale-95 shrink-0"
               title="Return to Mother Page (Full Studio with Attribute Table, Timelapse, Spectral & Asset tools)"
             >
               <ChevronLeft className="w-4 h-4" />
-              <span>Return to Mother Page</span>
+              <span className="hidden sm:inline">Mother Page</span>
+              <span className="sm:hidden">Exit</span>
             </Button>
-
-            <Badge variant="outline" className="text-[10px] font-mono border-sky-500/40 text-sky-300 bg-sky-500/10 py-0.5 h-6 hidden lg:inline-flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse" />
-              Full Map Training
-            </Badge>
-
-            <div className="h-4 w-[1px] bg-border/60 mx-0.5 hidden sm:block" />
 
             <Button
               size="sm"
               variant="outline"
               onClick={() => setIsLeftPanelOpen((p) => !p)}
-              className="h-8 px-2.5 text-xs font-medium gap-1.5 text-muted-foreground hover:text-foreground border-border/60 bg-muted/20"
+              className={`h-8 px-2 text-xs font-medium gap-1.5 border-border/60 transition-all shrink-0 ${
+                isLeftPanelOpen ? "bg-muted text-foreground" : "bg-muted/20 text-muted-foreground hover:text-foreground"
+              }`}
               title={isLeftPanelOpen ? "Hide Samples Table of Contents" : "Show Samples Table of Contents"}
             >
               <Layers className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">{isLeftPanelOpen ? "Hide Samples" : "Show Samples"}</span>
+              <span className="hidden md:inline">{isLeftPanelOpen ? "Hide Samples" : "Samples TOC"}</span>
+            </Button>
+
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={toggleBrowserFullscreen}
+              className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground border-border/60 bg-muted/20 shrink-0"
+              title={isBrowserFullscreen ? "Exit Browser Fullscreen (Esc)" : "Browser Fullscreen (F11)"}
+            >
+              {isBrowserFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
             </Button>
           </div>
 
           {/* Center: Essential Training & Digitizing Tools */}
-          <div className="flex items-center gap-2 flex-wrap justify-center">
+          <div className="flex items-center gap-1.5 shrink-0">
             {/* 1. Define AOI */}
             <Button
               size="sm"
               variant="outline"
               onClick={() => setIsStudyAreaModalOpen(true)}
-              className={`h-8 gap-1.5 text-xs font-medium px-2.5 transition-all shadow-2xs ${
+              className={`h-8 gap-1 text-xs font-medium px-2 shrink-0 transition-all ${
                 !studyArea
                   ? "border-sky-500/70 bg-sky-500/15 text-sky-200 hover:bg-sky-500/25 ring-1 ring-sky-500/30"
                   : "border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20"
               }`}
-              title={!studyArea ? "Prerequisite: Define or Upload Study Area (AOI) to unlock training tools" : "Study Area Defined"}
+              title={!studyArea ? "Prerequisite: Define Study Area (AOI)" : "Study Area Defined"}
             >
               {!studyArea ? (
                 <>
                   <Crosshair className="w-3.5 h-3.5 text-sky-400" />
-                  <span>1. Define AOI</span>
-                  <span className="text-[9px] font-mono px-1 py-0.2 rounded bg-sky-500/25 text-sky-300">Req</span>
+                  <span>Define AOI</span>
                 </>
               ) : (
                 <>
                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>AOI: Defined</span>
+                  <span>AOI</span>
                 </>
               )}
             </Button>
@@ -1837,32 +1945,31 @@ export function SampleDigitizationPage() {
             <button
               type="button"
               onClick={() => setIsClassPaletteModalOpen(true)}
-              className="flex items-center gap-1.5 hover:bg-muted/50 px-2.5 py-1 h-8 rounded-md text-xs font-medium transition-all border border-border/60 bg-muted/20 shadow-2xs text-foreground cursor-pointer"
+              className="flex items-center gap-1.5 hover:bg-muted/50 px-2 py-1 h-8 rounded-md text-xs font-medium transition-all border border-border/60 bg-muted/20 text-foreground cursor-pointer shrink-0"
               title="Open Land Cover Class Palette Studio"
             >
               <span className="w-2.5 h-2.5 rounded-full inline-block shadow-2xs shrink-0" style={{ backgroundColor: getRefinedColor(color, classLabel) }} />
-              <span className="max-w-[110px] truncate">{classLabel || "Select Class"}</span>
-              <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 font-mono text-muted-foreground border-border/50 bg-muted/40">
+              <span className="max-w-[90px] truncate">{classLabel || "Class"}</span>
+              <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 font-mono text-muted-foreground border-border/50 bg-muted/40">
                 {groupedSamples[classLabel]?.items.length || 0}
               </Badge>
-              <Palette className="w-3 h-3 text-muted-foreground ml-0.5" />
             </button>
 
             {/* 3. Vector Drawing Tools */}
-            <div className="flex items-center gap-0.5 bg-muted/30 p-0.5 rounded-lg border border-border/50">
+            <div className="flex items-center gap-0.5 bg-muted/30 p-0.5 rounded-lg border border-border/50 shrink-0">
               <button
                 type="button"
-                title="Pan Mode (Navigation)"
+                title="Pan Mode"
                 onClick={() => { cancelDrawMode(); setDrawMode("pan"); }}
                 className={`p-1.5 rounded-md transition-all flex items-center justify-center cursor-pointer ${
-                  drawMode === "pan" ? "bg-foreground text-background shadow-xs font-medium" : "hover:bg-muted/50 text-muted-foreground hover:text-foreground"
+                  drawMode === "pan" ? "bg-foreground text-background font-medium" : "hover:bg-muted/50 text-muted-foreground hover:text-foreground"
                 }`}
               >
                 <Hand className="w-3.5 h-3.5" />
               </button>
               <button
                 type="button"
-                title={!studyArea ? "Study Area (AOI) required before drawing points" : "Point Feature (Single coordinate sample)"}
+                title="Point Sample"
                 onClick={() => {
                   if (!studyArea) {
                     toast({ title: "Study Area Required", description: "Define AOI first", variant: "destructive" });
@@ -1872,14 +1979,14 @@ export function SampleDigitizationPage() {
                   autoStartDrawMode("point", isEditing);
                 }}
                 className={`p-1.5 rounded-md transition-all flex items-center justify-center ${
-                  !studyArea ? "opacity-30 cursor-not-allowed text-muted-foreground/40" : drawMode === "point" ? "bg-foreground text-background shadow-xs cursor-pointer font-semibold" : "hover:bg-muted/50 text-muted-foreground hover:text-foreground cursor-pointer"
+                  !studyArea ? "opacity-30 cursor-not-allowed" : drawMode === "point" ? "bg-foreground text-background font-semibold" : "hover:bg-muted/50 text-muted-foreground hover:text-foreground cursor-pointer"
                 }`}
               >
                 <MapPin className="w-3.5 h-3.5" />
               </button>
               <button
                 type="button"
-                title={!studyArea ? "Study Area (AOI) required before drawing lines" : "Polyline Feature (Linear sample / transect)"}
+                title="Polyline Sample"
                 onClick={() => {
                   if (!studyArea) {
                     toast({ title: "Study Area Required", description: "Define AOI first", variant: "destructive" });
@@ -1889,14 +1996,14 @@ export function SampleDigitizationPage() {
                   autoStartDrawMode("polyline", isEditing);
                 }}
                 className={`p-1.5 rounded-md transition-all flex items-center justify-center ${
-                  !studyArea ? "opacity-30 cursor-not-allowed text-muted-foreground/40" : drawMode === "polyline" ? "bg-foreground text-background shadow-xs cursor-pointer font-semibold" : "hover:bg-muted/50 text-muted-foreground hover:text-foreground cursor-pointer"
+                  !studyArea ? "opacity-30 cursor-not-allowed" : drawMode === "polyline" ? "bg-foreground text-background font-semibold" : "hover:bg-muted/50 text-muted-foreground hover:text-foreground cursor-pointer"
                 }`}
               >
                 <Activity className="w-3.5 h-3.5" />
               </button>
               <button
                 type="button"
-                title={!studyArea ? "Study Area (AOI) required before drawing polygons" : "Polygon Feature (Area polygon sample)"}
+                title="Polygon Sample"
                 onClick={() => {
                   if (!studyArea) {
                     toast({ title: "Study Area Required", description: "Define AOI first", variant: "destructive" });
@@ -1906,14 +2013,14 @@ export function SampleDigitizationPage() {
                   autoStartDrawMode("polygon", isEditing);
                 }}
                 className={`p-1.5 rounded-md transition-all flex items-center justify-center ${
-                  !studyArea ? "opacity-30 cursor-not-allowed text-muted-foreground/40" : drawMode === "polygon" ? "bg-foreground text-background shadow-xs cursor-pointer font-semibold" : "hover:bg-muted/50 text-muted-foreground hover:text-foreground cursor-pointer"
+                  !studyArea ? "opacity-30 cursor-not-allowed" : drawMode === "polygon" ? "bg-foreground text-background font-semibold" : "hover:bg-muted/50 text-muted-foreground hover:text-foreground cursor-pointer"
                 }`}
               >
                 <Layers className="w-3.5 h-3.5" />
               </button>
               <button
                 type="button"
-                title={!studyArea ? "Study Area (AOI) required before drawing rectangles" : "Rectangle Box Feature"}
+                title="Rectangle Box"
                 onClick={() => {
                   if (!studyArea) {
                     toast({ title: "Study Area Required", description: "Define AOI first", variant: "destructive" });
@@ -1923,14 +2030,14 @@ export function SampleDigitizationPage() {
                   autoStartDrawMode("rectangle", isEditing);
                 }}
                 className={`p-1.5 rounded-md transition-all flex items-center justify-center ${
-                  !studyArea ? "opacity-30 cursor-not-allowed text-muted-foreground/40" : drawMode === "rectangle" ? "bg-foreground text-background shadow-xs cursor-pointer font-semibold" : "hover:bg-muted/50 text-muted-foreground hover:text-foreground cursor-pointer"
+                  !studyArea ? "opacity-30 cursor-not-allowed" : drawMode === "rectangle" ? "bg-foreground text-background font-semibold" : "hover:bg-muted/50 text-muted-foreground hover:text-foreground cursor-pointer"
                 }`}
               >
                 <Square className="w-3.5 h-3.5" />
               </button>
               <button
                 type="button"
-                title={!studyArea ? "Study Area (AOI) required before drawing circular buffers" : "Circle Buffer Feature"}
+                title="Circle Buffer"
                 onClick={() => {
                   if (!studyArea) {
                     toast({ title: "Study Area Required", description: "Define AOI first", variant: "destructive" });
@@ -1940,7 +2047,7 @@ export function SampleDigitizationPage() {
                   autoStartDrawMode("circle", isEditing);
                 }}
                 className={`p-1.5 rounded-md transition-all flex items-center justify-center ${
-                  !studyArea ? "opacity-30 cursor-not-allowed text-muted-foreground/40" : drawMode === "circle" ? "bg-foreground text-background shadow-xs cursor-pointer font-semibold" : "hover:bg-muted/50 text-muted-foreground hover:text-foreground cursor-pointer"
+                  !studyArea ? "opacity-30 cursor-not-allowed" : drawMode === "circle" ? "bg-foreground text-background font-semibold" : "hover:bg-muted/50 text-muted-foreground hover:text-foreground cursor-pointer"
                 }`}
               >
                 <Circle className="w-3.5 h-3.5" />
@@ -1960,44 +2067,30 @@ export function SampleDigitizationPage() {
                   toast({ title: "Edit Session Started", description: `Digitizing '${classLabel}'. Click on map to add features.` });
                   setTimeout(() => autoStartDrawMode(drawMode === "pan" ? "point" : drawMode, true), 300);
                 }}
-                className={`font-semibold gap-1.5 text-xs shadow-2xs h-8 px-2.5 transition-all ${
-                  !studyArea
-                    ? "opacity-40 cursor-not-allowed border-dashed"
-                    : "bg-foreground text-background hover:bg-foreground/90 cursor-pointer"
+                className={`font-semibold gap-1 text-xs h-8 px-2 shrink-0 ${
+                  !studyArea ? "opacity-40 cursor-not-allowed" : "bg-foreground text-background hover:bg-foreground/90 cursor-pointer"
                 }`}
-                title={!studyArea ? "Define AOI first to start drawing features" : "Start digitizing samples on the map"}
+                title={!studyArea ? "Define AOI first to start drawing features" : "Start digitizing samples"}
               >
                 <Edit className="w-3.5 h-3.5" />
-                <span>Start Draw</span>
+                <span className="hidden sm:inline">Start Draw</span>
               </Button>
             ) : (
               <Button
                 size="sm"
                 variant="destructive"
-                className="font-medium gap-1 text-xs shadow-2xs h-8 px-2.5 animate-pulse cursor-pointer"
+                className="font-medium gap-1 text-xs h-8 px-2 animate-pulse cursor-pointer shrink-0"
                 onClick={handleStopSession}
                 title="Halt active digitization session"
               >
                 <StopCircle className="w-3.5 h-3.5" />
-                <span>Stop Draw</span>
+                <span>Stop</span>
               </Button>
             )}
-
-            {/* 5. Readiness Status */}
-            <button
-              type="button"
-              onClick={() => setIsReadinessModalOpen(true)}
-              className="px-2 h-8 rounded-md text-xs font-medium transition-all flex items-center gap-1.5 border border-border/60 bg-muted/20 hover:bg-muted/50 text-muted-foreground hover:text-foreground shadow-2xs cursor-pointer"
-              title="Inspect Dataset Readiness & Sample Quality Balance"
-            >
-              <span className={`w-1.5 h-1.5 rounded-full ${classBalanceMetrics.status === "healthy" ? "bg-emerald-400" : "bg-amber-400"}`} />
-              <span className="hidden xl:inline">Readiness:</span>
-              <span>{classBalanceMetrics.status === "healthy" ? "Healthy" : classBalanceMetrics.status === "imbalanced" ? "Imbalanced" : "Low Samples"}</span>
-            </button>
           </div>
 
-          {/* Right: Classifier Execution + Batch Save + Exit Full View */}
-          <div className="flex items-center gap-2">
+          {/* Right: Classifier Execution + Batch Save */}
+          <div className="flex items-center gap-1.5 shrink-0">
             {sessionSamples.length > 0 && (
               <Button
                 size="sm"
@@ -2005,7 +2098,7 @@ export function SampleDigitizationPage() {
                   setDatasetNameInput(`Training_Session_${new Date().toISOString().slice(0, 10)}`);
                   setIsSaveModalOpen(true);
                 }}
-                className="h-8 gap-1.5 text-xs font-medium px-2.5 bg-secondary hover:bg-secondary/80 text-secondary-foreground border border-border/60 shadow-2xs cursor-pointer"
+                className="h-8 gap-1 text-xs font-medium px-2 bg-secondary hover:bg-secondary/80 text-secondary-foreground border border-border/60 shrink-0 cursor-pointer"
                 title="SAVE: Commit buffered features to dataset"
               >
                 <Save className="w-3.5 h-3.5" />
@@ -2013,7 +2106,6 @@ export function SampleDigitizationPage() {
               </Button>
             )}
 
-            {/* RUN CLASSIFIER */}
             <Button
               size="sm"
               onClick={() => {
@@ -2028,12 +2120,12 @@ export function SampleDigitizationPage() {
                 trainSupervisedClassifierDirectly();
               }}
               disabled={classifyMut.isPending || allCombinedSamples.length === 0}
-              className={`h-8 gap-1.5 text-xs font-semibold px-3.5 shadow-2xs transition-all active:scale-95 ${
+              className={`h-8 gap-1.5 text-xs font-semibold px-2.5 sm:px-3 transition-all shrink-0 active:scale-95 ${
                 allCombinedSamples.length === 0
-                  ? "opacity-40 cursor-not-allowed border border-dashed border-border/40 text-muted-foreground/40 bg-muted/10 shadow-none"
-                  : "bg-emerald-600 hover:bg-emerald-500 text-white font-medium cursor-pointer shadow-xs"
+                  ? "opacity-40 cursor-not-allowed border border-dashed border-border/40 text-muted-foreground/40 bg-muted/10"
+                  : "bg-emerald-600 hover:bg-emerald-500 text-white font-medium cursor-pointer"
               }`}
-              title="RUN: Execute Random Forest Supervised Classifier on digitized training samples"
+              title="RUN: Execute Random Forest Supervised Classifier"
             >
               {classifyMut.isPending ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -2043,47 +2135,35 @@ export function SampleDigitizationPage() {
                 <Play className="w-3.5 h-3.5 fill-current" />
               )}
               <span>
-                {classifyMut.isPending
-                  ? "Training..."
-                  : `Run Classifier (${allCombinedSamples.length})`}
+                {classifyMut.isPending ? "Training..." : `Classify (${allCombinedSamples.length})`}
               </span>
-            </Button>
-
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => setIsFullMapMode(false)}
-              className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground cursor-pointer"
-              title="Exit Full-Screen Map (Return to Studio)"
-            >
-              <Minimize2 className="w-4 h-4" />
             </Button>
           </div>
         </div>
       ) : (
         /* Unified Top Master Command Bar - Sleek Minimalist */
-        <div className="flex flex-wrap items-center justify-between px-6 py-2 border-b border-border/60 bg-card/90 backdrop-blur-md z-[50] gap-3">
-        <div className="flex items-center gap-5 flex-wrap">
+        <div className="flex flex-wrap items-center justify-between px-3 sm:px-6 py-2 border-b border-border/60 bg-card/90 backdrop-blur-md z-[50] gap-2 sm:gap-3">
+        <div className="flex items-center gap-2 sm:gap-5 flex-wrap">
           {/* Brand & Studio Title */}
-          <div className="flex items-center gap-2.5">
-            <div className="p-1.5 rounded-md bg-muted/60 text-foreground border border-border/50">
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 rounded-md bg-muted/60 text-foreground border border-border/50 shrink-0">
               <Satellite className="w-4 h-4 text-foreground/80" />
             </div>
             <div className="flex flex-col">
-              <span className="text-xs font-semibold text-foreground tracking-tight flex items-center gap-2">
-                Training Data &amp; ML Studio
+              <span className="text-xs font-semibold text-foreground tracking-tight flex items-center gap-1.5">
+                Training Studio
                 <Badge variant="outline" className="text-[10px] font-mono border-border/50 text-muted-foreground bg-muted/40 py-0 h-4">
-                  Sentinel-2 SR
+                  Sentinel-2
                 </Badge>
               </span>
-              <span className="text-[11px] text-muted-foreground">
+              <span className="text-[10px] text-muted-foreground hidden sm:inline">
                 Spatial Feature Digitization &bull; Supervised Random Forest
               </span>
             </div>
           </div>
 
           {/* Unified Primary Action Bar */}
-          <div className="flex items-center gap-1.5 bg-muted/30 p-1 rounded-lg border border-border/50 shadow-2xs">
+          <div className="flex items-center gap-1 sm:gap-1.5 bg-muted/30 p-1 rounded-lg border border-border/50 shadow-2xs overflow-x-auto no-scrollbar max-w-full">
             {/* 1. RUN CLASSIFIER */}
             <Button
               size="sm"
@@ -2239,6 +2319,7 @@ export function SampleDigitizationPage() {
               variant="outline"
               onClick={() => {
                 setActiveTab("map");
+                setIsLeftPanelOpen(false);
                 setIsFullMapMode(true);
               }}
               className="h-8 gap-1.5 text-xs font-semibold px-3 bg-sky-500/10 hover:bg-sky-500/20 text-sky-400 border-sky-500/30 transition-all active:scale-95 shadow-2xs cursor-pointer"
@@ -2274,8 +2355,8 @@ export function SampleDigitizationPage() {
         </div>
 
         {/* Minimalist Tabs Bar */}
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-auto">
-          <TabsList className="bg-muted/40 p-0.5 border border-border/50 rounded-lg h-8.5">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full sm:w-auto overflow-x-auto no-scrollbar">
+          <TabsList className="bg-muted/40 p-0.5 border border-border/50 rounded-lg h-8.5 overflow-x-auto no-scrollbar max-w-full flex flex-nowrap shrink-0">
             <TabsTrigger value="map" className="gap-1.5 text-xs font-medium data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-2xs text-muted-foreground hover:text-foreground transition-all rounded-md px-3 py-1">
               <Edit className="w-3.5 h-3.5" /> Map &amp; Digitizer
             </TabsTrigger>
@@ -2503,8 +2584,22 @@ export function SampleDigitizationPage() {
 
         {/* 1. MAP & SAMPLES TAB */}
         <TabsContent value="map" className="h-full w-full m-0 p-0 flex absolute inset-0">
-          <div className={`flex-none bg-card/90 backdrop-blur-xl border-r border-border/60 overflow-y-auto custom-scrollbar z-10 flex flex-col transition-all duration-300 shadow-xl ${
-            isLeftPanelOpen ? "w-96 p-4 space-y-4" : "w-0 p-0 overflow-hidden border-r-0"
+          {/* Backdrop Overlay for Left Panel (Mobile & Full Map Mode) */}
+          {isLeftPanelOpen && (
+            <div
+              className={`fixed inset-0 bg-black/60 backdrop-blur-xs transition-opacity ${
+                isFullMapMode ? "z-[1000] block" : "md:hidden z-40"
+              }`}
+              onClick={() => setIsLeftPanelOpen(false)}
+            />
+          )}
+
+          <div className={`bg-card/95 md:bg-card/90 backdrop-blur-2xl md:backdrop-blur-xl border-r border-border/60 overflow-y-auto custom-scrollbar transition-all duration-300 flex flex-col ${
+            isLeftPanelOpen
+              ? isFullMapMode
+                ? "fixed inset-y-0 left-0 w-80 sm:w-96 max-w-[90vw] z-[1001] p-4 space-y-4 shadow-2xl"
+                : "fixed inset-y-0 left-0 w-[85vw] max-w-sm z-50 p-4 space-y-4 md:relative md:inset-auto md:w-96 md:z-10 shadow-2xl md:shadow-xl"
+              : "w-0 p-0 overflow-hidden border-r-0 pointer-events-none md:relative md:z-10"
           }`}>
             {/* Table of Contents Header */}
             <div className="flex items-center justify-between pb-2 border-b border-border/60">
@@ -2537,10 +2632,11 @@ export function SampleDigitizationPage() {
                   size="sm"
                   variant="ghost"
                   onClick={() => setIsLeftPanelOpen(false)}
-                  className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground cursor-pointer"
-                  title="Collapse Table of Contents"
+                  className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground cursor-pointer"
+                  title="Close Side Panel"
                 >
-                  <ChevronLeft className="w-3.5 h-3.5" />
+                  <X className="w-4 h-4 md:hidden" />
+                  <ChevronLeft className="w-3.5 h-3.5 hidden md:block" />
                 </Button>
               </div>
             </div>
@@ -2955,15 +3051,15 @@ export function SampleDigitizationPage() {
           <div className="flex-1 flex flex-col h-full overflow-hidden">
             {/* Docked Map Top Sub-Bar (Hidden in Full Map Mode since tools are in top bar) */}
             {!isFullMapMode && (
-              <div className="flex-none bg-card/90 backdrop-blur-md border-b border-border/60 px-3 py-2 z-10 flex flex-wrap items-center justify-between gap-2 shadow-2xs">
+              <div className="flex-none bg-card/90 backdrop-blur-md border-b border-border/60 px-2 sm:px-3 py-1.5 sm:py-2 z-10 flex items-center justify-between gap-1.5 sm:gap-2 shadow-2xs overflow-x-auto no-scrollbar">
               {/* Left: Sidebar Toggle, Study Area, Class Palette, Readiness, Vector Draw & Session */}
-              <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 flex-nowrap">
                 {/* Left Sidebar Toggle Button */}
                 <Button
                     size="sm"
                     variant="ghost"
                     onClick={() => setIsLeftPanelOpen((p) => !p)}
-                    className="h-8 px-2 text-xs font-medium gap-1 text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all"
+                    className="h-8 px-2 text-xs font-medium gap-1 text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-all shrink-0"
                     title={isLeftPanelOpen ? "Collapse Side Panel (Full Map View)" : "Expand Side Panel"}
                   >
                     {isLeftPanelOpen ? (
@@ -2973,7 +3069,9 @@ export function SampleDigitizationPage() {
                       </>
                     ) : (
                       <>
-                        <ChevronRight className="w-3.5 h-3.5" />
+                        <Layers className="w-3.5 h-3.5 text-emerald-500 md:hidden" />
+                        <ChevronRight className="w-3.5 h-3.5 hidden md:block" />
+                        <span className="text-[11px] md:hidden">Classes</span>
                         <span className="hidden xl:inline text-[11px]">Show Panel</span>
                       </>
                     )}
@@ -2986,7 +3084,7 @@ export function SampleDigitizationPage() {
                     size="sm"
                     variant="outline"
                     onClick={() => setIsStudyAreaModalOpen(true)}
-                    className={`h-8 gap-1.5 text-xs font-medium px-2.5 transition-all shadow-2xs ${
+                    className={`h-8 gap-1.5 text-xs font-medium px-2.5 transition-all shadow-2xs shrink-0 ${
                       !studyArea
                         ? "border-sky-500/70 bg-sky-500/15 text-sky-200 hover:bg-sky-500/25 hover:border-sky-400 font-semibold ring-1 ring-sky-500/30"
                         : "border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20 hover:text-emerald-200"
@@ -3011,11 +3109,24 @@ export function SampleDigitizationPage() {
                     )}
                   </Button>
 
+                  {/* Quick Mobile/Field GPS Sample Capture */}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={recordCurrentLocationSample}
+                    disabled={isLocatingUser || !classLabel}
+                    className="h-8 gap-1.5 text-xs font-semibold px-2.5 text-emerald-600 dark:text-emerald-400 border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/20 shadow-2xs transition-all active:scale-95 cursor-pointer disabled:opacity-40 shrink-0"
+                    title="Record Ground Truth Sample at Current GPS Location"
+                  >
+                    {isLocatingUser ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Compass className="w-3.5 h-3.5" />}
+                    <span>GPS Sample</span>
+                  </Button>
+
                   {/* Active Class Swatch & Palette Studio Trigger */}
                   <button
                     type="button"
                     onClick={() => setIsClassPaletteModalOpen(true)}
-                    className="flex items-center gap-1.5 hover:bg-muted/50 px-2.5 py-1 h-8 rounded-md text-xs font-medium transition-all border border-border/60 bg-muted/20 shadow-2xs text-foreground"
+                    className="flex items-center gap-1.5 hover:bg-muted/50 px-2.5 py-1 h-8 rounded-md text-xs font-medium transition-all border border-border/60 bg-muted/20 shadow-2xs text-foreground shrink-0"
                     title="Open Land Cover Class Palette Studio"
                   >
                     <span className="w-2.5 h-2.5 rounded-full inline-block shadow-2xs shrink-0" style={{ backgroundColor: getRefinedColor(color, classLabel) }} />
@@ -3234,8 +3345,8 @@ export function SampleDigitizationPage() {
               </div>
             )}
 
-              {/* Contextual Status Banners (Docked directly beneath sub-bar) */}
-              {!studyArea && !isDrawingStudyArea && (
+              {/* Contextual Status Banners */}
+              {!studyArea && !isDrawingStudyArea && !isFullMapMode && (
                 <div className="flex-none flex items-center justify-between bg-card/95 backdrop-blur-md border-b border-sky-500/25 px-4 py-2 text-xs shadow-2xs animate-in fade-in">
                   <div className="flex items-center gap-2.5">
                     <div className="w-6 h-6 rounded-md bg-sky-500/10 border border-sky-500/30 flex items-center justify-center text-sky-400 shrink-0">
@@ -3258,89 +3369,122 @@ export function SampleDigitizationPage() {
               )}
 
               {isDrawingStudyArea && (
-                <div className="flex-none flex items-center justify-between bg-card/95 backdrop-blur-md border-b border-sky-500/40 px-4 py-2 text-xs animate-in fade-in shadow-2xs">
-                  <div className="flex items-center gap-3">
-                    <div className="w-6 h-6 rounded-md bg-sky-500/15 border border-sky-500/30 flex items-center justify-center text-sky-400 shrink-0">
-                      <Crosshair className="w-3.5 h-3.5 animate-pulse" />
-                    </div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-semibold text-sky-300">Defining Study Area:</span>
-                      <span className="text-foreground">
-                        {aoiDrawShape === "rectangle" 
-                          ? "Click & drag or click opposite corners on map to define rectangular boundary."
-                          : "Click vertices on the map, then click the starting vertex to close polygon."}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1 bg-muted/40 p-0.5 rounded-md border border-border/60">
-                      <button
-                        type="button"
-                        onClick={() => startAoiDrawing("rectangle")}
-                        className={`px-2 py-0.5 rounded text-[11px] font-medium transition-all ${
-                          aoiDrawShape === "rectangle"
-                            ? "bg-sky-500/20 text-sky-300 border border-sky-500/40 font-semibold"
-                            : "text-muted-foreground hover:text-foreground hover:bg-muted/30"
-                        }`}
-                        title="Draw rectangular bounding box AOI"
-                      >
-                        Box (Rectangle)
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => startAoiDrawing("polygon")}
-                        className={`px-2 py-0.5 rounded text-[11px] font-medium transition-all ${
-                          aoiDrawShape === "polygon"
-                            ? "bg-sky-500/20 text-sky-300 border border-sky-500/40 font-semibold"
-                            : "text-muted-foreground hover:text-foreground hover:bg-muted/30"
-                        }`}
-                        title="Draw freeform polygon AOI"
-                      >
-                        Freeform Polygon
-                      </button>
-                    </div>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-7 text-xs text-muted-foreground hover:text-destructive gap-1 px-2.5"
-                    onClick={cancelAoiDrawing}
-                    title="Cancel AOI drawing"
-                  >
-                    <X className="w-3.5 h-3.5" /> Cancel Drawing
-                  </Button>
-                </div>
-              )}
-
-              {classifyResult?.tile_url && (
-                <div className="flex-none flex items-center justify-between bg-muted/80 backdrop-blur-md border-b border-border/60 px-4 py-2 text-xs animate-in fade-in shadow-2xs">
-                  <span className="flex items-center gap-2 text-foreground font-medium">
-                    <Sparkles className="w-3.5 h-3.5 text-muted-foreground" />
-                    Supervised Classification Map Overlay Active
-                    {classifyResult.accuracy && (
-                      classifyResult.accuracy.is_evaluated && typeof classifyResult.accuracy.overall_accuracy === "number" ? (
-                        <Badge variant="outline" className="border-border/60 text-muted-foreground bg-muted/40 font-mono text-[10px] ml-2">
-                          Overall Accuracy: {(classifyResult.accuracy.overall_accuracy * 100).toFixed(1)}% | Kappa: {typeof classifyResult.accuracy.kappa === "number" ? classifyResult.accuracy.kappa.toFixed(3) : "N/A"}
-                        </Badge>
-                      ) : (
-                        <Badge variant="outline" className="border-border/60 text-muted-foreground bg-muted/40 font-mono text-[10px] ml-2">
-                          Holdout validation: sample count too small for test split
-                        </Badge>
-                      )
-                    )}
-                  </span>
-                  <div className="flex items-center gap-2">
+                isFullMapMode ? (
+                  <div className="absolute top-14 left-1/2 -translate-x-1/2 z-[1000] pointer-events-auto bg-card/95 backdrop-blur-md border border-sky-500/50 shadow-xl px-4 py-1.5 rounded-full text-xs flex items-center gap-3 animate-in fade-in">
+                    <Crosshair className="w-3.5 h-3.5 text-sky-400 animate-pulse shrink-0" />
+                    <span className="text-sky-200 font-medium">
+                      {aoiDrawShape === "rectangle" ? "Draw rectangle bounding box on map" : "Click vertices to draw polygon"}
+                    </span>
                     <Button
                       size="sm"
                       variant="ghost"
-                      className="h-7 text-xs text-muted-foreground hover:text-foreground"
-                      onClick={() => setClassifyResult(null)}
+                      className="h-6 text-[11px] text-muted-foreground hover:text-destructive px-2 py-0"
+                      onClick={cancelAoiDrawing}
                     >
-                      <X className="w-3.5 h-3.5" /> Clear Classification Overlay
+                      <X className="w-3 h-3 mr-0.5" /> Cancel
                     </Button>
                   </div>
-                </div>
+                ) : (
+                  <div className="flex-none flex items-center justify-between bg-card/95 backdrop-blur-md border-b border-sky-500/40 px-4 py-2 text-xs animate-in fade-in shadow-2xs">
+                    <div className="flex items-center gap-3">
+                      <div className="w-6 h-6 rounded-md bg-sky-500/15 border border-sky-500/30 flex items-center justify-center text-sky-400 shrink-0">
+                        <Crosshair className="w-3.5 h-3.5 animate-pulse" />
+                      </div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-sky-300">Defining Study Area:</span>
+                        <span className="text-foreground">
+                          {aoiDrawShape === "rectangle" 
+                            ? "Click & drag or click opposite corners on map to define rectangular boundary."
+                            : "Click vertices on the map, then click the starting vertex to close polygon."}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1 bg-muted/40 p-0.5 rounded-md border border-border/60">
+                        <button
+                          type="button"
+                          onClick={() => startAoiDrawing("rectangle")}
+                          className={`px-2 py-0.5 rounded text-[11px] font-medium transition-all ${
+                            aoiDrawShape === "rectangle"
+                              ? "bg-sky-500/20 text-sky-300 border border-sky-500/40 font-semibold"
+                              : "text-muted-foreground hover:text-foreground hover:bg-muted/30"
+                          }`}
+                          title="Draw rectangular bounding box AOI"
+                        >
+                          Box (Rectangle)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => startAoiDrawing("polygon")}
+                          className={`px-2 py-0.5 rounded text-[11px] font-medium transition-all ${
+                            aoiDrawShape === "polygon"
+                              ? "bg-sky-500/20 text-sky-300 border border-sky-500/40 font-semibold"
+                              : "text-muted-foreground hover:text-foreground hover:bg-muted/30"
+                          }`}
+                          title="Draw freeform polygon AOI"
+                        >
+                          Freeform Polygon
+                        </button>
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 text-xs text-muted-foreground hover:text-destructive gap-1 px-2.5"
+                      onClick={cancelAoiDrawing}
+                      title="Cancel AOI drawing"
+                    >
+                      <X className="w-3.5 h-3.5" /> Cancel Drawing
+                    </Button>
+                  </div>
+                )
               )}
 
-              {isEditing && (
+              {classifyResult?.tile_url && (
+                isFullMapMode ? (
+                  <div className="absolute bottom-4 right-4 z-[1000] pointer-events-auto bg-card/95 backdrop-blur-md border border-border/80 shadow-xl px-3 py-1.5 rounded-lg text-xs flex items-center gap-2 animate-in fade-in">
+                    <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                    <span className="text-foreground font-medium">Overlay Active</span>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground ml-1"
+                      onClick={() => setClassifyResult(null)}
+                      title="Clear Classification Overlay"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex-none flex items-center justify-between bg-muted/80 backdrop-blur-md border-b border-border/60 px-4 py-2 text-xs animate-in fade-in shadow-2xs">
+                    <span className="flex items-center gap-2 text-foreground font-medium">
+                      <Sparkles className="w-3.5 h-3.5 text-muted-foreground" />
+                      Supervised Classification Map Overlay Active
+                      {classifyResult.accuracy && (
+                        classifyResult.accuracy.is_evaluated && typeof classifyResult.accuracy.overall_accuracy === "number" ? (
+                          <Badge variant="outline" className="border-border/60 text-muted-foreground bg-muted/40 font-mono text-[10px] ml-2">
+                            Overall Accuracy: {(classifyResult.accuracy.overall_accuracy * 100).toFixed(1)}% | Kappa: {typeof classifyResult.accuracy.kappa === "number" ? classifyResult.accuracy.kappa.toFixed(3) : "N/A"}
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="border-border/60 text-muted-foreground bg-muted/40 font-mono text-[10px] ml-2">
+                            Holdout validation: sample count too small for test split
+                          </Badge>
+                        )
+                      )}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 text-xs text-muted-foreground hover:text-foreground"
+                        onClick={() => setClassifyResult(null)}
+                      >
+                        <X className="w-3.5 h-3.5" /> Clear Classification Overlay
+                      </Button>
+                    </div>
+                  </div>
+                )
+              )}
+
+              {isEditing && !isFullMapMode && (
                 <div className="flex-none flex items-center justify-between bg-muted/80 backdrop-blur-md border-b border-border/60 px-4 py-2 text-xs animate-in fade-in shadow-2xs">
                   <div className="flex items-center gap-2 text-foreground font-medium">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block" />
@@ -3429,7 +3573,7 @@ export function SampleDigitizationPage() {
               )}
 
               {/* Map Container: Fills 100% of remaining flex space unobstructed */}
-              <div className="flex-1 relative w-full h-full bg-muted/10">
+              <div ref={mapContainerDivRef} className="flex-1 relative w-full h-full bg-muted/10 overflow-hidden">
 
                 {/* Floating Top-Left Map Controls: Basemap, Add Data, Layers, Bias Rings */}
                 <div className="absolute top-3 left-14 z-[1000] pointer-events-auto flex items-center gap-1.5 p-1 bg-card/95 backdrop-blur-md rounded-lg border border-border/80 shadow-md">
@@ -3506,8 +3650,10 @@ export function SampleDigitizationPage() {
                     onClick={() => {
                       if (isFullMapMode) {
                         setIsFullMapMode(false);
+                        setIsLeftPanelOpen(true);
                       } else {
                         setActiveTab("map");
+                        setIsLeftPanelOpen(false);
                         setIsFullMapMode(true);
                       }
                     }}
@@ -3718,6 +3864,38 @@ export function SampleDigitizationPage() {
                     <LeafletPolygon positions={activePoints} color="#38bdf8" fillColor="#38bdf8" fillOpacity={0.15} weight={2} />
                   )}
                 </MapContainer>
+
+                {/* Floating Mobile Field Controls (GPS Capture & Drawer Trigger) */}
+                <div className="absolute bottom-5 right-3.5 z-[1000] pointer-events-auto flex flex-col items-end gap-2.5">
+                  <button
+                    type="button"
+                    onClick={recordCurrentLocationSample}
+                    disabled={isLocatingUser || !classLabel}
+                    className="h-11 px-4 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs flex items-center gap-2 shadow-xl shadow-emerald-950/40 border border-emerald-400/30 active:scale-95 transition-all cursor-pointer disabled:opacity-50"
+                    title="Capture ground truth sample at current GPS location"
+                  >
+                    {isLocatingUser ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    ) : (
+                      <Compass className="w-4 h-4 text-emerald-200 animate-pulse" />
+                    )}
+                    <span>Record GPS Sample</span>
+                  </button>
+                </div>
+
+                {!isLeftPanelOpen && (
+                  <div className="md:hidden absolute bottom-5 left-3.5 z-[1000] pointer-events-auto">
+                    <button
+                      type="button"
+                      onClick={() => setIsLeftPanelOpen(true)}
+                      className="h-11 px-3.5 rounded-full bg-card/95 hover:bg-card text-foreground font-medium text-xs flex items-center gap-2 shadow-xl border border-border/80 backdrop-blur-md active:scale-95 transition-all cursor-pointer"
+                      title="Open Classes & Layers"
+                    >
+                      <Layers className="w-4 h-4 text-emerald-500" />
+                      <span>Classes ({Object.keys(groupedSamples).length})</span>
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
         </TabsContent>
@@ -3898,7 +4076,8 @@ export function SampleDigitizationPage() {
                         </div>
 
                         {/* Class Sub-items Attribute Table */}
-                        <table className="w-full text-xs">
+                        <div className="overflow-x-auto w-full custom-scrollbar">
+                          <table className="w-full text-xs min-w-[500px]">
                           <thead className="bg-muted/20 text-[11px] uppercase tracking-wider text-muted-foreground font-medium border-b border-border/60">
                             <tr>
                               <th className="text-left px-4 py-2 w-16">FID</th>
@@ -3959,6 +4138,7 @@ export function SampleDigitizationPage() {
                             })}
                           </tbody>
                         </table>
+                        </div>
                       </div>
                     );
                   })}

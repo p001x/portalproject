@@ -32,11 +32,11 @@ export function ContactPage() {
       <main className="flex-1 w-full pb-20">
         <section className="relative overflow-hidden bg-muted/30 pt-24 pb-16 px-6 border-b">
           <div className="max-w-4xl mx-auto text-center space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
-            <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight text-foreground leading-tight">
-              Get in <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-500 to-blue-600">Touch</span>
+            <h1 className="text-3xl md:text-4xl font-bold tracking-tight text-foreground">
+              Contact Us
             </h1>
-            <p className="text-xl text-muted-foreground max-w-2xl mx-auto leading-relaxed">
-              We're here to answer any questions you have about our spatial intelligence platform, enterprise solutions, or technical integrations.
+            <p className="text-base text-muted-foreground max-w-xl mx-auto leading-relaxed">
+              Have questions regarding data integrations, analysis modules, or organizational subscriptions? Get in touch with our team.
             </p>
           </div>
         </section>
@@ -72,10 +72,9 @@ export function ContactPage() {
                     <MapPin className="w-6 h-6" />
                   </div>
                   <div>
-                    <h3 className="font-bold text-lg">Our Office</h3>
+                    <h3 className="font-bold text-lg">Our Location</h3>
                     <p className="text-muted-foreground">
-                      Kigali, Rwanda<br />
-                      Global Operations Center
+                      Kigali, Rwanda
                     </p>
                   </div>
                 </div>

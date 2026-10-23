@@ -235,6 +235,26 @@ export function InteractiveMapEditor({
   const [historyIndex, setHistoryIndex] = useState(0);
   const [elements, setElementsState] = useState<ElementData[]>(initialElements);
   const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 });
+  const [initialScale, setInitialScale] = useState(1);
+
+  // Compute adaptive initial scale on mobile so 800px+ canvas fits screen automatically
+  useEffect(() => {
+    const updateScale = () => {
+      if (typeof window !== "undefined") {
+        const screenW = window.innerWidth;
+        if (screenW < 768) {
+          const availableW = Math.max(280, screenW - 32);
+          const calculated = Math.min(0.9, Math.max(0.3, availableW / canvasSize.width));
+          setInitialScale(calculated);
+        } else {
+          setInitialScale(1);
+        }
+      }
+    };
+    updateScale();
+    window.addEventListener("resize", updateScale);
+    return () => window.removeEventListener("resize", updateScale);
+  }, [canvasSize.width]);
 
   // Update map layer size when canvas size changes (only if it matches exactly)
   useEffect(() => {
@@ -841,11 +861,11 @@ export function InteractiveMapEditor({
   return (
     <div className={`flex flex-col gap-4 ${fullScreen ? "h-full" : ""}`}>
       {/* Global Toolbar */}
-      <div className="flex items-center gap-2 p-2 bg-card text-card-foreground rounded-lg border shadow-sm shrink-0">
-        <Button variant="ghost" size="sm" onClick={undo} disabled={historyIndex === 0} title="Undo (Ctrl+Z)">
+      <div className="flex items-center gap-2 p-2 bg-card text-card-foreground rounded-lg border shadow-sm shrink-0 overflow-x-auto max-w-full scrollbar-thin">
+        <Button variant="ghost" size="sm" onClick={undo} disabled={historyIndex === 0} title="Undo (Ctrl+Z)" className="shrink-0">
           <Undo2 className="w-4 h-4 mr-2" /> Undo
         </Button>
-        <Button variant="ghost" size="sm" onClick={redo} disabled={historyIndex === history.length - 1} title="Redo (Ctrl+Y)">
+        <Button variant="ghost" size="sm" onClick={redo} disabled={historyIndex === history.length - 1} title="Redo (Ctrl+Y)" className="shrink-0">
           <Redo2 className="w-4 h-4 mr-2" /> Redo
         </Button>
         <Button 
@@ -853,22 +873,23 @@ export function InteractiveMapEditor({
           size="sm" 
           onClick={() => setSnapToGrid(!snapToGrid)}
           title="Toggle Grid Snapping"
+          className="shrink-0"
         >
           <Grid3X3 className="w-4 h-4 mr-2" /> Snap
         </Button>
-        <div className="w-px h-6 bg-border mx-2" />
+        <div className="w-px h-6 bg-border mx-2 shrink-0" />
         <Dialog open={insertDialogOpen} onOpenChange={setInsertDialogOpen}>
           <DialogTrigger asChild>
-            <Button variant="ghost" size="sm">
+            <Button variant="ghost" size="sm" className="shrink-0">
               <PlusCircle className="w-4 h-4 mr-2" /> Insert Element
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Insert New Element</DialogTitle>
             </DialogHeader>
-            <div className="flex gap-6 py-4">
-              <div className="flex-1 flex items-center justify-center bg-gray-100 rounded-md border min-h-[200px]">
+            <div className="flex flex-col md:flex-row gap-6 py-4">
+              <div className="flex-1 flex items-center justify-center bg-gray-100 rounded-md border min-h-[180px] p-2">
                 <div style={{ width: previewType === "scale" ? 150 : previewType === "northArrow" ? 60 : previewType === "text" ? 200 : 150, height: previewType === "northArrow" ? 70 : previewType === "text" ? 40 : 80, position: 'relative' }}>
                   {renderElementContent({
                     id: "preview",
@@ -889,7 +910,7 @@ export function InteractiveMapEditor({
               <div className="flex-1 space-y-4">
                 <div className="space-y-2">
                   <Label>Element Type</Label>
-                  <div className="grid grid-cols-4 gap-2">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                     <Button variant={previewType === "northArrow" ? "default" : "outline"} size="sm" onClick={() => setPreviewType("northArrow")}>North Arrow</Button>
                     <Button variant={previewType === "scale" ? "default" : "outline"} size="sm" onClick={() => setPreviewType("scale")}>Scale Bar</Button>
                     <Button variant={previewType === "legend" ? "default" : "outline"} size="sm" onClick={() => setPreviewType("legend")}>Legend</Button>
@@ -983,29 +1004,34 @@ export function InteractiveMapEditor({
         </Button>
       </div>
 
-      <div className={`flex flex-col lg:flex-row gap-6 ${fullScreen ? "flex-1 overflow-hidden" : "h-[800px]"}`}>
+      <div className={`flex flex-col lg:flex-row gap-4 lg:gap-6 ${fullScreen ? "flex-1 overflow-hidden" : "min-h-[600px] lg:h-[800px]"}`}>
         {/* Main Canvas Area */}
-        <div className={`flex-1 bg-gray-100 rounded-lg overflow-hidden border border-border flex items-center justify-center relative ${fullScreen ? "h-[calc(100vh-140px)]" : "min-h-[500px]"}`}>
+        <div className={`flex-1 bg-gray-100 rounded-lg overflow-hidden border border-border flex items-center justify-center relative ${fullScreen ? "h-[calc(100vh-140px)] min-h-[350px]" : "h-[420px] sm:h-[500px] lg:h-auto min-h-[350px]"}`}>
           <TransformWrapper
-            initialScale={1}
-            minScale={0.1}
+            initialScale={initialScale}
+            minScale={0.15}
             maxScale={5}
             centerOnInit
             wheel={{ step: 0.1 }}
-            panning={{ excluded: ["react-draggable", "bg-white"] }}
+            panning={{ excluded: ["react-draggable"] }}
+            pinch={{ step: 5 }}
+            doubleClick={{ disabled: true }}
           >
             {({ zoomIn, zoomOut, resetTransform, state }) => (
               <>
-                <div className="absolute top-4 left-4 z-[50] flex gap-1 bg-card/90 text-card-foreground backdrop-blur shadow-md p-1.5 rounded-lg border">
-                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => zoomIn()} title="Zoom In">
-                    <ZoomIn className="w-4 h-4" />
+                <div className="absolute top-3 left-3 z-[50] flex items-center gap-1 bg-card/90 text-card-foreground backdrop-blur shadow-md p-1 rounded-lg border">
+                  <Button variant="ghost" size="icon" className="h-7 w-7 sm:h-8 sm:w-8" onClick={() => zoomIn()} title="Zoom In">
+                    <ZoomIn className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                   </Button>
-                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => zoomOut()} title="Zoom Out">
-                    <ZoomOut className="w-4 h-4" />
+                  <Button variant="ghost" size="icon" className="h-7 w-7 sm:h-8 sm:w-8" onClick={() => zoomOut()} title="Zoom Out">
+                    <ZoomOut className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                   </Button>
-                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => resetTransform()} title="Fit to Screen">
-                    <Maximize className="w-4 h-4" />
+                  <Button variant="ghost" size="icon" className="h-7 w-7 sm:h-8 sm:w-8" onClick={() => resetTransform()} title="Fit to Screen">
+                    <Maximize className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                   </Button>
+                </div>
+                <div className="absolute bottom-3 left-3 z-[50] pointer-events-none md:hidden bg-background/85 backdrop-blur text-[10px] text-muted-foreground px-2 py-0.5 rounded border shadow-sm">
+                  Drag background to pan • Pinch to zoom
                 </div>
                 <TransformComponent wrapperStyle={{ width: "100%", height: "100%" }}>
                   <div
@@ -1025,7 +1051,7 @@ export function InteractiveMapEditor({
         </div>
 
         {/* Properties Sidebar */}
-        <div className="w-full lg:w-64 bg-card border rounded-lg p-4 flex flex-col gap-4 shrink-0 overflow-y-auto">
+        <div className="w-full lg:w-64 bg-card border rounded-lg p-4 flex flex-col gap-4 shrink-0 overflow-y-auto max-h-[500px] lg:max-h-none">
           <div className="flex items-center gap-2 font-medium border-b pb-2">
             <Settings2 className="w-4 h-4" />
             Properties

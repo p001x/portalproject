@@ -18,15 +18,7 @@ import {
 import { Link, useLocation } from "wouter";
 import { SiteBrand, SiteLogoOnly } from "@/components/SiteBrand";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
-
-// Declare window.google
-declare global {
-  interface Window {
-    google: any;
-  }
-}
 
 export function AuthPage() {
   const [email, setEmail] = useState("");
@@ -39,24 +31,13 @@ export function AuthPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
-  const [isAdminMode, setIsAdminMode] = useState(false);
-
-  useEffect(() => {
-    try {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get("admin") === "true" || params.get("admin") === "1" || params.get("role") === "admin") {
-        setIsAdminMode(true);
-      }
-    } catch (e) {}
-  }, []);
   
-  const { login, register, loginWithGoogle, requestOtp, forgotPassword, isLoading } = useAuth();
+  const { login, register, requestOtp, forgotPassword, isLoading } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [resendCooldown, setResendCooldown] = useState(0);
   const [isResending, setIsResending] = useState(false);
   const [, setLocation] = useLocation();
-  const { resolvedTheme } = useTheme();
 
   useEffect(() => {
     if (resendCooldown <= 0) return;
@@ -82,53 +63,7 @@ export function AuthPage() {
     }
   };
 
-  // Load and manage Google Identity Services (only when admin mode is active)
-  useEffect(() => {
-    if (!isAdminMode) return;
 
-    let script = document.getElementById("google-gsi-client") as HTMLScriptElement | null;
-    if (!script) {
-      script = document.createElement("script");
-      script.id = "google-gsi-client";
-      script.src = "https://accounts.google.com/gsi/client";
-      script.async = true;
-      script.defer = true;
-      document.head.appendChild(script);
-    }
-
-    const initGoogleBtn = () => {
-      if (window.google?.accounts?.id) {
-        window.google.accounts.id.initialize({
-          client_id: "952981082241-tif2ul1vnps4fu13odnbpgb9p8n3el4j.apps.googleusercontent.com",
-          callback: async (response: any) => {
-            try {
-              await loginWithGoogle(response.credential);
-            } catch (err: any) {
-              setError(err.message || "Google authentication failed.");
-            }
-          },
-        });
-
-        const targetDiv = document.getElementById("google-signIn-btn");
-        if (targetDiv) {
-          targetDiv.innerHTML = "";
-          window.google.accounts.id.renderButton(targetDiv, {
-            theme: resolvedTheme === "dark" ? "filled_black" : "outline",
-            size: "large",
-            width: 320,
-            shape: "pill",
-            text: "continue_with",
-          });
-        }
-      }
-    };
-
-    if (window.google) {
-      initGoogleBtn();
-    } else {
-      script.onload = initGoogleBtn;
-    }
-  }, [loginWithGoogle, resolvedTheme, mode, step, isAdminMode]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -205,21 +140,21 @@ export function AuthPage() {
         </div>
 
         {/* Navigation Links */}
-        <nav className="hidden md:flex items-center gap-6">
+        <nav className="hidden md:flex items-center gap-7 lg:gap-8">
           <Link href="/">
-            <span className="text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer">Home</span>
+            <span className="text-sm md:text-base font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer py-1">Home</span>
           </Link>
           <Link href="/platform">
-            <span className="text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer">Platform</span>
+            <span className="text-sm md:text-base font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer py-1">Platform</span>
           </Link>
           <Link href="/about">
-            <span className="text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer">About</span>
+            <span className="text-sm md:text-base font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer py-1">About</span>
           </Link>
           <Link href="/services">
-            <span className="text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer">Services</span>
+            <span className="text-sm md:text-base font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer py-1">Services</span>
           </Link>
           <Link href="/contact">
-            <span className="text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer">Contact</span>
+            <span className="text-sm md:text-base font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer py-1">Contact</span>
           </Link>
         </nav>
 
@@ -257,9 +192,8 @@ export function AuthPage() {
 
           {/* Card Header & Brand Badge */}
           <div className="text-center mb-6">
-            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-bold tracking-wider uppercase bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 mb-3">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              SPETRO Security Gateway
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium tracking-wide uppercase bg-muted/60 text-muted-foreground border border-border/50 mb-3">
+              SPETRO Account
             </div>
             
             <h2 className="text-2xl sm:text-3xl font-extrabold text-foreground tracking-tight">
@@ -595,46 +529,6 @@ export function AuthPage() {
               </>
             )}
           </div>
-
-          {/* Divider & Google OAuth Section - Hidden from regular users, visible ONLY for admins */}
-          {isAdminMode && step !== "otp" && mode !== "forgot" && (
-            <div className="mt-6 pt-5 border-t border-border/60">
-              <div className="relative flex py-1 items-center mb-4">
-                <div className="flex-grow border-t border-border/60"></div>
-                <span className="shrink-0 px-3 text-[11px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">
-                  Admin Sign In with Google
-                </span>
-                <div className="flex-grow border-t border-border/60"></div>
-              </div>
-
-              {/* Google Button Container */}
-              <div className="flex items-center justify-center">
-                <div id="google-signIn-btn" className="min-h-[44px] flex items-center justify-center"></div>
-              </div>
-            </div>
-          )}
-
-          {/* Platform Security Badge & Subtle Admin Access Link */}
-          <div className="mt-7 pt-4 border-t border-border/40 flex flex-col items-center justify-center gap-1.5 text-[11px] text-muted-foreground/80 font-medium">
-            <div 
-              onClick={() => setIsAdminMode(!isAdminMode)}
-              className="flex items-center gap-1.5 cursor-pointer hover:text-foreground transition-colors select-none"
-              title={isAdminMode ? "Click to exit admin mode" : "Admin portal access"}
-            >
-              <ShieldCheck className={`w-3.5 h-3.5 ${isAdminMode ? "text-amber-500" : "text-emerald-500"}`} />
-              <span>{isAdminMode ? "Admin Gateway Active" : "Protected by Google Earth Engine & SPETRO Shield"}</span>
-            </div>
-            {!isAdminMode && (
-              <button
-                type="button"
-                onClick={() => setIsAdminMode(true)}
-                className="text-[10px] text-muted-foreground/40 hover:text-muted-foreground transition-colors cursor-pointer"
-              >
-                Admin Sign In
-              </button>
-            )}
-          </div>
-
         </div>
       </main>
 

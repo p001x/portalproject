@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { PlayCircle, BookOpen, Clock, CheckCircle2, GraduationCap, Video, FileText, Plus, Trash2, Headphones, Sparkles, Search, Shield, User, Pencil, ZoomIn, ZoomOut, Moon, Sun, ChevronLeft, ChevronRight, Maximize, Minimize, ListTree, X, Flame, Bot, HelpCircle, Loader2, MessageCircle } from "lucide-react";
+import { PlayCircle, BookOpen, Clock, CheckCircle2, GraduationCap, Video, FileText, Plus, Trash2, Headphones, Sparkles, Search, Shield, User, Pencil, ZoomIn, ZoomOut, Moon, Sun, ChevronLeft, ChevronRight, Maximize, Minimize, ListTree, X, Bot, HelpCircle, Loader2, MessageCircle } from "lucide-react";
 import { pdfjs, Document, Page, Outline } from 'react-pdf';
 import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
 import 'react-pdf/dist/esm/Page/TextLayer.css';
@@ -63,7 +63,6 @@ export function AcademyPage() {
   const [isToolbarVisible, setIsToolbarVisible] = useState<boolean>(true);
   const [containerWidth, setContainerWidth] = useState<number>();
   const containerRef = useRef<HTMLDivElement>(null);
-  const [streak, setStreak] = useState(0);
 
   // Reader Discussions State
   const [isDiscussionsOpen, setIsDiscussionsOpen] = useState(false);
@@ -91,30 +90,7 @@ export function AcademyPage() {
     }
   }, [pageNumber, selectedBookToRead]);
 
-  // Streak logic
-  useEffect(() => {
-    const lastRead = localStorage.getItem("last_read_date");
-    const currentStreak = parseInt(localStorage.getItem("reading_streak") || "0", 10);
-    const today = new Date().toDateString();
-    
-    if (lastRead !== today) {
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      
-      if (lastRead === yesterday.toDateString()) {
-        setStreak(currentStreak + 1);
-        localStorage.setItem("reading_streak", (currentStreak + 1).toString());
-      } else if (lastRead) {
-        setStreak(1);
-        localStorage.setItem("reading_streak", "1");
-      } else {
-        setStreak(0);
-      }
-      localStorage.setItem("last_read_date", today);
-    } else {
-      setStreak(currentStreak);
-    }
-  }, []);
+
 
   // Check milestone for Quiz and Confetti
   useEffect(() => {
@@ -510,12 +486,6 @@ export function AcademyPage() {
                 <GraduationCap className="mr-2 h-4 w-4" />
                 Corporate Training & Teaching
               </div>
-              {streak > 0 && (
-                <div className="inline-flex items-center rounded-lg bg-orange-500/10 px-3 py-1 text-sm font-medium text-orange-600 dark:text-orange-400" title="Daily Reading Streak">
-                  <Flame className="mr-1 h-4 w-4 text-orange-500" />
-                  {streak} Day Streak
-                </div>
-              )}
             </div>
             <h1 className="text-3xl font-bold tracking-tight">Training & Academy</h1>
             <p className="text-muted-foreground text-lg max-w-2xl">

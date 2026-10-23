@@ -21,9 +21,9 @@ export function HomePage() {
           <SiteBrand size="normal" hideSubtitleOnMobile />
 
           {/* Navigation Links */}
-          <nav className="hidden md:flex items-center gap-1 bg-muted/30 dark:bg-muted/20 p-1 rounded-full border border-border/50">
+          <nav className="hidden md:flex items-center gap-1.5 bg-muted/40 dark:bg-muted/30 p-1.5 rounded-full border border-border/60 shadow-sm">
             <Link href="/">
-              <span className={`text-xs font-bold px-3.5 py-1.5 rounded-full transition-all cursor-pointer ${
+              <span className={`text-sm font-semibold px-4 py-2 rounded-full transition-all cursor-pointer ${
                 loc === "/" 
                   ? "bg-background text-foreground shadow-sm" 
                   : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
@@ -32,7 +32,7 @@ export function HomePage() {
               </span>
             </Link>
             <Link href="/platform">
-              <span className={`text-xs font-bold px-3.5 py-1.5 rounded-full transition-all cursor-pointer ${
+              <span className={`text-sm font-semibold px-4 py-2 rounded-full transition-all cursor-pointer ${
                 loc === "/platform" 
                   ? "bg-background text-foreground shadow-sm" 
                   : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
@@ -41,7 +41,7 @@ export function HomePage() {
               </span>
             </Link>
             <Link href="/about">
-              <span className={`text-xs font-bold px-3.5 py-1.5 rounded-full transition-all cursor-pointer ${
+              <span className={`text-sm font-semibold px-4 py-2 rounded-full transition-all cursor-pointer ${
                 loc === "/about" 
                   ? "bg-background text-foreground shadow-sm" 
                   : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
@@ -50,7 +50,7 @@ export function HomePage() {
               </span>
             </Link>
             <Link href="/services">
-              <span className={`text-xs font-bold px-3.5 py-1.5 rounded-full transition-all cursor-pointer ${
+              <span className={`text-sm font-semibold px-4 py-2 rounded-full transition-all cursor-pointer ${
                 loc === "/services" 
                   ? "bg-background text-foreground shadow-sm" 
                   : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
@@ -59,7 +59,7 @@ export function HomePage() {
               </span>
             </Link>
             <Link href="/contact">
-              <span className={`text-xs font-bold px-3.5 py-1.5 rounded-full transition-all cursor-pointer ${
+              <span className={`text-sm font-semibold px-4 py-2 rounded-full transition-all cursor-pointer ${
                 loc === "/contact" 
                   ? "bg-background text-foreground shadow-sm" 
                   : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
@@ -96,10 +96,36 @@ export function HomePage() {
           Welcome to the <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-500 to-teal-400">SPETRO</span> Geoportal
         </h2>
         
-        {!user && (
-          <p className="text-muted-foreground text-xl md:text-2xl max-w-3xl mb-12 leading-relaxed">
-            Advanced satellite data analysis, seamless sample digitization, and collaborative environmental monitoring in one unified platform.
-          </p>
+        <p className="text-muted-foreground text-lg md:text-xl max-w-2xl mb-8 leading-relaxed">
+          Comprehensive satellite Earth observation, digital sample archiving, and environmental spatial analytics.
+        </p>
+
+        {user ? (
+          <div className="flex flex-wrap items-center justify-center gap-4">
+            <Link href="/platform">
+              <Button size="lg" className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-6 py-5 rounded-xl shadow-sm cursor-pointer">
+                Launch Platform Modules <ArrowRight className="w-4 h-4" />
+              </Button>
+            </Link>
+            <Link href="/analysis-hub">
+              <Button variant="outline" size="lg" className="px-6 py-5 rounded-xl font-medium cursor-pointer">
+                Earth Analytics Hub
+              </Button>
+            </Link>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center justify-center gap-4">
+            <Link href="/auth">
+              <Button size="lg" className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-7 py-5 rounded-xl shadow-sm cursor-pointer">
+                Get Started <ArrowRight className="w-4 h-4" />
+              </Button>
+            </Link>
+            <Link href="/platform">
+              <Button variant="outline" size="lg" className="px-6 py-5 rounded-xl font-medium cursor-pointer">
+                Explore Modules
+              </Button>
+            </Link>
+          </div>
         )}
 
 

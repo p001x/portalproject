@@ -2189,6 +2189,8 @@ def accessibility_map_endpoint(req: AccessibilityRequest):
     _require_gee()
     try:
         return compute_accessibility_map(req.aoi, req.amenities, req.dest_amenities, req.n_classes, req.service_threshold_mins, method=req.method, proposed_facilities=req.proposed_facilities, transport_mode=req.transport_mode)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     except Exception as exc:
         logger.exception("Accessibility map failed for %s", req.district)
         raise HTTPException(500, str(exc)) from exc
@@ -2198,6 +2200,8 @@ def accessibility_stats_endpoint(req: AccessibilityRequest):
     _require_gee()
     try:
         return compute_accessibility_stats(req.aoi, req.amenities, req.dest_amenities, req.n_classes, req.service_threshold_mins, proposed_facilities=req.proposed_facilities, transport_mode=req.transport_mode)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     except Exception as exc:
         logger.exception("Accessibility stats failed for %s", req.district)
         raise HTTPException(500, str(exc)) from exc
@@ -2207,6 +2211,8 @@ def accessibility_classify_endpoint(req: AccessibilityRequest):
     _require_gee()
     try:
         return compute_accessibility_classify(req.aoi, req.amenities, req.dest_amenities, req.n_classes, req.service_threshold_mins, method=req.method, custom_labels=req.custom_labels, proposed_facilities=req.proposed_facilities, transport_mode=req.transport_mode)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     except Exception as exc:
         logger.exception("Accessibility classify failed for %s", req.district)
         raise HTTPException(500, str(exc)) from exc
@@ -2216,6 +2222,8 @@ def accessibility_export_endpoint(req: AccessibilityRequest):
     _require_gee()
     try:
         return compute_accessibility_export(req.aoi, req.amenities, req.dest_amenities, req.n_classes, req.service_threshold_mins, proposed_facilities=req.proposed_facilities, transport_mode=req.transport_mode)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     except Exception as exc:
         logger.exception("Accessibility export failed for %s", req.district)
         raise HTTPException(500, str(exc)) from exc

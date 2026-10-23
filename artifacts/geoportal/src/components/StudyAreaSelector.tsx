@@ -16,20 +16,33 @@ import {
   Trash2, 
   Sparkles, 
   FileCode2, 
-  AlertCircle 
+  AlertCircle,
+  Lock 
 } from "lucide-react";
 
 interface StudyAreaSelectorProps {
   value: AOIConfig;
   onChange: (value: AOIConfig) => void;
+  restrictToRwanda?: boolean;
 }
 
-export function StudyAreaSelector({ value, onChange }: StudyAreaSelectorProps) {
+export function StudyAreaSelector({ value, onChange, restrictToRwanda = false }: StudyAreaSelectorProps) {
   const [tab, setTab] = useState<"rwanda" | "global" | "upload">(() => {
+    if (restrictToRwanda) return "rwanda";
     if (value.type === "geojson" || value.type === "custom") return "upload";
     if (value.type === "rwanda" || value.country === "Rwanda") return "rwanda";
     return "global";
   });
+
+  // Ensure value is reset to Rwanda if restrictToRwanda is active
+  React.useEffect(() => {
+    if (restrictToRwanda) {
+      if (tab !== "rwanda") setTab("rwanda");
+      if (value.country !== "Rwanda" && value.type !== "rwanda") {
+        onChange({ type: "rwanda", country: "Rwanda", name: "Rwanda" });
+      }
+    }
+  }, [restrictToRwanda, value, tab, onChange]);
   
   const [uploading, setUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
@@ -230,6 +243,10 @@ export function StudyAreaSelector({ value, onChange }: StudyAreaSelectorProps) {
     setDragActive(false);
 
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      if (restrictToRwanda) {
+        setUploadError("Custom spatial files are locked for this analysis module. Only Rwanda study areas are supported.");
+        return;
+      }
       const file = e.dataTransfer.files[0];
       await processFile(file);
     }
@@ -286,23 +303,46 @@ export function StudyAreaSelector({ value, onChange }: StudyAreaSelectorProps) {
         <Label className="text-sm font-semibold flex items-center gap-1.5">
           Study Area
         </Label>
+        {restrictToRwanda && (
+          <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 flex items-center gap-1">
+            <Lock className="w-3 h-3" /> Rwanda Only
+          </span>
+        )}
       </div>
 
-      <Tabs value={tab} onValueChange={handleTabChange} className="w-full">
-        <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="rwanda" className="flex gap-2 text-xs">
-            <MapPin className="w-4 h-4" /> Rwanda
-          </TabsTrigger>
-          <TabsTrigger value="global" className="flex gap-2 text-xs">
-            <Globe className="w-4 h-4" /> Global
-          </TabsTrigger>
-          <TabsTrigger value="upload" className="flex gap-2 text-xs relative">
-            <Upload className="w-4 h-4" /> Custom
-            {isCustomActive && (
-              <span className="w-2 h-2 rounded-full bg-primary absolute top-1 right-2 animate-pulse" />
-            )}
-          </TabsTrigger>
-        </TabsList>
+      {restrictToRwanda && (
+        <div className="text-[11px] text-muted-foreground bg-amber-500/5 dark:bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/20 flex items-start gap-2 leading-relaxed">
+          <AlertCircle className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
+          <span>
+            <strong>Local Data Bound:</strong> Accessibility analysis utilizes local Rwandan vector geodatabases, road networks, and POIs. Global and custom study areas are locked.
+          </span>
+        </div>
+      )}
+
+      <Tabs value={restrictToRwanda ? "rwanda" : tab} onValueChange={restrictToRwanda ? undefined : handleTabChange} className="w-full">
+        {!restrictToRwanda ? (
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="rwanda" className="flex gap-2 text-xs">
+              <MapPin className="w-4 h-4" /> Rwanda
+            </TabsTrigger>
+            <TabsTrigger value="global" className="flex gap-2 text-xs">
+              <Globe className="w-4 h-4" /> Global
+            </TabsTrigger>
+            <TabsTrigger value="upload" className="flex gap-2 text-xs relative">
+              <Upload className="w-4 h-4" /> Custom
+              {isCustomActive && (
+                <span className="w-2 h-2 rounded-full bg-primary absolute top-1 right-2 animate-pulse" />
+              )}
+            </TabsTrigger>
+          </TabsList>
+        ) : (
+          <div className="flex items-center justify-between p-2 rounded-lg bg-muted/40 border border-border/60 text-xs">
+            <span className="font-semibold text-foreground flex items-center gap-1.5">
+              <MapPin className="w-3.5 h-3.5 text-emerald-500" /> Rwanda Administrative Levels
+            </span>
+            <span className="text-[10px] font-mono text-muted-foreground">National &bull; Sector &bull; Cell</span>
+          </div>
+        )}
 
         {/* RWANDA TAB */}
         <TabsContent value="rwanda" className="space-y-3 mt-3">

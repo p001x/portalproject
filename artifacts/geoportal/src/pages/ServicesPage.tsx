@@ -37,15 +37,15 @@ const SERVICES = [
   },
   {
     id: "custom_analysis",
-    title: "Ultra GIS Engineering",
+    title: "Spatial Modeling & Pipelines",
     icon: Map,
-    description: "Let our experts build bespoke, AI-powered spatial models and automated data pipelines tailored to your organization.",
+    description: "Custom earth observation workflows, specialized algorithm development, and automated processing pipelines tailored to your operational requirements.",
     price: "Project Based",
     features: [
-      "Custom Machine Learning model training on multi-petabyte satellite data",
-      "Real-time automated environmental monitoring pipelines & API access",
-      "Sub-meter resolution drone & satellite imagery fusion",
-      "Fully deployed, white-labeled bespoke web Geoportals",
+      "Specialized classification and regression algorithms on satellite time-series",
+      "Automated environmental and resource monitoring pipelines",
+      "Multi-sensor fusion (optical, radar, and elevation datasets)",
+      "Dedicated workflow deployment and technical integration",
     ]
   }
 ];
@@ -99,11 +99,11 @@ export function ServicesPage() {
     <div className="h-full overflow-y-auto">
       <div className="max-w-6xl mx-auto py-12 px-6 lg:px-8">
         <div className="text-center mb-16 max-w-3xl mx-auto">
-        <h1 className="text-4xl md:text-5xl font-extrabold tracking-tight mb-6 bg-gradient-to-r from-emerald-400 to-blue-500 bg-clip-text text-transparent">
-          Expert Geospatial Services
+        <h1 className="text-3xl md:text-4xl font-bold tracking-tight mb-4 text-foreground">
+          Geospatial Advisory & Services
         </h1>
-        <p className="text-lg text-muted-foreground leading-relaxed">
-          Unlock the full potential of spatial data with our premium consultation, corporate teaching, and bespoke analysis packages. Let us accelerate your geospatial journey.
+        <p className="text-base text-muted-foreground leading-relaxed">
+          Technical consultations, capacity building programs, and specialized analytical workflows designed to support environmental and operational decision-making.
         </p>
       </div>
 

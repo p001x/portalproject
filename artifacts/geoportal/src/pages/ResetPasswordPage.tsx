@@ -73,21 +73,21 @@ export function ResetPasswordPage() {
           <SiteBrand size="normal" hideSubtitleOnMobile />
         </div>
 
-        <nav className="hidden md:flex items-center gap-6">
+        <nav className="hidden md:flex items-center gap-7 lg:gap-8">
           <Link href="/">
-            <span className="text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer">Home</span>
+            <span className="text-sm md:text-base font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer py-1">Home</span>
           </Link>
           <Link href="/platform">
-            <span className="text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer">Platform</span>
+            <span className="text-sm md:text-base font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer py-1">Platform</span>
           </Link>
           <Link href="/about">
-            <span className="text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer">About</span>
+            <span className="text-sm md:text-base font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer py-1">About</span>
           </Link>
           <Link href="/services">
-            <span className="text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer">Services</span>
+            <span className="text-sm md:text-base font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer py-1">Services</span>
           </Link>
           <Link href="/contact">
-            <span className="text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors cursor-pointer">Contact</span>
+            <span className="text-sm md:text-base font-medium text-muted-foreground hover:text-foreground transition-colors cursor-pointer py-1">Contact</span>
           </Link>
         </nav>
 
@@ -220,13 +220,6 @@ export function ResetPasswordPage() {
               </button>
             </Link>
           </div>
-
-          {/* Shield Badge */}
-          <div className="mt-7 pt-4 border-t border-border/40 flex items-center justify-center gap-2 text-[11px] text-muted-foreground/80 font-medium">
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-            <span>Protected by SPETRO Account Guard</span>
-          </div>
-
         </div>
       </main>
 

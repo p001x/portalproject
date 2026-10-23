@@ -115,8 +115,13 @@ export function AccessibilityPage() {
   };
 
   const getReq = () => {
+    // Enforce Rwanda study area for Accessibility
+    const validAoi = (aoi.type === "world" || (aoi.country && aoi.country.toLowerCase() !== "rwanda") || aoi.type === "custom")
+      ? { type: "rwanda" as const, country: "Rwanda", name: "Rwanda" }
+      : aoi;
+
     return {
-      aoi,
+      aoi: validAoi,
       amenities: selectedAmenities,
       dest_amenities: selectedDestAmenities,
       n_classes: nClasses,
@@ -202,7 +207,7 @@ export function AccessibilityPage() {
           Estimate travel time to selected amenities using simulated road networks and friction surfaces.
         </p>
 
-        <StudyAreaSelector value={aoi} onChange={setAoi} />
+        <StudyAreaSelector value={aoi} onChange={setAoi} restrictToRwanda />
 
         <div className="space-y-4">
           <div className="space-y-1.5 border-b pb-4">

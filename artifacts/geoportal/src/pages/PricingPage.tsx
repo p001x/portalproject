@@ -42,12 +42,12 @@ export function PricingPage() {
               ))}
             </ul>
             <div className="mt-auto pt-2 flex flex-col items-center">
-              <a href="https://cal.com/yang-peterson-bwrflu/consultation" target="_blank" rel="noreferrer" className="w-full">
-                <Button className="w-full rounded-xl bg-slate-800 py-6 text-base font-semibold text-white hover:bg-slate-700 transition-colors border border-slate-700">
-                  Book Now <ChevronRight className="ml-1 h-5 w-5" strokeWidth={2.5} />
+              <Link href="/contact" className="w-full">
+                <Button className="w-full rounded-xl bg-slate-800 py-6 text-base font-semibold text-white hover:bg-slate-700 transition-colors border border-slate-700 cursor-pointer">
+                  Request Consultation <ChevronRight className="ml-1 h-5 w-5" strokeWidth={2.5} />
                 </Button>
-              </a>
-              <span className="mt-3 text-xs text-slate-500 text-center leading-tight">Detailed explanation required to book.<br/>Minimum meeting cost: $10.</span>
+              </Link>
+              <span className="mt-3 text-xs text-slate-500 text-center leading-tight">Direct advisory session scheduled upon request.</span>
             </div>
           </div>
         </Card>
@@ -113,12 +113,12 @@ export function PricingPage() {
               ))}
             </ul>
             <div className="mt-auto pt-2 flex flex-col items-center">
-              <a href="mailto:hello@blacportal.com?subject=Enterprise Solutions Request" className="w-full">
+              <a href="mailto:pierrendorimana16@gmail.com?subject=Enterprise Solutions Inquiry" className="w-full">
                 <Button className="w-full rounded-xl bg-slate-800 py-6 text-base font-semibold text-white hover:bg-slate-700 transition-colors border border-slate-700">
                   Contact Sales <ChevronRight className="ml-1 h-5 w-5" strokeWidth={2.5} />
                 </Button>
               </a>
-              <span className="mt-3 text-xs text-slate-500">For projects starting at $5,000+</span>
+              <span className="mt-3 text-xs text-slate-500">Custom scopes and multi-year engagements.</span>
             </div>
           </div>
         </Card>

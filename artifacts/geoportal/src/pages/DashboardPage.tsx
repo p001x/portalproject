@@ -325,8 +325,8 @@ export function DashboardPage() {
             <div className="mx-auto w-12 h-12 bg-primary/10 text-primary rounded-full flex items-center justify-center mb-2">
               <Lock className="w-6 h-6" />
             </div>
-            <CardTitle className="text-xl">Admin Intelligence & Management</CardTitle>
-            <CardDescription>Enter admin credentials to unlock portal telemetry and user management</CardDescription>
+            <CardTitle className="text-xl">Administrative Access</CardTitle>
+            <CardDescription>Enter administrator credentials to access platform controls and metrics</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleLogin} className="space-y-4">
@@ -337,7 +337,7 @@ export function DashboardPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 autoFocus
               />
-              <Button type="submit" className="w-full font-medium">Unlock Command Center</Button>
+              <Button type="submit" className="w-full font-medium">Sign In to Admin Panel</Button>
             </form>
           </CardContent>
         </Card>
