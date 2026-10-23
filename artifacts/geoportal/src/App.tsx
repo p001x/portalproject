@@ -51,7 +51,6 @@ const UserManagementPage = lazy(() => import("@/pages/UserManagementPage").then(
 import { AccountBlockedDialog } from "@/components/AccountBlockedDialog";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { NotificationProvider, useNotifications } from "@/hooks/use-notifications";
-import { GEEAuthGate } from "@/components/GEEAuthGate";
 import { UserNav } from "@/components/UserNav";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -613,13 +612,11 @@ function Router() {
           <Route path="/rare-data" component={RareDataPage} />
           <Route path="/harvester" component={DataHarvesterPage} />
           <Route path="/samples">
-            <GEEAuthGate>
-              <div className="h-full flex flex-col">
-                <div className="flex-1 overflow-hidden">
-                  <SampleDigitizationPage />
-                </div>
+            <div className="h-full flex flex-col">
+              <div className="flex-1 overflow-hidden">
+                <SampleDigitizationPage />
               </div>
-            </GEEAuthGate>
+            </div>
           </Route>
           <Route path="/community" component={CommunityPage} />
           <Route path="/admin/users" component={UserManagementPage} />

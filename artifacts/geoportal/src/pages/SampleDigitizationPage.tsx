@@ -1556,8 +1556,8 @@ export function SampleDigitizationPage() {
     }
   };
 
-  const [targetGeeProjectId, setTargetGeeProjectId] = useState("ee-petersonyang87");
-  const [destinationAssetId, setDestinationAssetId] = useState("projects/ee-petersonyang87/assets/rwanda_training_samples");
+  const [targetGeeProjectId, setTargetGeeProjectId] = useState("");
+  const [destinationAssetId, setDestinationAssetId] = useState("");
 
   const geeMut = useMutation({
     mutationFn: () => {
