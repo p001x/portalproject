@@ -60,10 +60,10 @@ def check_symbol_ratio(text: str) -> bool:
     if not text:
         return False
     # Allow higher symbol density for technical content, coordinates, markdown, and code blocks
-    if "```" in text or "`" in text or "{" in text or "[" in text or "http" in text:
-        threshold = 0.75
+    if "```" in text or "`" in text or "{" in text or "[" in text or "http" in text or "#" in text or "*" in text or ">" in text:
+        threshold = 0.85
     else:
-        threshold = 0.60
+        threshold = 0.65
     symbols = sum(1 for c in text if not c.isalnum() and not c.isspace())
     if len(text) > 30 and (symbols / len(text)) > threshold:
         return True
@@ -104,9 +104,9 @@ def validate_and_sanitize_text(text: str) -> str:
         if re.search(pattern, text):
             raise ValueError("Comment flagged as spam.")
             
-    # Optional: ensure it has at least some normal readable letters
+    # Ensure it has at least some normal readable letters
     letters = sum(1 for c in text if c.isalpha())
-    if letters < 3:
+    if letters < 2:
         raise ValueError("Comment does not contain enough readable characters.")
         
     return text

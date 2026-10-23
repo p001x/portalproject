@@ -3720,13 +3720,19 @@ class ConnectionManager:
             self.active_connections.remove(websocket)
 
     async def broadcast(self, message: dict):
-        for connection in self.active_connections:
+        for connection in list(self.active_connections):
             try:
                 await connection.send_text(json.dumps(message))
             except Exception:
-                pass
+                self.disconnect(connection)
 
 manager = ConnectionManager()
+
+async def _safe_broadcast_message(msg: dict):
+    try:
+        await manager.broadcast(msg)
+    except Exception as exc:
+        logger.debug("Community live broadcast notice: %s", exc)
 
 class CommentCreateRequest(BaseModel):
     author: str = Field(..., min_length=2, max_length=50)
@@ -3745,12 +3751,13 @@ def api_get_comments(tag: Optional[str] = None, search: Optional[str] = None, li
     }
 
 import time
+import html
 from fastapi import Request
 
 _COMMUNITY_RATE_LIMITS = {}
 
 @app.post("/api/community/comments", tags=["community"])
-def api_post_comment(req: CommentCreateRequest, request: Request):
+async def api_post_comment(req: CommentCreateRequest, request: Request):
     if community_db.is_forum_frozen():
         raise HTTPException(403, "The community forum is currently frozen. No new comments can be posted.")
         
@@ -3760,18 +3767,20 @@ def api_post_comment(req: CommentCreateRequest, request: Request):
     client_ip = request.client.host if request.client else "unknown_ip"
     current_time = time.time()
     
-    # Check rate limit (2 minutes = 120 seconds)
-    author_key = f"author_{req.author.lower()}"
+    clean_author_raw = (req.author or "Analyst").strip()
+    author_key = f"author_{clean_author_raw.lower()}"
     ip_key = f"ip_{client_ip}"
     
     for key in [author_key, ip_key]:
         last_time = _COMMUNITY_RATE_LIMITS.get(key, 0)
-        if current_time - last_time < 10:
-            raise HTTPException(status_code=429, detail="Rate limit exceeded. You can only send 1 message every 10 seconds.")
+        if current_time - last_time < 3:
+            raise HTTPException(status_code=429, detail="Rate limit exceeded. Please wait a few seconds before posting again.")
             
     try:
         safe_content = security_middleware.validate_and_sanitize_text(req.content)
-        safe_author = security_middleware.validate_and_sanitize_text(req.author)
+        # Dedicated author name sanitization
+        raw_author = re.sub(r'[^\w\s\.\-@]', '', clean_author_raw)
+        safe_author = html.escape(raw_author)[:50].strip() or "Analyst"
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
         
@@ -3779,18 +3788,24 @@ def api_post_comment(req: CommentCreateRequest, request: Request):
     _COMMUNITY_RATE_LIMITS[author_key] = current_time
     _COMMUNITY_RATE_LIMITS[ip_key] = current_time
         
-    comment_id = community_db.add_comment(
-        author=safe_author,
-        content=safe_content,
-        tag=req.tag,
-        image_url=req.image_url,
-        parent_id=req.parent_id,
-        category=req.category
-    )
+    try:
+        comment_id = community_db.add_comment(
+            author=safe_author,
+            content=safe_content,
+            tag=req.tag,
+            image_url=req.image_url,
+            parent_id=req.parent_id,
+            category=req.category or "General"
+        )
+    except Exception as e:
+        logger.error(f"Error adding comment to DB: {e}")
+        raise HTTPException(status_code=500, detail="Database error while saving discussion.")
     
-    # Fire and forget async broadcast (we can just run it using asyncio or BackgroundTasks)
-    import asyncio
-    asyncio.create_task(manager.broadcast({"type": "new_comment", "id": comment_id, "category": req.category}))
+    # Safe broadcast in running event loop
+    try:
+        asyncio.create_task(_safe_broadcast_message({"type": "new_comment", "id": comment_id, "category": req.category or "General"}))
+    except Exception as e:
+        logger.debug("Broadcast notification skipped: %s", e)
     
     return {"status": "success", "id": comment_id}
 
@@ -3798,7 +3813,7 @@ class ToggleUpvoteRequest(BaseModel):
     author: str
 
 @app.post("/api/community/comments/{comment_id}/toggle-upvote", tags=["community"])
-def api_toggle_upvote(comment_id: int, req: ToggleUpvoteRequest):
+async def api_toggle_upvote(comment_id: int, req: ToggleUpvoteRequest):
     if community_db.is_forum_frozen():
         raise HTTPException(403, "The community forum is currently frozen.")
     if community_db.is_user_blocked(req.author):
@@ -3806,8 +3821,10 @@ def api_toggle_upvote(comment_id: int, req: ToggleUpvoteRequest):
         
     is_upvoted = community_db.toggle_upvote(comment_id, req.author)
     
-    import asyncio
-    asyncio.create_task(manager.broadcast({"type": "upvote", "id": comment_id}))
+    try:
+        asyncio.create_task(_safe_broadcast_message({"type": "upvote", "id": comment_id}))
+    except Exception as e:
+        logger.debug("Upvote broadcast notice: %s", e)
     
     return {"status": "success", "is_upvoted": is_upvoted}
 

@@ -130,7 +130,7 @@ const CATEGORIES = [
 
 export function CommunityPage() {
   const { user } = useAuth();
-  const author = user?.name || "Analyst";
+  const author = user?.name?.trim() || user?.email?.split('@')[0] || "Analyst";
 
   // Navigation & View States
   const [selectedThreadId, setSelectedThreadId] = useState<number | null>(null);
@@ -268,7 +268,7 @@ export function CommunityPage() {
         tag: vars.tag,
         image_url: vars.imgUrl,
         parent_id: vars.parent_id,
-        category: vars.category || activeCategory === "All" ? "General" : activeCategory,
+        category: vars.category || (activeCategory === "All" ? "General" : activeCategory),
       });
     },
     onSuccess: (res: any, vars) => {
