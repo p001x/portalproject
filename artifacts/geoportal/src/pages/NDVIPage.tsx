@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { usePersistedAnalysis } from "@/hooks/use-persisted-analysis";
 import { api } from "@/lib/api";
 import type { NDVIResult, AOIConfig } from "@/lib/api";
 import { DistrictMap } from "@/components/DistrictMap";
@@ -118,7 +119,9 @@ export function NDVIPage() {
     });
   }, [nClasses]);
 
-  const { mutate, data, isPending, error } = useMutation<NDVIResult, Error>({
+  const [persistedData, setPersistedData] = usePersistedAnalysis<NDVIResult>("ndvi");
+
+  const { mutate, data: mutationData, isPending, error } = useMutation<NDVIResult, Error>({
     mutationFn: () =>
       api.ndvi({ 
         aoi,
@@ -129,6 +132,7 @@ export function NDVIPage() {
         custom_labels: customClassNames,
       }),
     onSuccess: (res) => {
+      setPersistedData(res);
       if (method === "continuous") {
         setLayerMode("continuous");
       } else {
@@ -143,6 +147,8 @@ export function NDVIPage() {
       });
     }
   });
+
+  const data = mutationData || persistedData;
 
   const palette = (n: number) => {
     const stops = [

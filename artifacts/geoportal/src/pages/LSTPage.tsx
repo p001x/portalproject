@@ -21,6 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { usePersistedAnalysis } from "@/hooks/use-persisted-analysis";
 import { api } from "@/lib/api";
 import type { LSTResult, AOIConfig } from "@/lib/api";
 import { DistrictMap } from "@/components/DistrictMap";
@@ -114,7 +115,9 @@ export function LSTPage() {
     });
   }, [nClasses]);
 
-  const { mutate, data, isPending, error } = useMutation<LSTResult, Error>({
+  const [persistedData, setPersistedData] = usePersistedAnalysis<LSTResult>("lst");
+
+  const { mutate, data: mutationData, isPending, error } = useMutation<LSTResult, Error>({
     mutationFn: () =>
       api.lst.analyze({ 
         aoi,
@@ -125,6 +128,7 @@ export function LSTPage() {
         custom_labels: customClassNames,
       }),
     onSuccess: (res) => {
+      setPersistedData(res);
       if (method === "continuous") {
         setLayerMode("continuous");
       } else {
@@ -132,6 +136,8 @@ export function LSTPage() {
       }
     }
   });
+
+  const data = mutationData || persistedData;
 
   const palette = (n: number) => {
     const full = ["#313695","#4575b4","#74add1","#abd9e9","#e0f3f8",

@@ -38,8 +38,7 @@ def compute_ndvi(
     (district, start_date, end_date, n_classes, method, custom_labels) combination.
     """
     labels_tuple = tuple(custom_labels) if custom_labels else None
-    # BUST CACHE TEMPORARILY
-    cache_key = (json.dumps(aoi_config, sort_keys=True), start_date, end_date, n_classes, method, labels_tuple, "bust_cache_6")
+    cache_key = (json.dumps(aoi_config, sort_keys=True), start_date, end_date, n_classes, method, labels_tuple)
 
     with _lock:
         if cache_key in _cache:

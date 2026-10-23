@@ -30,6 +30,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { usePersistedAnalysis } from "@/hooks/use-persisted-analysis";
 import { api } from "@/lib/api";
 import type { RUSLEMapResult, RUSLEStatsResult, RUSLEClassifyResult, RUSLEExportResult, AOIConfig } from "@/lib/api";
 import { DistrictMap } from "@/components/DistrictMap";
@@ -111,10 +112,29 @@ export function RUSLEPage() {
     reverse_p: reverseP,
   });
 
-  const mapMutation = useMutation({ mutationFn: () => api.rusle.map(getReq()) });
-  const statsMutation = useMutation({ mutationFn: () => api.rusle.stats(getReq()) });
-  const classifyMutation = useMutation({ mutationFn: () => api.rusle.classify(getReq()) });
-  const exportMutation = useMutation({ mutationFn: () => api.rusle.export(getReq()) });
+  const [persistedResults, setPersistedResults] = usePersistedAnalysis<{
+    map?: any;
+    stats?: any;
+    classify?: any;
+    export?: any;
+  }>("rusle");
+
+  const mapMutation = useMutation({ 
+    mutationFn: () => api.rusle.map(getReq()),
+    onSuccess: (res) => setPersistedResults({ ...(persistedResults || {}), map: res })
+  });
+  const statsMutation = useMutation({ 
+    mutationFn: () => api.rusle.stats(getReq()),
+    onSuccess: (res) => setPersistedResults({ ...(persistedResults || {}), stats: res })
+  });
+  const classifyMutation = useMutation({ 
+    mutationFn: () => api.rusle.classify(getReq()),
+    onSuccess: (res) => setPersistedResults({ ...(persistedResults || {}), classify: res })
+  });
+  const exportMutation = useMutation({ 
+    mutationFn: () => api.rusle.export(getReq()),
+    onSuccess: (res) => setPersistedResults({ ...(persistedResults || {}), export: res })
+  });
 
   const handleAnalyze = () => {
     mapMutation.mutate();
@@ -126,10 +146,10 @@ export function RUSLEPage() {
   const isPending = mapMutation.isPending || statsMutation.isPending || classifyMutation.isPending || exportMutation.isPending;
   const error = mapMutation.error || statsMutation.error || classifyMutation.error || exportMutation.error;
   
-  const mapData = mapMutation.data as any;
-  const statsData = statsMutation.data as any;
-  const classifyData = classifyMutation.data as any;
-  const exportData = exportMutation.data as any;
+  const mapData = (mapMutation.data as any) || persistedResults?.map;
+  const statsData = (statsMutation.data as any) || persistedResults?.stats;
+  const classifyData = (classifyMutation.data as any) || persistedResults?.classify;
+  const exportData = (exportMutation.data as any) || persistedResults?.export;
   const data = mapData || statsData || classifyData || exportData;
 
   const getActiveTileUrl = () => {
