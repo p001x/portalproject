@@ -112,7 +112,15 @@ export function AuthPage() {
           setError("Passwords do not match.");
           return;
         }
-        await register(name, email, password);
+        const otpRes = await requestOtp(email);
+        if (otpRes?.code) {
+          setCode(otpRes.code);
+          setSuccess(`Verification code: ${otpRes.code} (auto-filled for instant access). You can also check your email.`);
+        } else {
+          setSuccess(`A 6-digit verification code has been sent to ${email}. Check your inbox or spam folder.`);
+        }
+        setResendCooldown(30);
+        setStep("otp");
       } else if (mode === "forgot") {
         const forgotRes = await forgotPassword(email);
         setSuccess(forgotRes?.message || "Password reset instructions have been sent to your email. Check your inbox or spam folder.");

@@ -335,11 +335,13 @@ class ChangePasswordRequest(BaseModel):
 def register(req: RegisterRequest):
     email = req.email.strip().lower()
     name = req.name.strip()
+    code = (req.code or "").strip()
     
-    if req.code and req.code.strip():
-        from auth_db import verify_otp
-        if not verify_otp(email, req.code.strip()):
-            raise HTTPException(400, "Invalid or expired verification code.")
+    if not code:
+        raise HTTPException(400, "Please enter the 6-digit verification code.")
+    from auth_db import verify_otp
+    if not verify_otp(email, code):
+        raise HTTPException(400, "Invalid or expired verification code.")
 
     try:
         user = create_new_user(name, email, req.password)
