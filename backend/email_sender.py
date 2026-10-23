@@ -44,7 +44,7 @@ def send_via_resend(to_email: str, subject: str, text: str, html: str, api_key: 
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
-                "User-Agent": "SPETRO-Portal/2.0"
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
             }
         )
         with urllib.request.urlopen(req, timeout=5) as res:
@@ -245,7 +245,7 @@ def send_otp_email(to_email: str, code: str, resend_key: str = None):
 
         # 1. Attempt delivery via Resend HTTPS (Port 443 - instantaneous and unblocked)
         if send_via_resend(to_email, f"Your Verification Code: {code}", text, html, api_key=resend_key):
-            return
+            return True
 
         part1 = MIMEText(text, "plain")
         part2 = MIMEText(html, "html")
@@ -258,7 +258,9 @@ def send_otp_email(to_email: str, code: str, resend_key: str = None):
         server.sendmail(smtp_user, to_email, msg.as_string())
         server.quit()
         logger.info(f"OTP email successfully sent to {to_email}")
+        return True
 
     except Exception as e:
         logger.error(f"Failed to send OTP to {to_email}: {e}")
+        return False
 

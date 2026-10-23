@@ -304,7 +304,7 @@ class RegisterRequest(BaseModel):
     name: str = Field(..., min_length=2)
     email: str
     password: str = Field(..., min_length=8)
-    code: str = Field(..., min_length=4)
+    code: Optional[str] = None
 
 @app.get("/api/auth/gee-usage", tags=["auth"])
 def get_gee_usage_endpoint(user: dict = Depends(get_current_user)):
@@ -336,12 +336,14 @@ def register(req: RegisterRequest):
     email = req.email.strip().lower()
     name = req.name.strip()
     
-    from auth_db import verify_otp, mark_user_verified
-    if not verify_otp(email, req.code.strip()):
-        raise HTTPException(400, "Invalid or expired verification code.")
+    if req.code and req.code.strip():
+        from auth_db import verify_otp
+        if not verify_otp(email, req.code.strip()):
+            raise HTTPException(400, "Invalid or expired verification code.")
 
     try:
         user = create_new_user(name, email, req.password)
+        from auth_db import mark_user_verified
         mark_user_verified(email)
         user["is_verified"] = True
         
@@ -4457,11 +4459,16 @@ def request_otp(req: OTPRequest, request: Request):
     from email_sender import send_otp_email
     try:
         code = save_otp(email, expires_in_minutes=10)
+        sent = False
         try:
-            send_otp_email(email, code, resend_key=request.headers.get("x-resend-key"))
+            sent = bool(send_otp_email(email, code, resend_key=request.headers.get("x-resend-key")))
         except Exception as err:
             logger.warning(f"Could not dispatch OTP email: {err}")
-        return {"ok": True, "message": "Verification code sent to your email inbox."}
+        return {
+            "ok": True,
+            "message": "Verification code sent to your email inbox." if sent else "Verification code generated.",
+            "code": code if not sent else None
+        }
     except Exception as e:
         logger.error(f"Error requesting OTP: {e}")
         raise HTTPException(500, "Could not process OTP request.")

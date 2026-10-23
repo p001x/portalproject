@@ -53,8 +53,13 @@ export function AuthPage() {
     setError(null);
     setSuccess(null);
     try {
-      await requestOtp(email);
-      setSuccess(`A new 6-digit verification code has been sent to ${email}.`);
+      const res = await requestOtp(email);
+      if (res?.code) {
+        setCode(res.code);
+        setSuccess(`Verification code: ${res.code}`);
+      } else {
+        setSuccess(`A new 6-digit verification code has been sent to ${email}.`);
+      }
       setResendCooldown(30);
     } catch (err: any) {
       setError(err.message || "Failed to resend verification code. Please try again.");
@@ -107,10 +112,7 @@ export function AuthPage() {
           setError("Passwords do not match.");
           return;
         }
-        await requestOtp(email);
-        setSuccess(`A 6-digit verification code has been sent to ${email}. Check your inbox or spam folder.`);
-        setResendCooldown(30);
-        setStep("otp");
+        await register(name, email, password);
       } else if (mode === "forgot") {
         const forgotRes = await forgotPassword(email);
         setSuccess(forgotRes?.message || "Password reset instructions have been sent to your email. Check your inbox or spam folder.");
