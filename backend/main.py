@@ -4465,11 +4465,14 @@ def request_otp(req: OTPRequest, request: Request):
         try:
             sent = bool(send_otp_email(email, code, resend_key=request.headers.get("x-resend-key")))
         except Exception as err:
-            logger.warning(f"Could not dispatch OTP email: {err}")
+            logger.error(f"Could not dispatch OTP email: {err}")
+
+        if not sent:
+            raise HTTPException(500, f"Could not deliver verification email to {email}. Please verify your email address.")
+
         return {
             "ok": True,
-            "message": "Verification code sent to your email inbox." if sent else "Verification code generated.",
-            "code": code if not sent else None
+            "message": f"A 6-digit verification code has been sent to {email}. Please check your email inbox."
         }
     except Exception as e:
         logger.error(f"Error requesting OTP: {e}")

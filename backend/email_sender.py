@@ -67,7 +67,7 @@ def send_reset_email(to_email: str, reset_link: str, user_name: str = "Valued Us
         pass
 
     smtp_server = os.environ.get("SMTP_SERVER") or "smtp.gmail.com"
-    smtp_port = os.environ.get("SMTP_PORT") or "587"
+    smtp_port = os.environ.get("SMTP_PORT") or "465"
     smtp_user = os.environ.get("SMTP_USER") or "petersonyang8@gmail.com"
     smtp_password = os.environ.get("SMTP_PASSWORD") or "ghhkuzsdcfbbgoab"
 
@@ -145,8 +145,12 @@ def send_reset_email(to_email: str, reset_link: str, user_name: str = "Valued Us
         msg.attach(part1)
         msg.attach(part2)
 
-        server = smtplib.SMTP(smtp_server, int(smtp_port), timeout=4)
-        server.starttls()
+        port = int(smtp_port)
+        if port == 465:
+            server = smtplib.SMTP_SSL(smtp_server, port, timeout=10)
+        else:
+            server = smtplib.SMTP(smtp_server, port, timeout=10)
+            server.starttls()
         server.login(smtp_user, smtp_password)
         server.sendmail(smtp_user, to_email, msg.as_string())
         server.quit()
@@ -171,7 +175,7 @@ def send_otp_email(to_email: str, code: str, resend_key: str = None):
         pass
 
     smtp_server = os.environ.get("SMTP_SERVER") or "smtp.gmail.com"
-    smtp_port = os.environ.get("SMTP_PORT") or "587"
+    smtp_port = os.environ.get("SMTP_PORT") or "465"
     smtp_user = os.environ.get("SMTP_USER") or "petersonyang8@gmail.com"
     smtp_password = os.environ.get("SMTP_PASSWORD") or "ghhkuzsdcfbbgoab"
 
@@ -252,8 +256,12 @@ def send_otp_email(to_email: str, code: str, resend_key: str = None):
         msg.attach(part1)
         msg.attach(part2)
 
-        server = smtplib.SMTP(smtp_server, int(smtp_port), timeout=4)
-        server.starttls()
+        port = int(smtp_port)
+        if port == 465:
+            server = smtplib.SMTP_SSL(smtp_server, port, timeout=10)
+        else:
+            server = smtplib.SMTP(smtp_server, port, timeout=10)
+            server.starttls()
         server.login(smtp_user, smtp_password)
         server.sendmail(smtp_user, to_email, msg.as_string())
         server.quit()

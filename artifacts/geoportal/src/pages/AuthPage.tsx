@@ -53,13 +53,8 @@ export function AuthPage() {
     setError(null);
     setSuccess(null);
     try {
-      const res = await requestOtp(email);
-      if (res?.code) {
-        setCode(res.code);
-        setSuccess(`Verification code: ${res.code}`);
-      } else {
-        setSuccess(`A new 6-digit verification code has been sent to ${email}.`);
-      }
+      await requestOtp(email);
+      setSuccess(`A new 6-digit verification code has been sent to ${email}. Check your email inbox or spam folder.`);
       setResendCooldown(30);
     } catch (err: any) {
       setError(err.message || "Failed to resend verification code. Please try again.");
@@ -77,13 +72,13 @@ export function AuthPage() {
     
     if (step === "otp") {
       if (code.length < 6) {
-        setError("Please enter the 6-digit verification code.");
+        setError("Please enter the 6-digit verification code from your email.");
         return;
       }
       try {
         await register(name, email, password, code);
       } catch (err: any) {
-        setError(err.message || "Invalid or expired verification code.");
+        setError(err.message || "Invalid or expired verification code. Please check your email.");
       }
       return;
     }
@@ -112,13 +107,9 @@ export function AuthPage() {
           setError("Passwords do not match.");
           return;
         }
-        const otpRes = await requestOtp(email);
-        if (otpRes?.code) {
-          setCode(otpRes.code);
-          setSuccess(`Verification code: ${otpRes.code} (auto-filled for instant access). You can also check your email.`);
-        } else {
-          setSuccess(`A 6-digit verification code has been sent to ${email}. Check your inbox or spam folder.`);
-        }
+        await requestOtp(email);
+        setCode("");
+        setSuccess(`A 6-digit verification code has been sent to ${email}. Please check your email inbox.`);
         setResendCooldown(30);
         setStep("otp");
       } else if (mode === "forgot") {
