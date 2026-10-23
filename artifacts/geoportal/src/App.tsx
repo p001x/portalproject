@@ -53,7 +53,6 @@ import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { NotificationProvider, useNotifications } from "@/hooks/use-notifications";
 import { GEEAuthGate } from "@/components/GEEAuthGate";
 import { UserNav } from "@/components/UserNav";
-import { GEEProjectConfig } from "@/components/GEEProjectConfig";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { GeeUsageIndicator } from "@/components/GeeUsageIndicator";
@@ -422,10 +421,9 @@ function Sidebar({ loc, className = "" }: { loc: string; className?: string }) {
         </Accordion>
       </div>
 
-      <div className="p-3 border-t space-y-2">
-        {isUserAdmin && <GEEProjectConfig />}
+      <div className="p-3 border-t">
         <p className="text-[10px] text-muted-foreground text-center">
-          Powered by Google Earth Engine
+          Earth Observation Analytics
         </p>
       </div>
       

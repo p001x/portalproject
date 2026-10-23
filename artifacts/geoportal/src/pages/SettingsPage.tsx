@@ -7,7 +7,6 @@ import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { User, Lock, Loader2, CheckCircle2, AlertCircle, Sparkles, Palette, Monitor, Moon, Sun, Shield, KeyRound, Cloud, Activity, UploadCloud, Bell } from "lucide-react";
 import { useTheme } from "next-themes";
-import { GEEProjectConfig } from "@/components/GEEProjectConfig";
 import { useEffect } from "react";
 import { Progress } from "@/components/ui/progress";
 import { BlogManager } from "@/components/BlogManager";
@@ -134,12 +133,11 @@ export function SettingsPage() {
         </div>
 
         <Tabs defaultValue="account" className="w-full">
-          <TabsList className={`grid w-full grid-cols-3 ${user?.role === 'admin' ? 'md:grid-cols-6' : 'md:grid-cols-5'} mb-8 bg-muted/60 p-1.5 rounded-2xl border border-border/60 h-auto`}>
+          <TabsList className={`grid w-full grid-cols-2 ${user?.role === 'admin' ? 'md:grid-cols-5' : 'md:grid-cols-4'} mb-8 bg-muted/60 p-1.5 rounded-2xl border border-border/60 h-auto`}>
             <TabsTrigger value="account" className="py-2.5 rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-sm data-[state=active]:text-primary transition-all font-semibold text-muted-foreground">Account</TabsTrigger>
             <TabsTrigger value="security" className="py-2.5 rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-sm data-[state=active]:text-primary transition-all font-semibold text-muted-foreground">Security</TabsTrigger>
             <TabsTrigger value="notifications" className="py-2.5 rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-sm data-[state=active]:text-primary transition-all font-semibold text-muted-foreground">Alerts</TabsTrigger>
             <TabsTrigger value="appearance" className="py-2.5 rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-sm data-[state=active]:text-primary transition-all font-semibold text-muted-foreground">Appearance</TabsTrigger>
-            <TabsTrigger value="integrations" className="py-2.5 rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-sm data-[state=active]:text-primary transition-all font-semibold text-muted-foreground">Cloud</TabsTrigger>
             {user?.role === 'admin' && (
               <TabsTrigger value="branding" className="py-2.5 rounded-xl data-[state=active]:bg-background data-[state=active]:shadow-sm data-[state=active]:text-primary transition-all font-semibold text-muted-foreground">Admin</TabsTrigger>
             )}
@@ -566,26 +564,7 @@ export function SettingsPage() {
             </TabsContent>
           )}
 
-          <TabsContent value="integrations" className="space-y-6 animate-in fade-in-50 slide-in-from-bottom-4 duration-500">
-            <div className="bg-card border border-border rounded-2xl shadow-sm overflow-hidden">
-              <div className="border-b border-border px-8 py-5 bg-muted/20">
-                <h2 className="text-xl font-bold flex items-center gap-3 text-foreground">
-                  <div className="p-2.5 bg-emerald-500/10 rounded-xl text-emerald-600 dark:text-emerald-400">
-                    <Cloud className="w-5 h-5" />
-                  </div>
-                  Cloud Integrations
-                </h2>
-              </div>
-              <div className="p-8">
-                <p className="text-muted-foreground mb-8 text-base font-medium">Manage your active Google Earth Engine configuration. This allows you to process remote sensing data using your own Google Cloud resources directly from the portal.</p>
-                <div className="w-full max-w-sm">
-                  <div className="p-1 rounded-xl bg-muted/40 border border-border">
-                    <GEEProjectConfig />
-                  </div>
-                </div>
-              </div>
-            </div>
-          </TabsContent>
+
 
           {user?.role === 'admin' && (
             <TabsContent value="content" className="space-y-6 animate-in fade-in-50 slide-in-from-bottom-4 duration-500">
