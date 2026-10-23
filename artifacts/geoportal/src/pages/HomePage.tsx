@@ -92,42 +92,9 @@ export function HomePage() {
       {/* Main Content */}
       <main className="relative z-10 flex-1 max-w-7xl w-full mx-auto px-6 flex flex-col items-center justify-center text-center">
 
-        <h2 className="text-5xl md:text-7xl font-black text-foreground mb-6 tracking-tight leading-tight max-w-4xl">
+        <h2 className="text-5xl md:text-7xl font-black text-foreground tracking-tight leading-tight max-w-4xl">
           Welcome to the <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-500 to-teal-400">SPETRO</span> Geoportal
         </h2>
-        
-        <p className="text-muted-foreground text-lg md:text-xl max-w-2xl mb-8 leading-relaxed">
-          Comprehensive satellite Earth observation, digital sample archiving, and environmental spatial analytics.
-        </p>
-
-        {user ? (
-          <div className="flex flex-wrap items-center justify-center gap-4">
-            <Link href="/platform">
-              <Button size="lg" className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-6 py-5 rounded-xl shadow-sm cursor-pointer">
-                Launch Platform Modules <ArrowRight className="w-4 h-4" />
-              </Button>
-            </Link>
-            <Link href="/analysis-hub">
-              <Button variant="outline" size="lg" className="px-6 py-5 rounded-xl font-medium cursor-pointer">
-                Earth Analytics Hub
-              </Button>
-            </Link>
-          </div>
-        ) : (
-          <div className="flex flex-wrap items-center justify-center gap-4">
-            <Link href="/auth">
-              <Button size="lg" className="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-7 py-5 rounded-xl shadow-sm cursor-pointer">
-                Get Started <ArrowRight className="w-4 h-4" />
-              </Button>
-            </Link>
-            <Link href="/platform">
-              <Button variant="outline" size="lg" className="px-6 py-5 rounded-xl font-medium cursor-pointer">
-                Explore Modules
-              </Button>
-            </Link>
-          </div>
-        )}
-
 
       </main>
 
