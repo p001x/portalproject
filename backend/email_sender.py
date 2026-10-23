@@ -247,26 +247,32 @@ def send_otp_email(to_email: str, code: str, resend_key: str = None):
         </html>
         """
 
-        # 1. Attempt delivery via Resend HTTPS (Port 443 - instantaneous and unblocked)
+        # 1. Attempt delivery via official Gmail SMTP_SSL on Port 465 (Trusted by Google, zero bounce)
+        try:
+            part1 = MIMEText(text, "plain")
+            part2 = MIMEText(html, "html")
+            msg.attach(part1)
+            msg.attach(part2)
+
+            port = int(smtp_port)
+            if port == 465:
+                server = smtplib.SMTP_SSL(smtp_server, port, timeout=10)
+            else:
+                server = smtplib.SMTP(smtp_server, port, timeout=10)
+                server.starttls()
+            server.login(smtp_user, smtp_password)
+            server.sendmail(smtp_user, to_email, msg.as_string())
+            server.quit()
+            logger.info(f"OTP email successfully sent via Gmail SMTP_SSL to {to_email}")
+            return True
+        except Exception as smtp_err:
+            logger.warning(f"Gmail SMTP_SSL delivery failed, attempting Resend fallback: {smtp_err}")
+
+        # 2. Fallback to Resend HTTPS
         if send_via_resend(to_email, f"Your Verification Code: {code}", text, html, api_key=resend_key):
             return True
 
-        part1 = MIMEText(text, "plain")
-        part2 = MIMEText(html, "html")
-        msg.attach(part1)
-        msg.attach(part2)
-
-        port = int(smtp_port)
-        if port == 465:
-            server = smtplib.SMTP_SSL(smtp_server, port, timeout=10)
-        else:
-            server = smtplib.SMTP(smtp_server, port, timeout=10)
-            server.starttls()
-        server.login(smtp_user, smtp_password)
-        server.sendmail(smtp_user, to_email, msg.as_string())
-        server.quit()
-        logger.info(f"OTP email successfully sent to {to_email}")
-        return True
+        return False
 
     except Exception as e:
         logger.error(f"Failed to send OTP to {to_email}: {e}")
