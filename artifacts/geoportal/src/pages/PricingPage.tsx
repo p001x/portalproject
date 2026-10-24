@@ -1,9 +1,54 @@
-import { Briefcase, CheckCircle2, ChevronRight, GraduationCap, Map } from 'lucide-react';
+import { useState } from 'react';
+import { useMutation } from '@tanstack/react-query';
+import { api } from '@/lib/api';
+import { Briefcase, CheckCircle2, ChevronRight, GraduationCap, Map, MessageSquare } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { useToast } from '@/hooks/use-toast';
 import { Link } from 'wouter';
 
 export function PricingPage() {
+  const { toast } = useToast();
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [selectedService, setSelectedService] = useState("");
+  const [message, setMessage] = useState("");
+  const [submitted, setSubmitted] = useState(false);
+
+  const requestMutation = useMutation({
+    mutationFn: () => api.services.requestService({
+      service_type: selectedService,
+      message: message
+    }),
+    onSuccess: () => {
+      setSubmitted(true);
+      toast({
+        title: "Request Sent!",
+        description: "We have received your booking request and will be in touch shortly.",
+      });
+      setTimeout(() => {
+        setIsDialogOpen(false);
+        setSubmitted(false);
+        setMessage("");
+      }, 3000);
+    },
+    onError: (err: any) => {
+      toast({
+        variant: "destructive",
+        title: "Submission Failed",
+        description: err.message || "Something went wrong. Please try again.",
+      });
+    }
+  });
+
+  const handleBookClick = (serviceType: string) => {
+    setSelectedService(serviceType);
+    setIsDialogOpen(true);
+    setSubmitted(false);
+    setMessage("");
+  };
+
   return (
     <div className="h-full w-full overflow-y-auto bg-[#080d14] py-20 px-4 sm:px-6 lg:px-8">
       {/* Page Header */}
@@ -42,11 +87,12 @@ export function PricingPage() {
               ))}
             </ul>
             <div className="mt-auto pt-2 flex flex-col items-center">
-              <Link href="/contact" className="w-full">
-                <Button className="w-full rounded-xl bg-slate-800 py-6 text-base font-semibold text-white hover:bg-slate-700 transition-colors border border-slate-700 cursor-pointer">
-                  Request Consultation <ChevronRight className="ml-1 h-5 w-5" strokeWidth={2.5} />
-                </Button>
-              </Link>
+              <Button
+                onClick={() => handleBookClick("1-on-1 Consultation")}
+                className="w-full rounded-xl bg-slate-800 py-6 text-base font-semibold text-white hover:bg-slate-700 transition-colors border border-slate-700 cursor-pointer"
+              >
+                Request Consultation <ChevronRight className="ml-1 h-5 w-5" strokeWidth={2.5} />
+              </Button>
               <span className="mt-3 text-xs text-slate-500 text-center leading-tight">Direct advisory session scheduled upon request.</span>
             </div>
           </div>
@@ -113,17 +159,62 @@ export function PricingPage() {
               ))}
             </ul>
             <div className="mt-auto pt-2 flex flex-col items-center">
-              <a href="mailto:pierrendorimana16@gmail.com?subject=Enterprise Solutions Inquiry" className="w-full">
-                <Button className="w-full rounded-xl bg-slate-800 py-6 text-base font-semibold text-white hover:bg-slate-700 transition-colors border border-slate-700">
-                  Contact Sales <ChevronRight className="ml-1 h-5 w-5" strokeWidth={2.5} />
-                </Button>
-              </a>
+              <Button
+                onClick={() => handleBookClick("Enterprise Solutions")}
+                className="w-full rounded-xl bg-slate-800 py-6 text-base font-semibold text-white hover:bg-slate-700 transition-colors border border-slate-700 cursor-pointer"
+              >
+                Contact Sales <ChevronRight className="ml-1 h-5 w-5" strokeWidth={2.5} />
+              </Button>
               <span className="mt-3 text-xs text-slate-500">Custom scopes and multi-year engagements.</span>
             </div>
           </div>
         </Card>
 
       </div>
+
+      {/* Booking Dialog */}
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent className="sm:max-w-[500px] bg-[#141d2b] border-[#1c293e] text-white">
+          <DialogHeader>
+            <DialogTitle className="text-2xl flex items-center gap-2 text-white">
+              <MessageSquare className="w-6 h-6 text-[#0cf6bd]" />
+              Book {selectedService}
+            </DialogTitle>
+            <DialogDescription className="text-base pt-2 text-slate-400">
+              Tell us a bit about your project or learning goals. We will follow up via email to schedule your session and discuss pricing.
+            </DialogDescription>
+          </DialogHeader>
+          
+          {!submitted ? (
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-300">Your Message / Requirements</label>
+                <Textarea 
+                  placeholder="e.g. I need help migrating my QGIS workflow to a scalable Google Earth Engine script..."
+                  className="min-h-[150px] resize-none bg-[#0d131f] border-[#1c293e] text-white placeholder:text-slate-500 focus:border-[#0cf6bd] focus:ring-[#0cf6bd]/20"
+                  value={message}
+                  onChange={(e) => setMessage(e.target.value)}
+                />
+              </div>
+              <Button 
+                className="w-full bg-[#0cf6bd] text-teal-950 font-semibold hover:bg-[#0ae3ad] transition-colors py-5" 
+                onClick={() => requestMutation.mutate()}
+                disabled={requestMutation.isPending || !message.trim()}
+              >
+                {requestMutation.isPending ? "Sending..." : "Submit Request"}
+              </Button>
+            </div>
+          ) : (
+            <div className="py-12 flex flex-col items-center justify-center text-center space-y-4">
+              <div className="w-16 h-16 bg-[#0cf6bd]/10 rounded-full flex items-center justify-center">
+                <CheckCircle2 className="w-8 h-8 text-[#0cf6bd]" />
+              </div>
+              <h3 className="text-xl font-bold text-white">Request Received!</h3>
+              <p className="text-slate-400 text-sm">We'll be in touch with you shortly.</p>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -1649,7 +1649,9 @@ export function SampleDigitizationPage() {
   };
 
   const downloadShapefile = () => {
-    window.open(`${BASE}/samples/export/shapefile`, "_blank");
+    const geeToken = getGeeToken();
+    const tokenParam = geeToken ? `?gee_token=${encodeURIComponent(geeToken)}` : "";
+    window.open(`${BASE}/samples/export/shapefile${tokenParam}`, "_blank");
     toast({
       title: "Shapefile Download Started 📦",
       description: "Exporting training samples as ESRI Shapefile ZIP archive (.shp, .shx, .dbf, .prj).",

@@ -49,6 +49,7 @@ const BlogPage = lazy(() => import("@/pages/BlogPage").then(m => ({ default: m.B
 const CanvaStandalonePage = lazy(() => import("@/pages/CanvaStandalonePage").then(m => ({ default: m.CanvaStandalonePage })));
 const UserManagementPage = lazy(() => import("@/pages/UserManagementPage").then(m => ({ default: m.UserManagementPage })));
 import { AccountBlockedDialog } from "@/components/AccountBlockedDialog";
+import { GEEAuthGate } from "@/components/GEEAuthGate";
 import { AuthProvider, useAuth } from "@/hooks/use-auth";
 import { NotificationProvider, useNotifications } from "@/hooks/use-notifications";
 import { UserNav } from "@/components/UserNav";
@@ -614,7 +615,9 @@ function Router() {
           <Route path="/samples">
             <div className="h-full flex flex-col">
               <div className="flex-1 overflow-hidden">
-                <SampleDigitizationPage />
+                <GEEAuthGate>
+                  <SampleDigitizationPage />
+                </GEEAuthGate>
               </div>
             </div>
           </Route>
