@@ -850,21 +850,21 @@ class IndividualAuthRequest(BaseModel):
 
 
 def _require_individual_gee(request: Request) -> dict:
-    """Read X-GEE-Token header and verify the individual session.
-    Raises HTTP 401 if missing or invalid."""
+    """Read X-GEE-Token header and verify the individual session if provided.
+    If no individual token is present, seamlessly fall back to the backend
+    Developer Service Account so users do not need a second Google OAuth account."""
     token = request.headers.get("X-GEE-Token") or request.query_params.get("gee_token")
-    if not token:
-        raise HTTPException(
-            status_code=401,
-            detail="Individual GEE authentication required. Please log in with your GEE email to access Sample Digitization.",
-        )
-    session = verify_individual_session(token)
-    if session is None:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid or expired GEE session. Please log in again.",
-        )
-    return session
+    if token:
+        session = verify_individual_session(token)
+        if session is not None:
+            return session
+    # Fallback to Developer Service Account
+    _require_gee()
+    return {
+        "email": "developer-service-account@spetro.internal",
+        "project_name": os.environ.get("GEE_PROJECT_ID", "ee-petersonyang87"),
+        "role": "developer_service_account"
+    }
 
 
 @app.post("/api/gee/individual-auth", tags=["gee-auth"])

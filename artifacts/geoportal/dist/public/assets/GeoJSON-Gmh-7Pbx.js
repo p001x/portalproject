@@ -1,0 +1,1 @@
+import{i as s,l as a,b as r,e as c}from"./leaflet-CmnKtkGT.js";const i=s(function({data:t,...e},n){const o=new a.GeoJSON(t,e);return r(o,c(n,{overlayContainer:o}))},function(t,e,n){e.style!==n.style&&(e.style==null?t.resetStyle():t.setStyle(e.style))});export{i as G};

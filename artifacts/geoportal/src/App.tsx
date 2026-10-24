@@ -615,9 +615,7 @@ function Router() {
           <Route path="/samples">
             <div className="h-full flex flex-col">
               <div className="flex-1 overflow-hidden">
-                <GEEAuthGate>
-                  <SampleDigitizationPage />
-                </GEEAuthGate>
+                <SampleDigitizationPage />
               </div>
             </div>
           </Route>
