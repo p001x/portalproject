@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import { api } from '@/lib/api';
-import { Briefcase, Calendar, CheckCircle2, ChevronRight, ExternalLink, GraduationCap, Map, MessageSquare, Phone } from 'lucide-react';
+import { Briefcase, Calendar, CheckCircle2, ChevronRight, Clock, GraduationCap, Map, MessageSquare, Phone } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,15 +14,22 @@ export function PricingPage() {
   const { toast } = useToast();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [selectedService, setSelectedService] = useState("");
+  const [preferredDate, setPreferredDate] = useState("");
+  const [preferredTimeSlot, setPreferredTimeSlot] = useState("Afternoon (13:00 - 17:00)");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [message, setMessage] = useState("");
   const [submitted, setSubmitted] = useState(false);
 
   const requestMutation = useMutation({
     mutationFn: () => {
-      const fullMessage = phoneNumber.trim()
-        ? `[Direct Contact / WhatsApp: ${phoneNumber.trim()}]\n\n${message.trim()}`
-        : message.trim();
+      const details: string[] = [];
+      if (preferredDate) details.push(`📅 Proposed Date: ${preferredDate}`);
+      if (preferredTimeSlot) details.push(`⏰ Proposed Time Slot: ${preferredTimeSlot}`);
+      if (phoneNumber.trim()) details.push(`📞 Phone / WhatsApp: ${phoneNumber.trim()}`);
+      
+      const headerSection = details.length > 0 ? details.join("\n") + "\n\n" : "";
+      const fullMessage = `${headerSection}Requirements / Topics to Discuss:\n${message.trim() || "No additional notes provided."}`;
+
       return api.services.requestService({
         service_type: selectedService,
         message: fullMessage
@@ -32,14 +39,15 @@ export function PricingPage() {
       setSubmitted(true);
       toast({
         title: "Request Sent!",
-        description: "We have received your booking request and will be in touch shortly.",
+        description: "We have received your proposed time slot and will confirm directly via email.",
       });
       setTimeout(() => {
         setIsDialogOpen(false);
         setSubmitted(false);
         setMessage("");
         setPhoneNumber("");
-      }, 3000);
+        setPreferredDate("");
+      }, 3500);
     },
     onError: (err: any) => {
       toast({
@@ -56,6 +64,10 @@ export function PricingPage() {
     setSubmitted(false);
     setMessage("");
     setPhoneNumber("");
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    setPreferredDate(tomorrow.toISOString().split("T")[0]);
+    setPreferredTimeSlot("Afternoon (13:00 - 17:00)");
   };
 
   return (
@@ -194,30 +206,63 @@ export function PricingPage() {
               Book {selectedService}
             </DialogTitle>
             <DialogDescription className="text-sm pt-1 text-slate-400">
-              Affordable 1-on-1 advisory session ($15/session). Pick an instant calendar slot on Cal.com or submit your number for a direct call.
+              Direct 1-on-1 consultation ($15/session). Propose your preferred date & time to talk, and we will reply directly via email to confirm your session.
             </DialogDescription>
           </DialogHeader>
 
-
           {!submitted ? (
             <div className="space-y-4 py-3">
+              {/* Proposed Date & Time Slot */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-slate-300 flex items-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5 text-[#0cf6bd]" /> Proposed Date
+                  </label>
+                  <Input 
+                    type="date"
+                    min={new Date().toISOString().split("T")[0]}
+                    className="bg-[#0d131f] border-[#1c293e] text-white focus:border-[#0cf6bd] focus:ring-[#0cf6bd]/20 h-10 text-sm [color-scheme:dark] cursor-pointer"
+                    value={preferredDate}
+                    onChange={(e) => setPreferredDate(e.target.value)}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-medium text-slate-300 flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-[#0cf6bd]" /> Proposed Time Slot
+                  </label>
+                  <select 
+                    className="w-full rounded-md border border-[#1c293e] bg-[#0d131f] px-3 py-2 text-sm text-white focus:border-[#0cf6bd] focus:outline-none focus:ring-1 focus:ring-[#0cf6bd] h-10 cursor-pointer"
+                    value={preferredTimeSlot}
+                    onChange={(e) => setPreferredTimeSlot(e.target.value)}
+                  >
+                    <option value="Morning (09:00 - 12:00)">Morning (09:00 - 12:00)</option>
+                    <option value="Early Afternoon (12:00 - 15:00)">Early Afternoon (12:00 - 15:00)</option>
+                    <option value="Late Afternoon (15:00 - 18:00)">Late Afternoon (15:00 - 18:00)</option>
+                    <option value="Evening (18:00 - 21:00)">Evening (18:00 - 21:00)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Phone / WhatsApp (Optional) */}
               <div className="space-y-1.5">
                 <label className="text-xs font-medium text-slate-300 flex items-center gap-1.5">
-                  <Phone className="w-3.5 h-3.5 text-[#0cf6bd]" /> Phone / WhatsApp (for Direct Call)
+                  <Phone className="w-3.5 h-3.5 text-[#0cf6bd]" /> Phone / WhatsApp (Optional)
                 </label>
                 <Input 
-                  placeholder="+250 788 ... or WhatsApp number"
+                  placeholder="+250 788 ... (or leave blank to communicate via email only)"
                   className="bg-[#0d131f] border-[#1c293e] text-white placeholder:text-slate-500 focus:border-[#0cf6bd] focus:ring-[#0cf6bd]/20 h-10 text-sm"
                   value={phoneNumber}
                   onChange={(e) => setPhoneNumber(e.target.value)}
                 />
               </div>
 
+              {/* Message / Topics */}
               <div className="space-y-1.5">
-                <label className="text-xs font-medium text-slate-300">Your Message / Requirements</label>
+                <label className="text-xs font-medium text-slate-300">What would you like to discuss or debug?</label>
                 <Textarea 
                   placeholder="e.g. I need help migrating my QGIS workflow to Google Earth Engine, or debugging classification..."
-                  className="min-h-[110px] resize-none bg-[#0d131f] border-[#1c293e] text-white placeholder:text-slate-500 focus:border-[#0cf6bd] focus:ring-[#0cf6bd]/20 text-sm"
+                  className="min-h-[100px] resize-none bg-[#0d131f] border-[#1c293e] text-white placeholder:text-slate-500 focus:border-[#0cf6bd] focus:ring-[#0cf6bd]/20 text-sm"
                   value={message}
                   onChange={(e) => setMessage(e.target.value)}
                 />
@@ -226,9 +271,9 @@ export function PricingPage() {
               <Button 
                 className="w-full bg-[#0cf6bd] text-teal-950 font-semibold hover:bg-[#0ae3ad] transition-colors py-5 cursor-pointer" 
                 onClick={() => requestMutation.mutate()}
-                disabled={requestMutation.isPending || (!message.trim() && !phoneNumber.trim())}
+                disabled={requestMutation.isPending || (!message.trim() && !preferredDate)}
               >
-                {requestMutation.isPending ? "Sending..." : "Submit for Direct Call & Consultation"}
+                {requestMutation.isPending ? "Sending Request..." : "Submit Proposed Time & Request via Email"}
               </Button>
             </div>
           ) : (
@@ -236,8 +281,8 @@ export function PricingPage() {
               <div className="w-14 h-14 bg-[#0cf6bd]/10 rounded-full flex items-center justify-center">
                 <CheckCircle2 className="w-7 h-7 text-[#0cf6bd]" />
               </div>
-              <h3 className="text-lg font-bold text-white">Direct Request Received!</h3>
-              <p className="text-slate-400 text-sm max-w-xs">We have received your direct consultation request and will call or reach out shortly.</p>
+              <h3 className="text-lg font-bold text-white">Booking Request Sent via Email!</h3>
+              <p className="text-slate-400 text-sm max-w-sm">We received your proposed date and time slot. Our team will review and reply directly to your email to confirm the session link.</p>
             </div>
           )}
         </DialogContent>
