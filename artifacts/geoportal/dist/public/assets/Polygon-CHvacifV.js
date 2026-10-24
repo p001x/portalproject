@@ -1,1 +1,0 @@
-import{i as a,l as i,b as r,e as l}from"./leaflet-CmnKtkGT.js";const p=a(function({positions:t,...o},n){const e=new i.Polygon(t,o);return r(e,l(n,{overlayContainer:e}))},function(t,o,n){o.positions!==n.positions&&t.setLatLngs(o.positions)});export{p as P};

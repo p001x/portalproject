@@ -99,24 +99,14 @@ export function PricingPage() {
                 </li>
               ))}
             </ul>
-            <div className="mt-auto pt-2 flex flex-col gap-3 w-full">
-              <a
-                href="https://cal.com"
-                target="_blank"
-                rel="noreferrer"
-                className="w-full"
-              >
-                <Button className="w-full rounded-xl bg-[#0cf6bd] text-teal-950 hover:bg-[#0ae3ad] py-5 text-sm font-semibold transition-colors cursor-pointer shadow-md flex items-center justify-center gap-2">
-                  <Calendar className="w-4 h-4" /> Book Directly on Cal.com
-                </Button>
-              </a>
+            <div className="mt-auto pt-2 flex flex-col items-center w-full">
               <Button
                 onClick={() => handleBookClick("1-on-1 Consultation")}
-                className="w-full rounded-xl bg-slate-800/90 py-5 text-sm font-semibold text-slate-200 hover:text-white hover:bg-slate-700 transition-colors border border-slate-700 cursor-pointer flex items-center justify-center gap-2"
+                className="w-full rounded-xl bg-[#0cf6bd] py-6 text-base font-semibold text-teal-950 hover:bg-[#0ae3ad] transition-colors shadow-lg shadow-[#0cf6bd]/20 cursor-pointer flex items-center justify-center gap-2"
               >
-                <Phone className="w-4 h-4 text-[#0cf6bd]" /> Request Direct Call / WhatsApp
+                Book 1-on-1 Consultation <ChevronRight className="ml-1 h-5 w-5" strokeWidth={2.5} />
               </Button>
-              <span className="text-xs text-slate-500 text-center leading-tight">Instant Cal.com scheduler or direct phone/WhatsApp callback.</span>
+              <span className="mt-3 text-xs text-slate-500 text-center leading-tight">Direct advisory session scheduled upon request.</span>
             </div>
           </div>
         </Card>
@@ -208,28 +198,7 @@ export function PricingPage() {
             </DialogDescription>
           </DialogHeader>
 
-          {/* Cal.com Direct Action Banner */}
-          <div className="bg-[#0f2e2d]/60 border border-[#0cf6bd]/30 rounded-xl p-3.5 flex items-center justify-between gap-3 mt-2">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-[#0cf6bd]/20 flex items-center justify-center shrink-0">
-                <Calendar className="w-5 h-5 text-[#0cf6bd]" />
-              </div>
-              <div className="text-xs">
-                <p className="font-semibold text-white">Instant Calendar Booking</p>
-                <p className="text-slate-400">Pick a direct video or phone time slot on Cal.com.</p>
-              </div>
-            </div>
-            <a
-              href="https://cal.com"
-              target="_blank"
-              rel="noreferrer"
-            >
-              <Button size="sm" className="bg-[#0cf6bd] text-teal-950 font-semibold hover:bg-[#0ae3ad] text-xs h-8 px-3 shrink-0 flex items-center gap-1.5 cursor-pointer">
-                Cal.com <ExternalLink className="w-3.5 h-3.5" />
-              </Button>
-            </a>
-          </div>
-          
+
           {!submitted ? (
             <div className="space-y-4 py-3">
               <div className="space-y-1.5">
