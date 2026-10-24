@@ -118,3 +118,5 @@ scratch/
 *.db-wal
 archive/
 backend/archive/
+
+artifacts/api-server_deprecated/dist/
