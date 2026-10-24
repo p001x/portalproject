@@ -573,6 +573,22 @@ def request_service_endpoint(req: ServiceRequestModel, background_tasks: Backgro
 def get_service_requests_endpoint(user: dict = Depends(get_current_user)):
     return {"requests": services_db.get_all_requests()}
 
+class ContactInquiryModel(BaseModel):
+    name: str
+    email: str
+    subject: str = "General Inquiry"
+    message: str
+
+@app.post("/api/contact", tags=["contact"])
+def submit_contact_inquiry(req: ContactInquiryModel, background_tasks: BackgroundTasks):
+    try:
+        background_tasks.add_task(email_notifier.send_contact_inquiry_alert, req.name, req.email, req.subject, req.message)
+        services_db.create_request(req.email, f"Contact: {req.subject}", f"From: {req.name} ({req.email})\n\n{req.message}")
+        return {"ok": True, "message": "Inquiry sent successfully to admins."}
+    except Exception as exc:
+        raise HTTPException(400, str(exc))
+
+
 class NewCourseNotification(BaseModel):
     title: str
     description: str

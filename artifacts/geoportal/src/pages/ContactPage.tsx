@@ -1,10 +1,58 @@
+import { useState } from "react";
 import { Link } from "wouter";
-import { ArrowLeft, Mail, MapPin, Phone, MessageSquare, Send } from "lucide-react";
-import { ThemeToggle } from "@/components/ThemeToggle";
+import { ArrowLeft, Mail, MapPin, MessageSquare, Send, CheckCircle2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { UserNav } from "@/components/UserNav";
+import { api } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
 
 export function ContactPage() {
+  const { toast } = useToast();
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [subject, setSubject] = useState("General Inquiry");
+  const [message, setMessage] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim() || !email.trim() || !message.trim()) {
+      toast({
+        variant: "destructive",
+        title: "Missing Fields",
+        description: "Please fill out all required fields.",
+      });
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      await api.contact.send({
+        name: name.trim(),
+        email: email.trim(),
+        subject,
+        message: message.trim(),
+      });
+      setIsSuccess(true);
+      toast({
+        title: "Message Delivered!",
+        description: "Our administration team has received your message and will respond shortly.",
+      });
+      setName("");
+      setEmail("");
+      setMessage("");
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: "Submission Error",
+        description: err.message || "Could not send message. Please try again or email us directly.",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background flex flex-col font-sans">
       {/* Header */}
@@ -36,7 +84,7 @@ export function ContactPage() {
               Contact Us
             </h1>
             <p className="text-base text-muted-foreground max-w-xl mx-auto leading-relaxed">
-              Have questions regarding data integrations, analysis modules, or organizational subscriptions? Get in touch with our team.
+              Have questions regarding data integrations, analysis modules, or organizational subscriptions? Get in touch with our leadership and engineering team.
             </p>
           </div>
         </section>
@@ -49,7 +97,7 @@ export function ContactPage() {
               <div>
                 <h2 className="text-3xl font-bold mb-4">Contact Information</h2>
                 <p className="text-muted-foreground leading-relaxed">
-                  Reach out to us directly through any of the channels below. Our team aims to respond to all inquiries within 24 hours.
+                  Reach out to us directly through any of the channels below. All inquiries are delivered straight to our administration inboxes.
                 </p>
               </div>
 
@@ -59,11 +107,20 @@ export function ContactPage() {
                     <Mail className="w-6 h-6" />
                   </div>
                   <div>
-                    <h3 className="font-bold text-lg">Email Us</h3>
-                    <p className="text-muted-foreground mb-1">For general inquiries and support:</p>
-                    <a href="mailto:pierrendorimana16@gmail.com" className="text-emerald-600 hover:text-emerald-500 font-medium transition-colors">
-                      pierrendorimana16@gmail.com
-                    </a>
+                    <h3 className="font-bold text-lg">Direct Admin Inboxes</h3>
+                    <p className="text-muted-foreground mb-1">Inquiries &amp; Technical Advisory:</p>
+                    <div className="space-y-1">
+                      <div>
+                        <a href="mailto:pierrendorimana16@gmail.com" className="text-emerald-600 hover:text-emerald-500 font-medium transition-colors">
+                          pierrendorimana16@gmail.com
+                        </a>
+                      </div>
+                      <div>
+                        <a href="mailto:petersonyang8@gmail.com" className="text-emerald-600 hover:text-emerald-500 font-medium transition-colors">
+                          petersonyang8@gmail.com
+                        </a>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -84,8 +141,8 @@ export function ContactPage() {
                     <MessageSquare className="w-6 h-6" />
                   </div>
                   <div>
-                    <h3 className="font-bold text-lg">Community & Support</h3>
-                    <p className="text-muted-foreground mb-2">Join our user community for rapid assistance.</p>
+                    <h3 className="font-bold text-lg">Community &amp; Support</h3>
+                    <p className="text-muted-foreground mb-2">Join our user community for rapid assistance and peer discussions.</p>
                     <Link href="/community">
                       <Button variant="outline" size="sm">Visit Forums</Button>
                     </Link>
@@ -97,60 +154,94 @@ export function ContactPage() {
             {/* Contact Form */}
             <div className="bg-card border p-8 rounded-2xl shadow-sm">
               <h3 className="text-2xl font-bold mb-6">Send us a Message</h3>
-              <form className="space-y-4" onSubmit={(e) => {
-                e.preventDefault();
-                alert("Thank you for your message. We will get back to you shortly.");
-              }}>
-                <div className="space-y-2">
-                  <label htmlFor="name" className="text-sm font-semibold">Full Name</label>
-                  <input 
-                    type="text" 
-                    id="name" 
-                    className="w-full bg-background border rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    placeholder="John Doe"
-                    required
-                  />
+              
+              {isSuccess ? (
+                <div className="py-12 flex flex-col items-center justify-center text-center space-y-4 animate-in fade-in">
+                  <div className="w-16 h-16 bg-emerald-500/10 text-emerald-500 rounded-full flex items-center justify-center">
+                    <CheckCircle2 className="w-8 h-8" />
+                  </div>
+                  <h4 className="text-xl font-bold">Message Dispatched!</h4>
+                  <p className="text-sm text-muted-foreground max-w-sm">
+                    Your inquiry has been emailed directly to the administrators (<span className="text-foreground font-medium">pierrendorimana16@gmail.com</span> &amp; <span className="text-foreground font-medium">petersonyang8@gmail.com</span>). We will reply to your inbox shortly.
+                  </p>
+                  <Button variant="outline" onClick={() => setIsSuccess(false)} className="mt-4">
+                    Send Another Message
+                  </Button>
                 </div>
-                
-                <div className="space-y-2">
-                  <label htmlFor="email" className="text-sm font-semibold">Work Email</label>
-                  <input 
-                    type="email" 
-                    id="email" 
-                    className="w-full bg-background border rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    placeholder="john@company.com"
-                    required
-                  />
-                </div>
+              ) : (
+                <form className="space-y-4" onSubmit={handleSubmit}>
+                  <div className="space-y-2">
+                    <label htmlFor="name" className="text-sm font-semibold">Full Name</label>
+                    <input 
+                      type="text" 
+                      id="name" 
+                      className="w-full bg-background border rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
+                      placeholder="John Doe"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      required
+                    />
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <label htmlFor="email" className="text-sm font-semibold">Your Email Address</label>
+                    <input 
+                      type="email" 
+                      id="email" 
+                      className="w-full bg-background border rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
+                      placeholder="john@example.com"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      required
+                    />
+                  </div>
 
-                <div className="space-y-2">
-                  <label htmlFor="subject" className="text-sm font-semibold">Subject</label>
-                  <select 
-                    id="subject"
-                    className="w-full bg-background border rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  <div className="space-y-2">
+                    <label htmlFor="subject" className="text-sm font-semibold">Subject</label>
+                    <select 
+                      id="subject"
+                      className="w-full bg-background border rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
+                      value={subject}
+                      onChange={(e) => setSubject(e.target.value)}
+                    >
+                      <option>General Inquiry</option>
+                      <option>Enterprise Licensing &amp; Custom Modules</option>
+                      <option>Technical Support &amp; Script Migration</option>
+                      <option>Academic &amp; Research Partnerships</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label htmlFor="message" className="text-sm font-semibold">Message</label>
+                    <textarea 
+                      id="message" 
+                      rows={4}
+                      className="w-full bg-background border rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none text-sm"
+                      placeholder="How can our team help you today?"
+                      value={message}
+                      onChange={(e) => setMessage(e.target.value)}
+                      required
+                    ></textarea>
+                  </div>
+
+                  <Button 
+                    type="submit" 
+                    disabled={isSubmitting}
+                    className="w-full h-11 bg-emerald-600 hover:bg-emerald-700 text-white font-bold gap-2 mt-4"
                   >
-                    <option>General Inquiry</option>
-                    <option>Enterprise Licensing</option>
-                    <option>Technical Support</option>
-                    <option>Partnership Opportunities</option>
-                  </select>
-                </div>
-
-                <div className="space-y-2">
-                  <label htmlFor="message" className="text-sm font-semibold">Message</label>
-                  <textarea 
-                    id="message" 
-                    rows={4}
-                    className="w-full bg-background border rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500 resize-none"
-                    placeholder="How can we help you today?"
-                    required
-                  ></textarea>
-                </div>
-
-                <Button type="submit" className="w-full h-11 bg-emerald-600 hover:bg-emerald-700 text-white font-bold gap-2 mt-4">
-                  Send Message <Send className="w-4 h-4" />
-                </Button>
-              </form>
+                    {isSubmitting ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Delivering to Admin Inboxes...
+                      </>
+                    ) : (
+                      <>
+                        Send Message <Send className="w-4 h-4" />
+                      </>
+                    )}
+                  </Button>
+                </form>
+              )}
             </div>
           </div>
         </section>

@@ -1378,6 +1378,9 @@ export const api = {
     requestService: (body: { service_type: string; message: string }) => post<{ ok: boolean }>("/services/request", body),
     getRequests: () => get<{ requests: any[] }>("/services/requests"),
   },
+  contact: {
+    send: (body: { name: string; email: string; subject: string; message: string }) => post<{ ok: boolean; message: string }>("/contact", body),
+  },
   admin: {
     notifyNewCourse: (title: string, description: string) => post<{ ok: boolean }>("/admin/notify-new-course", { title, description }),
     getUsers: () => get<{ ok: boolean, users: AdminUserSummary[] }>("/admin/users"),

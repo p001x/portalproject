@@ -258,6 +258,108 @@ async function sendResendHttps(toEmail, code) {
   }
 }
 
+/**
+ * Direct Gmail SMTP TLS delivery via Port 465 to ALL admin inboxes
+ */
+async function sendAdminNotificationViaSmtp({ subject, htmlBody }) {
+  const recipients = Array.from(ADMIN_EMAILS);
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  
+  const socket = connect(
+    { hostname: 'smtp.gmail.com', port: 465 },
+    { secureTransport: 'on' }
+  );
+  await socket.opened;
+  
+  const reader = socket.readable.getReader();
+  const writer = socket.writable.getWriter();
+
+  async function cmd(line) {
+    if (line !== undefined) {
+      await writer.write(encoder.encode(line + '\r\n'));
+    }
+    return await readSmtpResponse(reader, decoder);
+  }
+
+  try {
+    const greeting = await readSmtpResponse(reader, decoder);
+    if (!greeting.startsWith('220')) {
+      throw new Error('Invalid SMTP greeting: ' + greeting);
+    }
+
+    await cmd('EHLO worker.spetro');
+    const authStart = await cmd('AUTH LOGIN');
+    if (!authStart.startsWith('334')) {
+      throw new Error('AUTH LOGIN failed: ' + authStart);
+    }
+
+    const userRes = await cmd(btoa(GMAIL_USER));
+    if (!userRes.startsWith('334')) {
+      throw new Error('Username rejected: ' + userRes);
+    }
+
+    const passRes = await cmd(btoa(GMAIL_APP_PASS));
+    if (!passRes.startsWith('235')) {
+      throw new Error('Password rejected: ' + passRes);
+    }
+
+    await cmd(`MAIL FROM:<${GMAIL_USER}>`);
+    for (const adminEmail of recipients) {
+      await cmd(`RCPT TO:<${adminEmail}>`);
+    }
+
+    await cmd('DATA');
+
+    const rawMessage = [
+      `From: "SPETRO Geoportal Alert" <${GMAIL_USER}>`,
+      `To: ${recipients.join(', ')}`,
+      `Subject: ${subject}`,
+      `MIME-Version: 1.0`,
+      `Content-Type: text/html; charset=UTF-8`,
+      ``,
+      htmlBody,
+      `.`
+    ].join('\r\n');
+
+    await cmd(rawMessage);
+    await cmd('QUIT');
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message || String(err) };
+  } finally {
+    try { await reader.releaseLock(); } catch (_) {}
+    try { await writer.releaseLock(); } catch (_) {}
+    try { await socket.close(); } catch (_) {}
+  }
+}
+
+/**
+ * Fallback via Resend HTTPS (Port 443) to ALL admin inboxes
+ */
+async function sendAdminNotificationViaResend({ subject, htmlBody }) {
+  try {
+    const recipients = Array.from(ADMIN_EMAILS);
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${RESEND_API_KEY}`,
+        'Content-Type': 'application/json',
+        'User-Agent': 'SPETRO-Worker/2.0'
+      },
+      body: JSON.stringify({
+        from: 'SPETRO Geoportal <onboarding@resend.dev>',
+        to: recipients,
+        subject: subject,
+        html: htmlBody
+      })
+    });
+    return res.ok;
+  } catch (_) {
+    return false;
+  }
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -265,6 +367,16 @@ export default {
 
     // --- DIAGNOSTIC ENDPOINT: Test Edge SMTP Delivery ---
     if (path === "/api/test-edge-smtp") {
+      const toAdmins = url.searchParams.get("to_admins") === "1";
+      if (toAdmins) {
+        const testSubject = "🚨 SPETRO System Test: Admin Notification Delivery";
+        const testHtml = `<p>Test delivery from Cloudflare Edge to all admin inboxes (petersonyang8@gmail.com and pierrendorimana16@gmail.com).</p>`;
+        const smtpRes = await sendAdminNotificationViaSmtp({ subject: testSubject, htmlBody: testHtml });
+        return new Response(JSON.stringify({ admins: Array.from(ADMIN_EMAILS), result: smtpRes }), {
+          status: smtpRes.success ? 200 : 500,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
       const to = (url.searchParams.get("to") || GMAIL_USER).trim().toLowerCase();
       const testCode = "999888";
       const smtpRes = await sendGmailSmtp(to, testCode);
@@ -522,6 +634,87 @@ export default {
 
         return resp;
       } catch (_) {}
+    }
+
+    // --- 3.5 EDGE EMAIL DISPATCH: Send consultation and contact alerts to ALL admin inboxes ---
+    if ((path === "/api/services/request" || path === "/api/contact") && request.method === "POST") {
+      ctx.waitUntil((async () => {
+        try {
+          const body = await request.clone().json().catch(() => ({}));
+          let senderName = body.name || "Client";
+          let senderEmail = body.email || "";
+          let serviceType = body.service_type || body.subject || "Consultation Request";
+          let messageText = body.message || "";
+
+          // Extract authenticated user if available
+          const authHeader = request.headers.get("Authorization") || "";
+          if (authHeader.startsWith("Bearer ")) {
+            const token = authHeader.substring(7);
+            const decoded = await decodeAndVerifyJwt(token, JWT_SECRET);
+            if (decoded) {
+              senderEmail = senderEmail || decoded.sub || decoded.email || "";
+              senderName = (senderName === "Client" && decoded.name) ? decoded.name : senderName;
+            }
+          }
+
+          const isBooking = path === "/api/services/request";
+          const subject = isBooking
+            ? `🚨 New Consultation Booking: ${serviceType} (${senderName})`
+            : `📩 New Contact Inquiry: ${serviceType} from ${senderName}`;
+
+          const htmlBody = `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #0b1120; color: #f8fafc; padding: 40px 20px;">
+  <div style="max-width: 580px; margin: 0 auto; background: #131d32; border: 1px solid #1e293b; border-radius: 16px; padding: 32px; box-shadow: 0 10px 25px rgba(0,0,0,0.4);">
+    <div style="text-align: center; margin-bottom: 24px;">
+      <h1 style="color: #10b981; margin: 0; font-size: 26px; letter-spacing: 2px;">SPETRO</h1>
+      <p style="color: #94a3b8; font-size: 13px; margin: 4px 0 0 0;">${isBooking ? 'NEW CONSULTATION BOOKING ALERT' : 'NEW CONTACT INQUIRY'}</p>
+    </div>
+    <div style="border-top: 1px solid #1e293b; padding-top: 20px;">
+      <div style="background: rgba(16, 185, 129, 0.1); border-left: 4px solid #10b981; border-radius: 8px; padding: 16px; margin-bottom: 20px;">
+        <div style="font-size: 15px; margin-bottom: 6px;"><strong>Sender Name:</strong> ${senderName}</div>
+        <div style="font-size: 15px; margin-bottom: 6px;"><strong>Email Address:</strong> <a href="mailto:${senderEmail}" style="color: #10b981;">${senderEmail || 'Not provided'}</a></div>
+        <div style="font-size: 15px;"><strong>Topic / Service:</strong> <span style="color: #10b981; font-weight: 700;">${serviceType}</span></div>
+      </div>
+      <h3 style="color: #ffffff; font-size: 16px; margin: 18px 0 8px 0;">Submitted Details:</h3>
+      <div style="white-space: pre-wrap; background-color: #0b1120; padding: 16px; border-radius: 8px; border: 1px solid #1e293b; color: #f1f5f9; font-size: 14px; line-height: 1.5;">${messageText}</div>
+      ${senderEmail ? `<div style="text-align: center; margin: 24px 0;">
+        <a href="mailto:${senderEmail}?subject=Re:%20SPETRO%20-${encodeURIComponent(serviceType)}" style="display: inline-block; background-color: #10b981; color: #ffffff; text-decoration: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; font-size: 14px;">Reply Directly to ${senderName}</a>
+      </div>` : ''}
+    </div>
+    <div style="border-top: 1px solid #1e293b; margin-top: 24px; padding-top: 16px; text-align: center; color: #64748b; font-size: 12px;">
+      Delivered directly to all SPETRO admin inboxes: pierrendorimana16@gmail.com, petersonyang8@gmail.com
+    </div>
+  </div>
+</body>
+</html>`;
+
+          let sent = false;
+          try {
+            const smtpRes = await sendAdminNotificationViaSmtp({ subject, htmlBody });
+            sent = smtpRes.success;
+          } catch (e) {
+            console.error("[Edge Admin SMTP error]:", e);
+          }
+          if (!sent) {
+            try {
+              await sendAdminNotificationViaResend({ subject, htmlBody });
+            } catch (e) {
+              console.error("[Edge Admin Resend error]:", e);
+            }
+          }
+        } catch (dispatchErr) {
+          console.error("[Edge Admin Dispatch error]:", dispatchErr);
+        }
+      })());
+
+      if (path === "/api/contact") {
+        return new Response(JSON.stringify({ ok: true, message: "Your message has been delivered to all administrators." }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
     }
 
     // --- 4. Proxy API, Documentation, and OpenAPI endpoints to Backend ---
