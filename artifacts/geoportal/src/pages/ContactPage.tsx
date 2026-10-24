@@ -3,6 +3,7 @@ import { Link } from "wouter";
 import { ArrowLeft, Mail, MapPin, MessageSquare, Send, CheckCircle2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { UserNav } from "@/components/UserNav";
+import { SiteBrand } from "@/components/SiteBrand";
 import { api } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 
@@ -63,13 +64,7 @@ export function ContactPage() {
               <ArrowLeft className="w-5 h-5 text-muted-foreground group-hover:text-foreground" />
             </button>
           </Link>
-          <div className="flex items-center gap-3">
-            <img src="/logo.png" alt="SPETRO Logo" className="h-10 w-auto object-contain shrink-0 drop-shadow-md rounded-md" />
-            <div>
-              <h1 className="font-bold text-lg leading-tight tracking-wide text-foreground">SPETRO</h1>
-              <p className="text-xs font-medium tracking-widest text-emerald-600 uppercase">Geoportal Analysis</p>
-            </div>
-          </div>
+          <SiteBrand size="normal" hideSubtitleOnMobile />
         </div>
         <div className="flex items-center gap-3">
           <UserNav />
@@ -97,7 +92,7 @@ export function ContactPage() {
               <div>
                 <h2 className="text-3xl font-bold mb-4">Contact Information</h2>
                 <p className="text-muted-foreground leading-relaxed">
-                  Reach out to us directly through any of the channels below. All inquiries are delivered straight to our administration inboxes.
+                  Reach out to our geospatial engineering leadership through any of the channels below. We look forward to discussing your technical and analytical requirements.
                 </p>
               </div>
 
@@ -107,8 +102,8 @@ export function ContactPage() {
                     <Mail className="w-6 h-6" />
                   </div>
                   <div>
-                    <h3 className="font-bold text-lg">Direct Admin Inboxes</h3>
-                    <p className="text-muted-foreground mb-1">Inquiries &amp; Technical Advisory:</p>
+                    <h3 className="font-bold text-lg">Direct Leadership Contact</h3>
+                    <p className="text-muted-foreground mb-1">Executive &amp; Advisory Team:</p>
                     <div className="space-y-1">
                       <div>
                         <a href="mailto:pierrendorimana16@gmail.com" className="text-emerald-600 hover:text-emerald-500 font-medium transition-colors">
@@ -160,9 +155,9 @@ export function ContactPage() {
                   <div className="w-16 h-16 bg-emerald-500/10 text-emerald-500 rounded-full flex items-center justify-center">
                     <CheckCircle2 className="w-8 h-8" />
                   </div>
-                  <h4 className="text-xl font-bold">Message Dispatched!</h4>
+                  <h4 className="text-xl font-bold">Message Received</h4>
                   <p className="text-sm text-muted-foreground max-w-sm">
-                    Your inquiry has been emailed directly to the administrators (<span className="text-foreground font-medium">pierrendorimana16@gmail.com</span> &amp; <span className="text-foreground font-medium">petersonyang8@gmail.com</span>). We will reply to your inbox shortly.
+                    Thank you for contacting SPETRO. Our senior geospatial team has received your message and will review your request promptly.
                   </p>
                   <Button variant="outline" onClick={() => setIsSuccess(false)} className="mt-4">
                     Send Another Message
@@ -232,7 +227,7 @@ export function ContactPage() {
                     {isSubmitting ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin" />
-                        Delivering to Admin Inboxes...
+                        Sending Message...
                       </>
                     ) : (
                       <>

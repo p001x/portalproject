@@ -97,11 +97,8 @@ export function PricingPage() {
               Personalized direct guidance on geospatial analysis, GEE algorithm debugging, or project architecture.
             </p>
             <div className="mb-8 flex items-baseline gap-2 flex-wrap">
-              <span className="text-3xl font-extrabold text-[#0cf6bd]">$15</span>
-              <span className="text-slate-400 text-sm">/ session</span>
-              <span className="inline-flex items-center rounded-full bg-[#0cf6bd]/10 px-2.5 py-0.5 text-xs font-semibold text-[#0cf6bd] border border-[#0cf6bd]/20">
-                Affordable & Direct
-              </span>
+              <span className="text-3xl font-extrabold text-white">$150</span>
+              <span className="text-slate-400 text-sm">/ hr</span>
             </div>
             <ul className="mb-10 flex flex-col gap-4">
               {['Direct Live Pair-Programming & GEE Debugging', 'Geospatial Data Sourcing Strategy', 'Cloud Architecture & API Integration Review', 'Includes Written Action Plan & Code Samples'].map((feature) => (
@@ -116,9 +113,9 @@ export function PricingPage() {
                 onClick={() => handleBookClick("1-on-1 Consultation")}
                 className="w-full rounded-xl bg-[#0cf6bd] py-6 text-base font-semibold text-teal-950 hover:bg-[#0ae3ad] transition-colors shadow-lg shadow-[#0cf6bd]/20 cursor-pointer flex items-center justify-center gap-2"
               >
-                Book 1-on-1 Consultation <ChevronRight className="ml-1 h-5 w-5" strokeWidth={2.5} />
+                Schedule Consultation <ChevronRight className="ml-1 h-5 w-5" strokeWidth={2.5} />
               </Button>
-              <span className="mt-3 text-xs text-slate-500 text-center leading-tight">Direct advisory session scheduled upon request.</span>
+              <span className="mt-3 text-xs text-slate-400 text-center leading-tight">Dedicated 1-on-1 session with senior GIS engineers.</span>
             </div>
           </div>
         </Card>
@@ -156,7 +153,7 @@ export function PricingPage() {
                   Access Studies & Books <ChevronRight className="ml-1 h-5 w-5" strokeWidth={2.5} />
                 </Button>
               </Link>
-              <span className="mt-3 text-xs text-slate-500 font-medium">Instant access to training materials and videos.</span>
+              <span className="mt-3 text-xs text-slate-400 font-medium">Hands-on technical workshops for teams and research groups.</span>
             </div>
           </div>
         </Card>
@@ -190,7 +187,7 @@ export function PricingPage() {
               >
                 Contact Sales <ChevronRight className="ml-1 h-5 w-5" strokeWidth={2.5} />
               </Button>
-              <span className="mt-3 text-xs text-slate-500">Custom scopes and multi-year engagements.</span>
+              <span className="mt-3 text-xs text-slate-400">Enterprise SLA and bespoke production modeling.</span>
             </div>
           </div>
         </Card>
@@ -206,7 +203,7 @@ export function PricingPage() {
               Book {selectedService}
             </DialogTitle>
             <DialogDescription className="text-sm pt-1 text-slate-400">
-              Direct 1-on-1 consultation ($15/session). Propose your preferred date & time to talk, and we will reply directly via email to confirm your session.
+              Schedule a dedicated technical advisory session. Propose your preferred date & time, and our engineering team will confirm your meeting details directly via email.
             </DialogDescription>
           </DialogHeader>
 
@@ -273,7 +270,7 @@ export function PricingPage() {
                 onClick={() => requestMutation.mutate()}
                 disabled={requestMutation.isPending || (!message.trim() && !preferredDate)}
               >
-                {requestMutation.isPending ? "Sending Request..." : "Submit Proposed Time & Request via Email"}
+                {requestMutation.isPending ? "Sending Request..." : "Submit Consultation Request"}
               </Button>
             </div>
           ) : (
@@ -281,8 +278,8 @@ export function PricingPage() {
               <div className="w-14 h-14 bg-[#0cf6bd]/10 rounded-full flex items-center justify-center">
                 <CheckCircle2 className="w-7 h-7 text-[#0cf6bd]" />
               </div>
-              <h3 className="text-lg font-bold text-white">Booking Request Sent via Email!</h3>
-              <p className="text-slate-400 text-sm max-w-sm">We received your proposed date and time slot. Our team will review and reply directly to your email to confirm the session link.</p>
+              <h3 className="text-lg font-bold text-white">Consultation Request Received</h3>
+              <p className="text-slate-400 text-sm max-w-sm">We have received your proposed schedule and requirements. Our engineering team will review and confirm your session details directly via email.</p>
             </div>
           )}
         </DialogContent>
