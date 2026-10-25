@@ -7,15 +7,31 @@ import geopandas as gpd
 import pandas as pd
 import requests
 
-from gee.aoi_utils import get_dynamic_scale
+from gee.aoi_utils import get_dynamic_scale, get_bounds_and_center, safe_get_info
+from gee.auth import rotate_credentials
 
 from gee.persistent_cache import PersistentCache
 from threading import Lock
 import time
+import random
 import concurrent.futures
 from gee.classify_utils import quantile_classify
 
 logger = logging.getLogger(__name__)
+
+def _safe_gee_call(func, *args, **kwargs):
+    retries = 5
+    for i in range(retries):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            err_str = str(e)
+            if "429" in err_str or "Too Many Requests" in err_str or "concurrency" in err_str.lower() or "quota" in err_str.lower():
+                rotate_credentials()
+                if i < retries - 1:
+                    time.sleep((2 ** i) + random.uniform(0, 1))
+                    continue
+            raise
 
 # Colors matching the Python snippet: Very High -> Very Low accessibility (0 -> 3600 seconds)
 ACCESSIBILITY_VIS = {"min": 1, "max": 4, "palette": ["#5C3A21", "#B98D4F", "#E8C285", "#F3E58C"]}
@@ -251,10 +267,12 @@ def _build_accessibility_images(aoi_config: dict, amenities: list[str], dest_ame
     from gee.aoi_utils import get_aoi_geometry
     aoi = get_aoi_geometry(aoi_config)
 
-    bounds_info = aoi.bounds().getInfo()
-    if not bounds_info or "coordinates" not in bounds_info:
+    bounds, center = get_bounds_and_center(aoi, aoi_config)
+    if not bounds:
+        bounds_info = safe_get_info(aoi.bounds()) or {}
+        bounds = bounds_info.get("coordinates", [[]])[0]
+    if not bounds:
         raise ValueError("Could not calculate bounds for the selected study area. The area might be empty or missing from the geographic dataset.")
-    bounds = bounds_info["coordinates"][0]
     
     lons = [p[0] for p in bounds]
     lats = [p[1] for p in bounds]
@@ -458,12 +476,13 @@ def _get_nearest_farthest(aoi, raw_points, origin_raw_points=None):
     else:
         # Fallback to centroid safely
         try:
-            centroid_info = aoi.centroid(maxError=100).coordinates().getInfo()
+            centroid_info = safe_get_info(aoi.centroid(maxError=100).coordinates())
             if not centroid_info or len(centroid_info) < 2:
                 # Ultimate fallback if GEE fails
-                bounds = aoi.bounds().getInfo().get("coordinates", [[[0,0]]])[0]
-                c_lon = sum(p[0] for p in bounds) / len(bounds)
-                c_lat = sum(p[1] for p in bounds) / len(bounds)
+                b_info = safe_get_info(aoi.bounds()) or {}
+                b_coords = b_info.get("coordinates", [[[0,0]]])[0]
+                c_lon = sum(p[0] for p in b_coords) / len(b_coords)
+                c_lat = sum(p[1] for p in b_coords) / len(b_coords)
             else:
                 c_lon, c_lat = centroid_info[0], centroid_info[1]
         except Exception:
@@ -492,7 +511,7 @@ def _get_closest_road_geojson(roads_fc, pt_lon, pt_lat):
         def add_dist(f):
             return f.set('dist', f.geometry().distance(pt, 10))
         sorted_roads = subset.map(add_dist).sort('dist').limit(1)
-        info = sorted_roads.getInfo()
+        info = safe_get_info(sorted_roads) or {}
         if info and info.get('features') and len(info['features']) > 0:
             return info['features'][0]['geometry']
         return None
@@ -583,23 +602,14 @@ def compute_accessibility_map(aoi_config: dict, amenities: list[str], dest_ameni
     acc_class_tile_url = classify["panels"][0]["tile_url"]
 
     travel_time_vis = {"min": 0, "max": 3600, "palette": ["#ffffff", "#f5e6ce", "#d4b179", "#a16b38", "#572b0c"]}
-    travel_time_map_id = travel_time.getMapId(travel_time_vis)
+    travel_time_map_id = _safe_gee_call(lambda: travel_time.getMapId(travel_time_vis))
     
-    roads_map_id = ee.Image().byte().paint(roads, 1, 1).getMapId({"palette": ["#FF0000"]}) if roads else {"tile_fetcher": type('obj', (object,), {'url_format': ''})}
+    roads_map_id = _safe_gee_call(lambda: ee.Image().byte().paint(roads, 1, 1).getMapId({"palette": ["#FF0000"]})) if roads else {"tile_fetcher": type('obj', (object,), {'url_format': ''})}
 
-    centroid_info = aoi.centroid(maxError=100).coordinates().getInfo()
-    bounds_info = aoi.bounds().getInfo()
-    if not bounds_info or "coordinates" not in bounds_info:
-        raise ValueError("AOI geometry is invalid or empty.")
-    bounds = bounds_info["coordinates"][0]
+    bounds, center = get_bounds_and_center(aoi)
     lons = [p[0] for p in bounds]
     lats = [p[1] for p in bounds]
     bbox = [min(lons), min(lats), max(lons), max(lats)]
-
-    if centroid_info and len(centroid_info) >= 2:
-        centroid = centroid_info
-    else:
-        centroid = [sum(lons)/len(lons), sum(lats)/len(lats)]
 
     origin_raw_points = factors.get("origin_raw_points", [])
     nearest, farthest = _get_nearest_farthest(aoi, raw_points, origin_raw_points)
@@ -693,15 +703,17 @@ def compute_accessibility_stats(aoi_config: dict, amenities: list[str], dest_ame
         s_mask = t_time.lte(service_threshold_mins * 60)
         pop_img = ee.ImageCollection("WorldPop/GP/100m/pop").filter(ee.Filter.inList('year', [2020])).first().clip(area_of_interest)
         sc = get_dynamic_scale(area_of_interest)
+        bounds, _ = get_bounds_and_center(area_of_interest)
+        calc_geom = ee.Geometry.Polygon([bounds], "EPSG:4326", False) if bounds else area_of_interest.bounds(maxError=1000)
         
         return {
-            'stats': executor.submit(lambda: t_time.reduceRegion(
+            'stats': executor.submit(lambda: safe_get_info(t_time.reduceRegion(
                 reducer=ee.Reducer.mean().combine(ee.Reducer.min(), sharedInputs=True).combine(ee.Reducer.max(), sharedInputs=True).combine(ee.Reducer.stdDev(), sharedInputs=True),
-                geometry=area_of_interest, scale=sc, maxPixels=1e10).getInfo()),
-            'area': executor.submit(lambda: c_bands.reduceRegion(reducer=ee.Reducer.sum(), geometry=area_of_interest, scale=sc, maxPixels=1e10).getInfo()),
-            'served': executor.submit(lambda: ee.Image.pixelArea().updateMask(s_mask).reduceRegion(reducer=ee.Reducer.sum(), geometry=area_of_interest, scale=sc, maxPixels=1e10).getInfo()),
-            'pop': executor.submit(lambda: pop_img.updateMask(s_mask).reduceRegion(reducer=ee.Reducer.sum(), geometry=area_of_interest, scale=sc, maxPixels=1e10).getInfo()),
-            'total_pop': executor.submit(lambda: pop_img.reduceRegion(reducer=ee.Reducer.sum(), geometry=area_of_interest, scale=sc, maxPixels=1e10).getInfo())
+                geometry=calc_geom, scale=sc, maxPixels=1e13, tileScale=16, bestEffort=True)) or {}),
+            'area': executor.submit(lambda: safe_get_info(c_bands.reduceRegion(reducer=ee.Reducer.sum(), geometry=calc_geom, scale=sc, maxPixels=1e13, tileScale=16, bestEffort=True)) or {}),
+            'served': executor.submit(lambda: safe_get_info(ee.Image.pixelArea().updateMask(s_mask).reduceRegion(reducer=ee.Reducer.sum(), geometry=calc_geom, scale=sc, maxPixels=1e13, tileScale=16, bestEffort=True)) or {}),
+            'pop': executor.submit(lambda: safe_get_info(pop_img.updateMask(s_mask).reduceRegion(reducer=ee.Reducer.sum(), geometry=calc_geom, scale=sc, maxPixels=1e13, tileScale=16, bestEffort=True)) or {}),
+            'total_pop': executor.submit(lambda: safe_get_info(pop_img.reduceRegion(reducer=ee.Reducer.sum(), geometry=calc_geom, scale=sc, maxPixels=1e13, tileScale=16, bestEffort=True)) or {})
         }
         
     def _resolve_jobs(futures):
@@ -835,26 +847,25 @@ def compute_accessibility_export(aoi_config: dict, amenities: list[str], dest_am
     tt_final = tt_rgb.blend(roads_rgb).blend(points_rgb)
     acc_final = acc_rgb.blend(roads_rgb).blend(points_rgb)
 
-    from gee.aoi_utils import get_bounds_and_center
     bounds, _ = get_bounds_and_center(aoi, aoi_config=aoi_config if isinstance(aoi_config, dict) else None)
-    dl_geom = ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds()
+    dl_geom = ee.Geometry.Polygon([bounds], "EPSG:4326", False) if bounds else aoi.bounds(maxError=1000)
     scale = max(100, get_dynamic_scale(aoi, aoi_config=aoi_config if isinstance(aoi_config, dict) else None))
 
     tt_thumb = None
     try:
-        tt_thumb = tt_final.getThumbURL({"region": dl_geom, "dimensions": 800, "crs": "EPSG:4326", "format": "png"})
+        tt_thumb = _safe_gee_call(lambda: tt_final.getThumbURL({"region": dl_geom, "dimensions": 800, "crs": "EPSG:4326", "format": "png"}))
     except Exception:
         pass
 
     tt_dl = None
     try:
-        tt_dl = travel_time.getDownloadURL({"region": dl_geom, "scale": scale, "format": "GEO_TIFF", "crs": "EPSG:4326"})
+        tt_dl = _safe_gee_call(lambda: travel_time.getDownloadURL({"region": dl_geom, "scale": scale, "format": "GEO_TIFF", "crs": "EPSG:4326"}))
     except Exception:
         pass
 
     acc_thumb = None
     try:
-        acc_thumb = acc_final.getThumbURL({"region": dl_geom, "dimensions": 800, "crs": "EPSG:4326", "format": "png"})
+        acc_thumb = _safe_gee_call(lambda: acc_final.getThumbURL({"region": dl_geom, "dimensions": 800, "crs": "EPSG:4326", "format": "png"}))
     except Exception:
         pass
 

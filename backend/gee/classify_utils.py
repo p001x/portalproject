@@ -244,8 +244,21 @@ def quantile_classify(layers: list, aoi, scale: int, n_classes: int, reverse_pal
         except:
             pass
 
+    country = (aoi_config.get("country") or aoi_config.get("name") or "") if aoi_config else ""
+    from .aoi_utils import COUNTRY_PRESETS
+    is_massive = is_global or (country in COUNTRY_PRESETS and COUNTRY_PRESETS[country].get("is_massive"))
+
     area_sqkm = 0
-    calc_geom = ee.Geometry.Rectangle([-180, -85.051129, 180, 85.051129], "EPSG:4326", False) if is_global else aoi.bounds(maxError=1000)
+    if is_global:
+        calc_geom = ee.Geometry.Rectangle([-180, -85.051129, 180, 85.051129], "EPSG:4326", False)
+    elif is_massive and aoi_config:
+        try:
+            b, _ = get_bounds_and_center(aoi, aoi_config=aoi_config)
+            calc_geom = ee.Geometry.Polygon([b], None, False) if b else aoi.bounds(maxError=1000)
+        except Exception:
+            calc_geom = aoi.bounds(maxError=1000)
+    else:
+        calc_geom = aoi.bounds(maxError=1000)
 
     if custom_breaks:
         raw_data = {}

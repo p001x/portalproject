@@ -34,7 +34,8 @@ def ndbi_image_and_aoi(aoi_config: dict, start_date: str, end_date: str):
         .map(apply_scale_factors) \
         .map(compute_ndbi)
     
-    if collection.limit(1).size().getInfo() == 0:
+    from gee.aoi_utils import safe_get_info
+    if (safe_get_info(collection.limit(1).size()) or 0) == 0:
         raise ValueError("No satellite imagery (Landsat 4-9) found for this area and date range with <20% cloud cover. Try expanding the date range or choosing a different area.")
 
     ndbi_median = gap_fill(collection.median()).clip(aoi)

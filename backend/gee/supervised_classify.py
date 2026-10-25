@@ -51,7 +51,8 @@ def _get_feature_image(aoi, data_source, custom_asset_id):
         else:
             feature_image = ee.Image(custom_asset_id)
             
-        bands = feature_image.bandNames().getInfo()
+        from gee.aoi_utils import safe_get_info, _safe_gee_call
+        bands = safe_get_info(feature_image.bandNames()) or []
         vis_bands = bands[:3] if len(bands) >= 3 else [bands[0]]*3 if bands else []
         return feature_image, 10, {'bands': vis_bands, 'min': 0, 'max': 3000} if vis_bands else {}
             
@@ -294,7 +295,8 @@ def train_and_classify(samples: list, aoi=None, data_source="sentinel2", custom_
     }
 
     try:
-        map_id = vis_image.getMapId(vis_params)
+        from gee.aoi_utils import safe_get_info, _safe_gee_call
+        map_id = _safe_gee_call(vis_image.getMapId, vis_params)
     except Exception as e:
         logger.error("Failed to generate map_id: %s", e)
         raise ValueError(f"Earth Engine classification failed: {e}. This usually happens if training samples fall on masked pixels (e.g. clouds) or if one class is entirely lost during sampling.")
@@ -315,7 +317,7 @@ def train_and_classify(samples: list, aoi=None, data_source="sentinel2", custom_
     # Feature Importance
     importance_dict = {}
     try:
-        explanation = classifier.explain().getInfo()
+        explanation = safe_get_info(classifier.explain()) or {}
         if 'importance' in explanation:
             importance_dict = explanation['importance']
     except Exception as e:
@@ -357,12 +359,12 @@ def train_and_classify(samples: list, aoi=None, data_source="sentinel2", custom_
         conf_matrix = validated.errorMatrix("class", "classification")
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
-            f_acc = executor.submit(lambda: conf_matrix.accuracy().getInfo())
-            f_kappa = executor.submit(lambda: conf_matrix.kappa().getInfo())
-            f_conf = executor.submit(lambda: conf_matrix.getInfo())
-            f_prod = executor.submit(lambda: conf_matrix.producersAccuracy().getInfo())
-            f_cons = executor.submit(lambda: conf_matrix.consumersAccuracy().getInfo())
-            f_order = executor.submit(lambda: conf_matrix.order().getInfo())
+            f_acc = executor.submit(lambda: safe_get_info(conf_matrix.accuracy()))
+            f_kappa = executor.submit(lambda: safe_get_info(conf_matrix.kappa()))
+            f_conf = executor.submit(lambda: safe_get_info(conf_matrix))
+            f_prod = executor.submit(lambda: safe_get_info(conf_matrix.producersAccuracy()))
+            f_cons = executor.submit(lambda: safe_get_info(conf_matrix.consumersAccuracy()))
+            f_order = executor.submit(lambda: safe_get_info(conf_matrix.order()))
             
             acc_val = f_acc.result()
             kappa_val = f_kappa.result()
@@ -434,7 +436,7 @@ def train_and_classify(samples: list, aoi=None, data_source="sentinel2", custom_
         
         # Determine a safe scale for area calculation
         try:
-            area_sq_km = aoi_geom.bounds().area(maxError=100).getInfo() / 1e6
+            area_sq_km = (safe_get_info(aoi_geom.bounds().area(maxError=100)) or 0) / 1e6
             if area_sq_km > 10000:
                 calc_scale = 500
                 export_scales = [500, 1000, 2000]
@@ -447,7 +449,7 @@ def train_and_classify(samples: list, aoi=None, data_source="sentinel2", custom_
             else:
                 calc_scale = 50
                 export_scales = [30, 50, 100, 250]
-        except:
+        except Exception:
             calc_scale = 500
             export_scales = [500, 1000, 2000]
 
@@ -459,9 +461,10 @@ def train_and_classify(samples: list, aoi=None, data_source="sentinel2", custom_
             geometry=aoi_geom,  # Use original geometry instead of bounds to avoid corners
             scale=calc_scale,
             tileScale=16,
-            maxPixels=1e10
+            maxPixels=1e13,
+            bestEffort=True,
         )
-        area_results = areas_computed.getInfo().get('groups', [])
+        area_results = (safe_get_info(areas_computed) or {}).get('groups', [])
         
         for group in area_results:
             # The sum is in square meters, divide by 10,000 for hectares
@@ -484,7 +487,7 @@ def train_and_classify(samples: list, aoi=None, data_source="sentinel2", custom_
         # rather than the visualized RGB picture.
         for export_scale in export_scales:
             try:
-                download_url = classified.getDownloadURL({
+                download_url = _safe_gee_call(classified.getDownloadURL, {
                     'name': 'supervised_classification_classes',
                     'scale': export_scale,
                     'region': aoi_geom.bounds(),
@@ -507,7 +510,7 @@ def train_and_classify(samples: list, aoi=None, data_source="sentinel2", custom_
         rgb_image = vis_image.visualize(**vis_params)
         for export_scale in export_scales:
             try:
-                visualized_download_url = rgb_image.getDownloadURL({
+                visualized_download_url = _safe_gee_call(rgb_image.getDownloadURL, {
                     'name': 'supervised_classification_rgb',
                     'scale': export_scale,
                     'region': aoi_geom.bounds(),

@@ -314,6 +314,7 @@ def compute_change_detection(
         class_colors = ["#d73027", "#f46d43", "#fee08b", "#d9ef8b", "#1a9850"]
 
     # 5. Visualizations & Map IDs
+    from gee.aoi_utils import get_bounds_and_center, safe_get_info, _safe_gee_call
     diff_vis = {"min": vis_min, "max": vis_max, "palette": palette}
     
     # If water masked, overlay water in subtle dark blue
@@ -324,45 +325,49 @@ def compute_change_detection(
     else:
         diff_final_viz = diff.visualize(**diff_vis).clip(aoi)
 
-    diff_map_id = diff_final_viz.getMapId()
+    diff_map_id = _safe_gee_call(diff_final_viz.getMapId)
 
     # Before & After Index Visualizations
     idx_vis = {"min": -0.1, "max": 0.8, "palette": ["#a50026", "#fee08b", "#1a9850"]}
-    before_idx_map_id = before_idx.visualize(**idx_vis).clip(aoi).getMapId()
-    after_idx_map_id = after_idx.visualize(**idx_vis).clip(aoi).getMapId()
+    before_idx_map_id = _safe_gee_call(before_idx.visualize(**idx_vis).clip(aoi).getMapId)
+    after_idx_map_id = _safe_gee_call(after_idx.visualize(**idx_vis).clip(aoi).getMapId)
 
     # Before & After True-Color Satellite RGB Visualizations
     rgb_vis = {"bands": ["B4", "B3", "B2"], "min": 0.02, "max": 0.22, "gamma": 1.2}
-    before_rgb_map_id = before_comp.visualize(**rgb_vis).clip(aoi).getMapId()
-    after_rgb_map_id = after_comp.visualize(**rgb_vis).clip(aoi).getMapId()
+    before_rgb_map_id = _safe_gee_call(before_comp.visualize(**rgb_vis).clip(aoi).getMapId)
+    after_rgb_map_id = _safe_gee_call(after_comp.visualize(**rgb_vis).clip(aoi).getMapId)
 
     labels = list(classes.keys())
     area_img = ee.Image.cat(
         [classes[lbl].multiply(ee.Image.pixelArea()).rename(f"c{i}") for i, lbl in enumerate(labels)]
     )
 
-    from gee.aoi_utils import get_bounds_and_center
     bounds, center = get_bounds_and_center(aoi, aoi_config=aoi_config)
-    eval_geom = ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds(maxError=1000)
+    eval_geom = ee.Geometry.Polygon([bounds], "EPSG:4326", False) if bounds else aoi.bounds(maxError=1000)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         f_stats = executor.submit(
-            lambda: diff.reduceRegion(
-                reducer=ee.Reducer.mean()
-                .combine(ee.Reducer.min(), sharedInputs=True)
-                .combine(ee.Reducer.max(), sharedInputs=True)
-                .combine(ee.Reducer.stdDev(), sharedInputs=True),
-                geometry=eval_geom,
-                scale=dynamic_scale,
-                maxPixels=1e10,
-                tileScale=4,
-            ).getInfo()
+            lambda: safe_get_info(
+                diff.reduceRegion(
+                    reducer=ee.Reducer.mean()
+                    .combine(ee.Reducer.min(), sharedInputs=True)
+                    .combine(ee.Reducer.max(), sharedInputs=True)
+                    .combine(ee.Reducer.stdDev(), sharedInputs=True),
+                    geometry=eval_geom,
+                    scale=dynamic_scale,
+                    maxPixels=1e13,
+                    tileScale=16,
+                    bestEffort=True,
+                )
+            )
         )
 
         f_area = executor.submit(
-            lambda: area_img.reduceRegion(
-                reducer=ee.Reducer.sum(), geometry=eval_geom, scale=dynamic_scale, maxPixels=1e10, tileScale=4
-            ).getInfo() if method == "threshold" else {}
+            lambda: safe_get_info(
+                area_img.reduceRegion(
+                    reducer=ee.Reducer.sum(), geometry=eval_geom, scale=dynamic_scale, maxPixels=1e13, tileScale=16, bestEffort=True,
+                )
+            ) if method == "threshold" else {}
         )
         
         f_classify = executor.submit(
@@ -378,7 +383,7 @@ def compute_change_detection(
         )
 
         f_thumb = executor.submit(
-            lambda: diff_final_viz.getThumbURL({"region": eval_geom, "dimensions": 512, "crs": "EPSG:4326", "format": "png"})
+            lambda: _safe_gee_call(diff_final_viz.getThumbURL, {"region": eval_geom, "dimensions": 512, "crs": "EPSG:4326", "format": "png"})
         )
 
         try:
@@ -490,12 +495,15 @@ def inspect_change_point(
     after_idx = calculate_index(after_comp, index_type).rename("after")
     diff = after_idx.subtract(before_idx).rename("delta")
 
-    combined = ee.Image.cat([before_idx, after_idx, diff])
-    sampled = combined.reduceRegion(
-        reducer=ee.Reducer.first(),
-        geometry=point,
-        scale=30,
-    ).getInfo()
+    from gee.aoi_utils import safe_get_info
+    sampled = safe_get_info(
+        combined.reduceRegion(
+            reducer=ee.Reducer.first(),
+            geometry=point,
+            scale=30,
+            bestEffort=True,
+        )
+    ) or {}
 
     b_val = sampled.get("before")
     a_val = sampled.get("after")

@@ -44,7 +44,7 @@ def compute_ndvi(
         if cache_key in _cache:
             return _cache[cache_key]
 
-    from gee.aoi_utils import get_aoi_geometry, get_bounds_and_center
+    from gee.aoi_utils import get_aoi_geometry, get_bounds_and_center, safe_get_info, _safe_gee_call
     aoi = get_aoi_geometry(aoi_config)
     bounds, center = get_bounds_and_center(aoi, aoi_config)
     ee_bounds = ee.Geometry.Polygon([bounds], "EPSG:4326", False)
@@ -62,7 +62,7 @@ def compute_ndvi(
         "max": 0.8,
         "palette": ["#4575b4", "#d73027", "#fc8d59", "#fee08b", "#91cf60", "#1a9850"],
     }
-    map_id = median.getMapId(vis_params)
+    map_id = _safe_gee_call(median.getMapId, vis_params)
 
     # 1. Classification (computes thresholds, classified tile, and class areas)
     classify = quantile_classify(
@@ -76,15 +76,18 @@ def compute_ndvi(
     )
 
     # 2. Regional summary statistics
-    stats = median.reduceRegion(
+    reduction = median.reduceRegion(
         reducer=ee.Reducer.mean()
         .combine(ee.Reducer.min(), sharedInputs=True)
         .combine(ee.Reducer.max(), sharedInputs=True)
         .combine(ee.Reducer.stdDev(), sharedInputs=True),
         geometry=ee_bounds,
         scale=dynamic_scale,
-        maxPixels=1e10,
-    ).getInfo()
+        maxPixels=1e13,
+        tileScale=16,
+        bestEffort=True,
+    )
+    stats = safe_get_info(reduction) or {}
 
     panel = classify.get("panels", [{}])[0] if classify and classify.get("panels") else {}
     panel_areas = panel.get("areas", {})

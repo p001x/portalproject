@@ -2,6 +2,8 @@
 import os
 import json
 import logging
+import time
+import random
 import ee
 
 # --- Workaround for Google API ConnectionResetError on Windows (IPv6 / Proxies) ---
@@ -103,6 +105,7 @@ def initialize_gee(project_id: str | None = None, key_json_override: str | None 
                 pass
 
         # Guarantee working service account (ee-petersonyang87 / geoportalservices) is PRIMARY (Index 0)
+        # and peteryanservice is SECONDARY BACKUP (Index 1) for seamless rotation
         def _cred_rank(k_str):
             try:
                 kd = json.loads(k_str)
@@ -111,8 +114,8 @@ def initialize_gee(project_id: str | None = None, key_json_override: str | None 
                 if "ee-petersonyang87" in em or "ee-petersonyang87" in pk or "geoportalservices" in em:
                     return 0 # Working Primary
                 if "peteryanservice" in em or "project-93a68124" in em:
-                    return 2 # Deprecated/blocked project
-                return 1 # Standby Backup
+                    return 1 # Working Secondary Backup
+                return 2 # Other Standby Backup
             except Exception:
                 return 3
 
@@ -189,12 +192,11 @@ def _activate_credential_unlocked(idx: int, project_id: str | None = None):
         raise
         
     try:
-        roots = ee.data.getAssetRoots()
+        # Quick validation computation
+        _ = ee.Number(1).add(1).getInfo()
     except Exception as e:
-        err_msg = str(e).lower()
-        if "refresherror" in err_msg or "policy" in err_msg or "invalid_grant" in err_msg or "unauthorized" in err_msg:
-            logger.warning("Service Account %s failed authorization validation: %s", key_data.get("client_email"), e)
-            raise
+        logger.warning("Service Account %s failed computation validation: %s", key_data.get("client_email"), e)
+        raise
     _initialized = True
     _active_project_id = target_project
     _active_sa_email = key_data["client_email"]
@@ -215,9 +217,9 @@ def rotate_credentials() -> bool:
             _last_failover_time = time.time()
             role = "BACKUP" if _current_cred_idx != 0 else "PRIMARY"
             logger.warning("Shifting GEE Credentials! Switching from %s to %s (index %d)", old_email, role, _current_cred_idx)
-            print(f"[GEE Failover] Switched active account to {role} ({_active_sa_email})")
             try:
                 _activate_credential_unlocked(_current_cred_idx)
+                print(f"[GEE Failover] Switched active account to {role} ({_active_sa_email})")
                 return True
             except Exception as e:
                 logger.error("Failed to rotate credentials: %s", e)

@@ -1,10 +1,11 @@
 from gee.persistent_cache import with_cache
-from gee.aoi_utils import get_bounds_and_center
+from gee.aoi_utils import get_bounds_and_center, get_dynamic_scale, safe_get_info
+from gee.auth import rotate_credentials
 """Water Harvesting Calculator — FastAPI backend."""
 import json
 import ee
-
-from gee.aoi_utils import get_dynamic_scale
+import time
+import random
 
 from gee.persistent_cache import PersistentCache
 from threading import Lock
@@ -14,13 +15,26 @@ _cache_stats = PersistentCache(ttl=3600)
 _cache_export = PersistentCache(ttl=3600)
 _lock = Lock()
 
+def _safe_gee_call(func, *args, **kwargs):
+    retries = 5
+    for i in range(retries):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            err_str = str(e)
+            if "429" in err_str or "Too Many Requests" in err_str or "concurrency" in err_str.lower() or "quota" in err_str.lower():
+                rotate_credentials()
+                if i < retries - 1:
+                    time.sleep((2 ** i) + random.uniform(0, 1))
+                    continue
+            raise
+
 _PRECIP_VIS = {"min": 0, "max": 200, "palette": ["#f7fbff", "#c6dbef", "#6baed6", "#2171b5", "#08306b"]}
 
 def _build_water_harvesting_images(aoi_config: dict, start_year: int, end_year: int):
     from gee.aoi_utils import get_aoi_geometry
     aoi = get_aoi_geometry(aoi_config)
 
-    
     start_date = f"{start_year}-01-01"
     end_date = f"{end_year}-12-31"
     num_years = max(1, end_year - start_year + 1)
@@ -35,12 +49,14 @@ def _build_water_harvesting_images(aoi_config: dict, start_year: int, end_year: 
 
 def apply_natural_breaks(img: ee.Image, aoi: ee.Geometry, scale: int, n_classes: int = 5):
     from gee.classify_utils import get_jenks_breaks
-    hist = img.reduceRegion(
+    bounds, _ = get_bounds_and_center(aoi)
+    calc_geom = ee.Geometry.Polygon([bounds], "EPSG:4326", False) if bounds else aoi.bounds(maxError=1000)
+    hist = safe_get_info(img.reduceRegion(
         reducer=ee.Reducer.autoHistogram(maxBuckets=100),
-        geometry=aoi.bounds(maxError=1000), scale=scale, maxPixels=10000, bestEffort=True
-    ).getInfo()
+        geometry=calc_geom, scale=scale, maxPixels=1e13, bestEffort=True, tileScale=16
+    )) or {}
     
-    band_name = img.bandNames().get(0).getInfo()
+    band_name = safe_get_info(img.bandNames().get(0)) or "monthly_precip"
     band_hist = hist.get(band_name) if hist else []
     
     if not band_hist:
@@ -88,24 +104,27 @@ def compute_water_harvesting_map(aoi_config: dict, start_year: int, end_year: in
     
     vis_params = {"min": 1, "max": len(_PRECIP_VIS["palette"]), "palette": _PRECIP_VIS["palette"]}
     
-    map_id = classified_precip.getMapId(vis_params)
+    map_id = _safe_gee_call(lambda: classified_precip.getMapId(vis_params))
     
-    centroid = aoi.centroid(maxError=100).coordinates().getInfo()
-    bounds, _ = get_bounds_and_center(aoi)
+    bounds, center = get_bounds_and_center(aoi)
+    calc_geom = ee.Geometry.Polygon([bounds], "EPSG:4326", False) if bounds else aoi.bounds(maxError=1000)
     
-    thumb_url = classified_precip.getThumbURL({
-        **vis_params,
-        "region": aoi.bounds(),
-        "dimensions": 512, "crs": "EPSG:4326",
-        "format": "png"
-    })
+    try:
+        thumb_url = _safe_gee_call(lambda: classified_precip.getThumbURL({
+            **vis_params,
+            "region": calc_geom,
+            "dimensions": 512, "crs": "EPSG:4326",
+            "format": "png"
+        }))
+    except Exception:
+        thumb_url = ""
     
     labels = get_continuous_labels(breaks, " mm")
 
     result = {
         "tile_url": map_id["tile_fetcher"].url_format,
         "thumb_url": thumb_url,
-        "center": [centroid[1], centroid[0]],
+        "center": center,
         "bbox": bounds,
         "labels": labels
     }
@@ -136,10 +155,13 @@ def compute_water_harvesting_stats(aoi_config: dict, start_year: int, end_year: 
     aoi, annual_precip, monthly_precip, precip_col, num_years = _build_water_harvesting_images(aoi_config, start_year, end_year)
     
     # Calculate Area
+    bounds, _ = get_bounds_and_center(aoi)
+    calc_geom = ee.Geometry.Polygon([bounds], "EPSG:4326", False) if bounds else aoi.bounds(maxError=1000)
+
     if manual_area_m2 and manual_area_m2 > 0:
         area_m2 = manual_area_m2
     elif use_building_footprint:
-        aoi_area = aoi.area(maxError=100).getInfo()
+        aoi_area = safe_get_info(aoi.area(maxError=100)) or 0
         
         # Dynamic scale to allow district-wide building footprint calculations without memory crashes
         calc_scale = 2
@@ -153,12 +175,14 @@ def compute_water_harvesting_stats(aoi_config: dict, start_year: int, end_year: 
             # Use rasterization to compute building area within AOI highly efficiently
             building_mask = ee.Image(0).paint(buildings, 1).clip(aoi)
             pixel_area = ee.Image.pixelArea().updateMask(building_mask.eq(1))
-            area_dict = pixel_area.reduceRegion(
+            area_dict = safe_get_info(pixel_area.reduceRegion(
                 reducer=ee.Reducer.sum(),
-                geometry=aoi.bounds(maxError=1000),
+                geometry=calc_geom,
                 scale=calc_scale,
-                maxPixels=1e11
-            ).getInfo()
+                maxPixels=1e13,
+                tileScale=16,
+                bestEffort=True
+            )) or {}
             area_m2 = area_dict.get("area", 0.0)
             if area_m2 is None:
                 area_m2 = 0.0
@@ -166,15 +190,15 @@ def compute_water_harvesting_stats(aoi_config: dict, start_year: int, end_year: 
             area_m2 = 0.0
     else:
         # Calculate area of polygon in square meters
-        area_m2 = aoi.area(maxError=100).getInfo()
+        area_m2 = safe_get_info(aoi.area(maxError=100)) or 0.0
         
     # Extract time series of monthly precipitation over AOI
     def get_monthly(img):
-        val = img.reduceRegion(reducer=ee.Reducer.mean(), geometry=aoi.bounds(maxError=1000), scale=get_dynamic_scale(aoi), maxPixels=1e10).get('pr')
+        val = img.reduceRegion(reducer=ee.Reducer.mean(), geometry=calc_geom, scale=get_dynamic_scale(aoi), maxPixels=1e13, tileScale=16, bestEffort=True).get('pr')
         return ee.Feature(None, {'pr': val})
     
     fc = precip_col.map(get_monthly)
-    monthly_precip_series = fc.aggregate_array('pr').getInfo()
+    monthly_precip_series = safe_get_info(fc.aggregate_array('pr')) or []
     monthly_precip_series = [float(v) if v is not None else 0.0 for v in monthly_precip_series]
     
     # Pad to 12 months if necessary (TerraClimate should have 12)
@@ -259,14 +283,13 @@ def compute_water_harvesting_export(aoi_config: dict, start_year: int, end_year:
     classified_precip, breaks = apply_natural_breaks(monthly_precip, aoi, scale, len(_PRECIP_VIS["palette"]))
     
     try:
-        from gee.aoi_utils import get_bounds_and_center
         bounds, _ = get_bounds_and_center(aoi, aoi_config=aoi_config)
-        dl_geom = ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds()
-        download_url = monthly_precip.getDownloadURL({
+        dl_geom = ee.Geometry.Polygon([bounds], "EPSG:4326", False) if bounds else aoi.bounds(maxError=1000)
+        download_url = _safe_gee_call(lambda: monthly_precip.getDownloadURL({
             "scale": max(scale, 100),
             "region": dl_geom,
             "format": "GEO_TIFF"
-        })
+        }))
     except Exception:
         download_url = None
         

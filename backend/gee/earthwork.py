@@ -5,7 +5,7 @@ from gee.persistent_cache import PersistentCache
 import threading
 import math
 import numpy as np
-from gee.aoi_utils import get_dynamic_scale
+from gee.aoi_utils import get_dynamic_scale, safe_get_info, _safe_gee_call
 
 logger = logging.getLogger(__name__)
 
@@ -78,8 +78,8 @@ def _compute_volumes_only(
     cut_img = diff.updateMask(diff.gt(0)).multiply(pixel_area)
     fill_img = diff.updateMask(diff.lt(0)).abs().multiply(pixel_area)
     
-    cut_vol_dict = cut_img.reduceRegion(reducer=ee.Reducer.sum(), geometry=poly, scale=dynamic_scale, maxPixels=1e10).getInfo()
-    fill_vol_dict = fill_img.reduceRegion(reducer=ee.Reducer.sum(), geometry=poly, scale=dynamic_scale, maxPixels=1e10).getInfo()
+    cut_vol_dict = safe_get_info(cut_img.reduceRegion(reducer=ee.Reducer.sum(), geometry=poly, scale=dynamic_scale, maxPixels=1e13, tileScale=16, bestEffort=True)) or {}
+    fill_vol_dict = safe_get_info(fill_img.reduceRegion(reducer=ee.Reducer.sum(), geometry=poly, scale=dynamic_scale, maxPixels=1e13, tileScale=16, bestEffort=True)) or {}
     
     raw_cut_m3 = cut_vol_dict.get("DEM") or 0
     raw_fill_m3 = fill_vol_dict.get("DEM") or 0
@@ -96,7 +96,7 @@ def _compute_volumes_only(
             amount_in_layer = valid_above.min(layer_thickness)
             
             layer_vol_img = amount_in_layer.multiply(pixel_area)
-            layer_vol = layer_vol_img.reduceRegion(reducer=ee.Reducer.sum(), geometry=poly, scale=dynamic_scale, maxPixels=1e10).getInfo()
+            layer_vol = safe_get_info(layer_vol_img.reduceRegion(reducer=ee.Reducer.sum(), geometry=poly, scale=dynamic_scale, maxPixels=1e13, tileScale=16, bestEffort=True)) or {}
             vol_m3 = layer_vol.get("DEM") or 0
             adjusted_cut_m3 += vol_m3 * layer_swell
             current_depth += layer_thickness
@@ -105,7 +105,7 @@ def _compute_volumes_only(
         valid_above = depth_above.updateMask(depth_above.gt(0))
         if valid_above is not None:
             rem_vol_img = valid_above.multiply(pixel_area)
-            rem_vol = rem_vol_img.reduceRegion(reducer=ee.Reducer.sum(), geometry=poly, scale=dynamic_scale, maxPixels=1e10).getInfo()
+            rem_vol = safe_get_info(rem_vol_img.reduceRegion(reducer=ee.Reducer.sum(), geometry=poly, scale=dynamic_scale, maxPixels=1e13, tileScale=16, bestEffort=True)) or {}
             rem_vol_m3 = rem_vol.get("DEM") or 0
             adjusted_cut_m3 += rem_vol_m3 * swell_factor
     else:
@@ -125,12 +125,14 @@ def _optimize_grading_surface(poly, dem, mean_elev, swell_factor, shrink_factor,
     dem_with_coords = dem.addBands(ee.Image.pixelLonLat()).addBands(dist.rename('dist'))
     
     # We sample a max of 2000 points (pad + buffer) for daylighting optimization
-    samples = dem_with_coords.sample(
-        region=poly.buffer(300, 1),
-        scale=dynamic_scale,
-        geometries=False,
-        numPixels=2000
-    ).getInfo()
+    samples = safe_get_info(
+        dem_with_coords.sample(
+            region=poly.buffer(300, 1),
+            scale=dynamic_scale,
+            geometries=False,
+            numPixels=2000
+        )
+    ) or {}
     
     features = samples.get("features", [])
     if not features:
@@ -226,12 +228,16 @@ def _analyze_single_zone(
     poly, dem = get_earthwork_base(polygon_coords, custom_dem_id)
     dynamic_scale = get_dynamic_scale(poly)
     
-    mean_elev_dict = dem.reduceRegion(
-        reducer=ee.Reducer.mean(),
-        geometry=poly,
-        scale=dynamic_scale,
-        maxPixels=1e10
-    ).getInfo()
+    mean_elev_dict = safe_get_info(
+        dem.reduceRegion(
+            reducer=ee.Reducer.mean(),
+            geometry=poly,
+            scale=dynamic_scale,
+            maxPixels=1e13,
+            tileScale=16,
+            bestEffort=True,
+        )
+    ) or {}
     
     mean_elev = mean_elev_dict.get("DEM")
     if mean_elev is None:
@@ -282,8 +288,8 @@ def _analyze_single_zone(
     cut = diff.updateMask(diff.gt(0)).multiply(pixel_area)
     fill = diff.updateMask(diff.lt(0)).abs().multiply(pixel_area)
     
-    cut_vol_dict = cut.reduceRegion(reducer=ee.Reducer.sum(), geometry=calc_geom, scale=dynamic_scale, maxPixels=1e10).getInfo()
-    fill_vol_dict = fill.reduceRegion(reducer=ee.Reducer.sum(), geometry=calc_geom, scale=dynamic_scale, maxPixels=1e10).getInfo()
+    cut_vol_dict = safe_get_info(cut.reduceRegion(reducer=ee.Reducer.sum(), geometry=calc_geom, scale=dynamic_scale, maxPixels=1e13, tileScale=16, bestEffort=True)) or {}
+    fill_vol_dict = safe_get_info(fill.reduceRegion(reducer=ee.Reducer.sum(), geometry=calc_geom, scale=dynamic_scale, maxPixels=1e13, tileScale=16, bestEffort=True)) or {}
     
     raw_cut_m3 = cut_vol_dict.get("DEM") or 0
     raw_fill_m3 = fill_vol_dict.get("DEM") or 0
@@ -317,7 +323,7 @@ def _analyze_single_zone(
             amount_in_layer = valid_above.min(layer_thickness)
             
             layer_vol_img = amount_in_layer.multiply(pixel_area)
-            layer_vol = layer_vol_img.reduceRegion(reducer=ee.Reducer.sum(), geometry=calc_geom, scale=dynamic_scale, maxPixels=1e10).getInfo()
+            layer_vol = safe_get_info(layer_vol_img.reduceRegion(reducer=ee.Reducer.sum(), geometry=calc_geom, scale=dynamic_scale, maxPixels=1e13, tileScale=16, bestEffort=True)) or {}
             vol_m3 = layer_vol.get("DEM") or 0
             
             if water_table_depth > 0:
@@ -348,7 +354,7 @@ def _analyze_single_zone(
         valid_above = depth_above.updateMask(depth_above.gt(0))
         if valid_above is not None:
             rem_vol_img = valid_above.multiply(pixel_area)
-            rem_vol = rem_vol_img.reduceRegion(reducer=ee.Reducer.sum(), geometry=calc_geom, scale=dynamic_scale, maxPixels=1e10).getInfo()
+            rem_vol = safe_get_info(rem_vol_img.reduceRegion(reducer=ee.Reducer.sum(), geometry=calc_geom, scale=dynamic_scale, maxPixels=1e13, tileScale=16, bestEffort=True)) or {}
             rem_vol_m3 = rem_vol.get("DEM") or 0
             rem_adj_vol_m3 = rem_vol_m3 * swell_factor
             if rem_vol_m3 > 0.1:
@@ -363,7 +369,7 @@ def _analyze_single_zone(
     
     adjusted_fill_m3 = raw_fill_m3 / shrink_factor if shrink_factor > 0 else raw_fill_m3
     
-    area_m2 = calc_geom.area(maxError=1).getInfo()
+    area_m2 = safe_get_info(calc_geom.area(maxError=1)) or 0
     
     cut_diff = diff.updateMask(diff.gt(0))
     cut_vis = cut_diff.visualize(min=0, max=5, palette=["#fc9272", "#fb6a4a", "#ef3b2c", "#cb181d", "#99000d"])
@@ -372,26 +378,30 @@ def _analyze_single_zone(
     fill_vis = fill_diff_abs.visualize(min=0, max=5, palette=["#9ecae1", "#6baed6", "#4292c6", "#2171b5", "#084594"])
     
     heatmap = ee.ImageCollection([fill_vis, cut_vis]).mosaic().clip(calc_geom)
-    map_id = heatmap.getMapId()
+    map_id = _safe_gee_call(heatmap.getMapId)
     
     proposed_slope = ee.Terrain.slope(proposed_surface).clip(calc_geom)
     drainage_vis = proposed_slope.visualize(min=0, max=10, palette=["#313695", "#74add1", "#abdda4", "#fdae61", "#d7191c"])
     
     cut_with_coords = cut_diff.addBands(ee.Image.pixelLonLat())
-    max_cut_feat = cut_with_coords.reduceRegion(
+    max_cut_feat = safe_get_info(cut_with_coords.reduceRegion(
         reducer=ee.Reducer.max(3).setOutputs(['depth', 'lon', 'lat']),
         geometry=calc_geom,
         scale=dynamic_scale,
-        maxPixels=1e10
-    ).getInfo()
+        maxPixels=1e13,
+        tileScale=16,
+        bestEffort=True,
+    )) or {}
     
     fill_with_coords = fill_diff_abs.addBands(ee.Image.pixelLonLat())
-    max_fill_feat = fill_with_coords.reduceRegion(
+    max_fill_feat = safe_get_info(fill_with_coords.reduceRegion(
         reducer=ee.Reducer.max(3).setOutputs(['depth', 'lon', 'lat']),
         geometry=calc_geom,
         scale=dynamic_scale,
-        maxPixels=1e10
-    ).getInfo()
+        maxPixels=1e13,
+        tileScale=16,
+        bestEffort=True,
+    )) or {}
 
     max_cut_pt = None
     if max_cut_feat.get('lon') is not None and max_cut_feat.get('lat') is not None:
@@ -405,9 +415,9 @@ def _analyze_single_zone(
     
     cut_mass_x = lonLat.select('longitude').multiply(cut_diff)
     cut_mass_y = lonLat.select('latitude').multiply(cut_diff)
-    cut_x_sum = cut_mass_x.reduceRegion(reducer=ee.Reducer.sum(), geometry=calc_geom, scale=dynamic_scale, maxPixels=1e10).getInfo().get('longitude', 0)
-    cut_y_sum = cut_mass_y.reduceRegion(reducer=ee.Reducer.sum(), geometry=calc_geom, scale=dynamic_scale, maxPixels=1e10).getInfo().get('latitude', 0)
-    cut_depth_sum = cut_diff.reduceRegion(reducer=ee.Reducer.sum(), geometry=calc_geom, scale=dynamic_scale, maxPixels=1e10).getInfo().get('DEM', 0)
+    cut_x_sum = (safe_get_info(cut_mass_x.reduceRegion(reducer=ee.Reducer.sum(), geometry=calc_geom, scale=dynamic_scale, maxPixels=1e13, tileScale=16, bestEffort=True)) or {}).get('longitude', 0)
+    cut_y_sum = (safe_get_info(cut_mass_y.reduceRegion(reducer=ee.Reducer.sum(), geometry=calc_geom, scale=dynamic_scale, maxPixels=1e13, tileScale=16, bestEffort=True)) or {}).get('latitude', 0)
+    cut_depth_sum = (safe_get_info(cut_diff.reduceRegion(reducer=ee.Reducer.sum(), geometry=calc_geom, scale=dynamic_scale, maxPixels=1e13, tileScale=16, bestEffort=True)) or {}).get('DEM', 0)
     
     cut_centroid = None
     if cut_depth_sum > 0:
@@ -415,9 +425,9 @@ def _analyze_single_zone(
         
     fill_mass_x = lonLat.select('longitude').multiply(fill_diff_abs)
     fill_mass_y = lonLat.select('latitude').multiply(fill_diff_abs)
-    fill_x_sum = fill_mass_x.reduceRegion(reducer=ee.Reducer.sum(), geometry=calc_geom, scale=dynamic_scale, maxPixels=1e10).getInfo().get('longitude', 0)
-    fill_y_sum = fill_mass_y.reduceRegion(reducer=ee.Reducer.sum(), geometry=calc_geom, scale=dynamic_scale, maxPixels=1e10).getInfo().get('latitude', 0)
-    fill_depth_sum = fill_diff_abs.reduceRegion(reducer=ee.Reducer.sum(), geometry=calc_geom, scale=dynamic_scale, maxPixels=1e10).getInfo().get('DEM', 0)
+    fill_x_sum = (safe_get_info(fill_mass_x.reduceRegion(reducer=ee.Reducer.sum(), geometry=calc_geom, scale=dynamic_scale, maxPixels=1e13, tileScale=16, bestEffort=True)) or {}).get('longitude', 0)
+    fill_y_sum = (safe_get_info(fill_mass_y.reduceRegion(reducer=ee.Reducer.sum(), geometry=calc_geom, scale=dynamic_scale, maxPixels=1e13, tileScale=16, bestEffort=True)) or {}).get('latitude', 0)
+    fill_depth_sum = (safe_get_info(fill_diff_abs.reduceRegion(reducer=ee.Reducer.sum(), geometry=calc_geom, scale=dynamic_scale, maxPixels=1e13, tileScale=16, bestEffort=True)) or {}).get('DEM', 0)
     
     fill_centroid = None
     if fill_depth_sum > 0:
@@ -436,12 +446,14 @@ def _analyze_single_zone(
     land_cover_stats = []
     try:
         lc = ee.ImageCollection("ESA/WorldCover/v200/2021").first().clip(calc_geom)
-        lc_hist = lc.reduceRegion(
+        lc_hist = (safe_get_info(lc.reduceRegion(
             reducer=ee.Reducer.frequencyHistogram(),
             geometry=calc_geom,
             scale=10,
-            maxPixels=1e10
-        ).getInfo().get('Map', {})
+            maxPixels=1e13,
+            tileScale=16,
+            bestEffort=True,
+        )) or {}).get('Map', {})
         
         LC_CLASSES = {
             '10': "Tree cover",
@@ -716,11 +728,14 @@ def profile_earthwork_line(
     
     combined = dem.rename('existing_elev').addBands(target_surface.rename('proposed_elev'))
     
-    sampled = combined.reduceRegions(
-        collection=fc,
-        reducer=ee.Reducer.first(),
-        scale=30
-    ).getInfo()
+    sampled = safe_get_info(
+        combined.reduceRegions(
+            collection=fc,
+            reducer=ee.Reducer.first(),
+            scale=30,
+            tileScale=16,
+        )
+    ) or {}
     
     features = sampled.get("features", [])
     
@@ -770,7 +785,10 @@ def get_earthwork_3d_grid(
     else:
         bounds = poly.bounds()
         
-    coords = bounds.coordinates().get(0).getInfo()
+    coords = safe_get_info(bounds.coordinates().get(0)) or []
+    if not coords:
+        return {"original_z": [], "proposed_z": [], "lon_min": 0, "lon_max": 0, "lat_min": 0, "lat_max": 0, "scale": 10}
+
     lon_min = min(c[0] for c in coords)
     lon_max = max(c[0] for c in coords)
     lat_min = min(c[1] for c in coords)
@@ -784,7 +802,7 @@ def get_earthwork_3d_grid(
     scale = max(10, max_dist / 50.0)
     
     if target_elevation is None:
-        mean_elev = dem.reduceRegion(ee.Reducer.mean(), poly, scale=dynamic_scale, maxPixels=1e10).getInfo().get("DEM", 0)
+        mean_elev = (safe_get_info(dem.reduceRegion(ee.Reducer.mean(), poly, scale=dynamic_scale, maxPixels=1e13, tileScale=16, bestEffort=True)) or {}).get("DEM", 0)
         target_elevation = mean_elev
         
     target_surface = get_target_surface(poly, target_elevation, slope_grade, slope_angle)
@@ -811,8 +829,8 @@ def get_earthwork_3d_grid(
     dem_resampled = dem.unmask().reproject(crs="EPSG:4326", scale=scale)
     prop_resampled = proposed_dem.unmask().reproject(crs="EPSG:4326", scale=scale)
     
-    dem_grid = dem_resampled.sampleRectangle(region=bounds, defaultValue=0).getInfo()
-    prop_grid = prop_resampled.sampleRectangle(region=bounds, defaultValue=0).getInfo()
+    dem_grid = safe_get_info(dem_resampled.sampleRectangle(region=bounds, defaultValue=0)) or {}
+    prop_grid = safe_get_info(prop_resampled.sampleRectangle(region=bounds, defaultValue=0)) or {}
     
     return {
         "original_z": dem_grid.get("properties", {}).get("DEM", []),
@@ -843,7 +861,7 @@ def get_earthwork_3d_surface(
     
     # Calculate target surface
     if target_elevation is None:
-        target_elevation = dem.reduceRegion(reducer=ee.Reducer.mean(), geometry=poly, scale=dynamic_scale, maxPixels=1e10).getInfo().get("DEM")
+        target_elevation = (safe_get_info(dem.reduceRegion(reducer=ee.Reducer.mean(), geometry=poly, scale=dynamic_scale, maxPixels=1e13, tileScale=16, bestEffort=True)) or {}).get("DEM")
     target_surface = get_target_surface(poly, target_elevation, slope_grade, slope_angle)
     
     if batter_ratio > 0:
@@ -859,12 +877,14 @@ def get_earthwork_3d_surface(
         
     dem_with_props = dem.addBands(ee.Image.pixelLonLat()).addBands(proposed.rename('proposed'))
     
-    samples = dem_with_props.sample(
-        region=poly.buffer(100, 1),
-        scale=dynamic_scale,
-        geometries=False,
-        numPixels=3000
-    ).getInfo()
+    samples = safe_get_info(
+        dem_with_props.sample(
+            region=poly.buffer(100, 1),
+            scale=dynamic_scale,
+            geometries=False,
+            numPixels=3000
+        )
+    ) or {}
     
     features = samples.get("features", [])
     if not features:

@@ -8,7 +8,7 @@ import concurrent.futures
 from threading import Lock
 from gee.classify_utils import quantile_classify
 
-from gee.aoi_utils import get_dynamic_scale, get_aoi_geometry, get_bounds_and_center, get_historical_ndvi
+from gee.aoi_utils import get_dynamic_scale, get_aoi_geometry, get_bounds_and_center, get_historical_ndvi, safe_get_info
 
 _cache_map = PersistentCache(ttl=3600)
 _cache_stats = PersistentCache(ttl=3600)
@@ -236,7 +236,7 @@ def _build_rusle_images(
                     image=export_img.toFloat(), # Convert to 32-bit float to save storage space
                     description=f"AutoCache_RUSLE_{year}_{config_hash}",
                     assetId=asset_id,
-                    region=ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds(),
+                    region=ee.Geometry.Polygon([bounds], "EPSG:4326", False) if bounds else aoi.bounds(),
                     scale=dynamic_scale,
                     maxPixels=1e13
                 )
@@ -339,9 +339,11 @@ def compute_rusle_stats(
         .combine(ee.Reducer.stdDev(), sharedInputs=True)
     )
 
-    stats_raw = all_factors_img.reduceRegion(
-        reducer=combined_reducer, geometry=aoi, scale=scale, maxPixels=1e10
-    ).getInfo()
+    bounds, _ = get_bounds_and_center(aoi, aoi_config=aoi_config)
+    eval_geom = ee.Geometry.Polygon([bounds], "EPSG:4326", False) if bounds else aoi.bounds(maxError=1000)
+    stats_raw = safe_get_info(all_factors_img.reduceRegion(
+        reducer=combined_reducer, geometry=eval_geom, scale=scale, maxPixels=1e13, bestEffort=True, tileScale=4
+    )) or {}
 
     result = {
         "stats": {
@@ -391,7 +393,7 @@ def compute_rusle_classify(
         ]
         labels = [lbl for lbl, _ in fixed_class_thresholds]
         area_img = ee.Image.cat([mask.multiply(ee.Image.pixelArea()).rename(f"c{i}") for i, (_, mask) in enumerate(fixed_class_thresholds)])
-        areas = area_img.reduceRegion(reducer=ee.Reducer.sum(), geometry=aoi, scale=scale, maxPixels=1e10).getInfo()
+        areas = safe_get_info(area_img.reduceRegion(reducer=ee.Reducer.sum(), geometry=aoi, scale=scale, maxPixels=1e13, bestEffort=True, tileScale=4)) or {}
         
         cls = ee.Image(1)
         for i, (_, mask) in enumerate(fixed_class_thresholds):
@@ -420,7 +422,7 @@ def compute_rusle_classify(
             {"name": "P", "image": res["factor_images"]["P"], "title": "Support Practice (P)", "palette": FACTOR_VIS["P"]["palette"]},
             {"name": "risk_index", "image": res["risk_index"], "title": "Risk Index"},
         ]
-        other_result = quantile_classify(layers=other_layers, aoi=aoi, scale=scale, n_classes=5, custom_labels=other_labels, method="natural_breaks")
+        other_result = quantile_classify(layers=other_layers, aoi=aoi, scale=scale, n_classes=5, custom_labels=other_labels, method="natural_breaks", aoi_config=aoi_config)
         result["panels"].extend(other_result["panels"])
 
     else:
@@ -434,7 +436,7 @@ def compute_rusle_classify(
             {"name": "P", "image": res["factor_images"]["P"], "title": "Support Practice (P)", "palette": FACTOR_VIS["P"]["palette"]},
             {"name": "risk_index", "image": res["risk_index"], "title": "Risk Index"},
         ]
-        result = quantile_classify(layers=layers_to_classify, aoi=aoi, scale=scale, n_classes=n_classes, custom_labels=labels, method=method)
+        result = quantile_classify(layers=layers_to_classify, aoi=aoi, scale=scale, n_classes=n_classes, custom_labels=labels, method=method, aoi_config=aoi_config)
 
 
     with _lock:
@@ -459,7 +461,7 @@ def compute_rusle_export(
 
     scale = max(res.get("scale", 250), get_dynamic_scale(aoi, aoi_config=aoi_config))
     bounds = res.get("bounds")
-    dl_region = ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds()
+    dl_region = ee.Geometry.Polygon([bounds], "EPSG:4326", False) if bounds else aoi.bounds()
 
     def get_dl_url(img):
         try:

@@ -15,7 +15,7 @@ from gee.classify_utils import (
     class_palette,
 )
 
-from gee.aoi_utils import get_dynamic_scale
+from gee.aoi_utils import get_dynamic_scale, safe_get_info, get_bounds_and_center
 
 _cache_unified = PersistentCache(ttl=3600)
 _cache_build = PersistentCache(ttl=3600)
@@ -137,13 +137,10 @@ def _classify_all_raw_images(raw_dict: dict, aoi: ee.Geometry, scale: int, n_cla
     
     # Combine into a single image to compute all histograms in one GEE request
     all_bands = ee.Image.cat([img.rename(nm) for nm, img in zip(names, images)])
-    hist_raw = all_bands.reduceRegion(
+    hist_raw = safe_get_info(all_bands.reduceRegion(
         reducer=ee.Reducer.autoHistogram(maxBuckets=100),
         geometry=aoi.bounds(maxError=1000), scale=scale, maxPixels=20000, bestEffort=True
-    ).getInfo()
-    
-    if not hist_raw:
-        hist_raw = {}
+    )) or {}
         
     classified = {}
     breaks_dict = {}
@@ -241,10 +238,10 @@ def _build_habitat_images(
         slope_deg = ee.Terrain.slope(dem).clip(aoi)
         
         try:
-            bounds_coords = aoi.bounds(maxError=1000).coordinates().get(0).getInfo()
-            lats = [pt[1] for pt in bounds_coords]
+            bnds, _ = get_bounds_and_center(aoi, aoi_config)
+            lats = [pt[1] for pt in bnds] if isinstance(bnds[0], (list, tuple)) else [bnds[1], bnds[3]]
             use_era5_precip = max(lats) > 50 or min(lats) < -50
-        except:
+        except Exception:
             use_era5_precip = True
 
         n_years = max(1, end_year - start_year + 1)
@@ -349,12 +346,8 @@ def compute_habitat(
             k, map_dict = f.result()
             factor_maps[k] = map_dict
         
-    geom_info = ee.Dictionary({
-        "centroid": aoi.centroid(maxError=100).coordinates(),
-        "bounds": aoi.bounds().coordinates().get(0)
-    }).getInfo()
-    centroid = geom_info.get("centroid", [30.0, -1.9])
-    bounds = geom_info.get("bounds", [])
+    bounds, center = get_bounds_and_center(aoi, aoi_config=aoi_config)
+    dl_geom = ee.Geometry.Polygon([bounds], "EPSG:4326", False) if bounds else aoi.bounds()
 
     # 2. Stats Data
     classes = {
@@ -366,14 +359,10 @@ def compute_habitat(
     }
     stat_labels = list(classes.keys())
     area_img = ee.Image.cat([classes[lbl].multiply(ee.Image.pixelArea()).rename(f"c{i}") for i, lbl in enumerate(stat_labels)])
-    area_dict = area_img.reduceRegion(
-        reducer=ee.Reducer.sum(), geometry=aoi.bounds(maxError=1000), scale=scale, maxPixels=1e10
-    ).getInfo() or {}
+    area_dict = safe_get_info(area_img.reduceRegion(
+        reducer=ee.Reducer.sum(), geometry=dl_geom, scale=scale, maxPixels=1e13, bestEffort=True, tileScale=4
+    )) or {}
     class_areas = {lbl: round((area_dict.get(f"c{i}") or 0) / 1e6, 2) for i, lbl in enumerate(stat_labels)}
-
-    from gee.aoi_utils import get_bounds_and_center
-    bounds, _ = get_bounds_and_center(aoi, aoi_config=aoi_config)
-    dl_geom = ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds()
 
     # 3 & 4. Classify and Export Data (Parallelized with ThreadPoolExecutor for rapid response)
     def safe_url(img, name):
@@ -394,7 +383,8 @@ def compute_habitat(
         try:
             return quantile_classify(
                 layers=[{"name": "suitability", "image": suitability, "title": "Habitat Suitability"}],
-                aoi=aoi, scale=max(scale, 100), n_classes=n_classes, method=method, custom_labels=custom_labels
+                aoi=aoi, scale=max(scale, 100), n_classes=n_classes, method=method, custom_labels=custom_labels,
+                aoi_config=aoi_config
             )
         except Exception:
             return None

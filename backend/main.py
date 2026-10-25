@@ -1086,6 +1086,7 @@ class LandslideRequest(BaseModel):
     reverse_twi: bool = False
     reverse_dist: bool = False
     custom_palettes: Optional[dict] = Field(default_factory=dict)
+    weights: Optional[dict] = Field(default_factory=dict)
 
 
 class AccessibilityRequest(BaseModel):
@@ -2166,6 +2167,7 @@ def landslide_map_endpoint(req: LandslideRequest):
             reverse_litho=req.reverse_litho, reverse_soiltype=req.reverse_soiltype,
             reverse_landcover=req.reverse_landcover, reverse_twi=req.reverse_twi,
             reverse_dist=req.reverse_dist, custom_palettes=req.custom_palettes,
+            weights=req.weights,
         )
     except Exception as exc:
         logger.exception("Landslide map failed for %s", req.district)
@@ -2179,7 +2181,7 @@ def landslide_stats_endpoint(req: LandslideRequest):
             reverse_slope=req.reverse_slope, reverse_rainfall=req.reverse_rainfall,
             reverse_litho=req.reverse_litho, reverse_soiltype=req.reverse_soiltype,
             reverse_landcover=req.reverse_landcover, reverse_twi=req.reverse_twi,
-            reverse_dist=req.reverse_dist,
+            reverse_dist=req.reverse_dist, weights=req.weights,
         )
     except Exception as exc:
         logger.exception("Landslide stats failed for %s", req.district)
@@ -2193,7 +2195,8 @@ def landslide_classify_endpoint(req: LandslideRequest):
             reverse_slope=req.reverse_slope, reverse_rainfall=req.reverse_rainfall,
             reverse_litho=req.reverse_litho, reverse_soiltype=req.reverse_soiltype,
             reverse_landcover=req.reverse_landcover, reverse_twi=req.reverse_twi,
-            reverse_dist=req.reverse_dist,
+            reverse_dist=req.reverse_dist, method=req.method or "natural_breaks",
+            custom_labels=req.custom_labels, weights=req.weights,
         )
     except Exception as exc:
         logger.exception("Landslide classify failed for %s", req.district)
@@ -2208,6 +2211,7 @@ def landslide_export_endpoint(req: LandslideRequest):
             reverse_litho=req.reverse_litho, reverse_soiltype=req.reverse_soiltype,
             reverse_landcover=req.reverse_landcover, reverse_twi=req.reverse_twi,
             reverse_dist=req.reverse_dist, custom_palettes=req.custom_palettes,
+            weights=req.weights,
         )
     except Exception as exc:
         logger.exception("Landslide export failed for %s", req.district)

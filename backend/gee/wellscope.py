@@ -83,7 +83,7 @@ def _normalize_weights(custom: dict | None) -> dict:
     total = sum(raw.values())
     return {k: v / total for k, v in raw.items()}
 
-from gee.aoi_utils import get_dynamic_scale
+from gee.aoi_utils import get_dynamic_scale, safe_get_info
 
 def _build_wellscope_base(aoi_config: dict, custom_weights: dict = None):
     cache_key = (json.dumps(aoi_config, sort_keys=True), json.dumps(custom_weights, sort_keys=True) if custom_weights else None)
@@ -168,16 +168,16 @@ def _build_wellscope_base(aoi_config: dict, custom_weights: dict = None):
         else:
             scale_hist = min(dynamic_scale * 2 if dynamic_scale else 100, 5000)
 
-        hist_region = ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds(maxError=1000)
+        hist_region = ee.Geometry.Polygon([bounds], "EPSG:4326", False) if bounds else aoi.bounds(maxError=1000)
         with gee_semaphore:
-            hist_raw = continuous_bands.reduceRegion(
+            hist_raw = safe_get_info(continuous_bands.reduceRegion(
                 reducer=ee.Reducer.autoHistogram(maxBuckets=50),
                 geometry=hist_region,
                 scale=scale_hist,
                 maxPixels=1e13,
                 tileScale=4,
                 bestEffort=True
-            ).getInfo()
+            )) or {}
 
         def apply_jenks(img, name, reverse=False, n=5):
             hist = hist_raw.get(name) or []
@@ -304,17 +304,17 @@ def compute_wellscope_stats(aoi_config: dict, custom_weights: dict = None) -> di
 
     from gee.aoi_utils import get_bounds_and_center
     bounds, _ = get_bounds_and_center(aoi, aoi_config=aoi_config)
-    eval_geom = ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds(maxError=1000)
+    eval_geom = ee.Geometry.Polygon([bounds], "EPSG:4326", False) if bounds else aoi.bounds(maxError=1000)
 
     with gee_semaphore:
-        stats = suitability_100.reduceRegion(
+        stats = safe_get_info(suitability_100.reduceRegion(
             reducer=ee.Reducer.mean().combine(ee.Reducer.min(), sharedInputs=True).combine(ee.Reducer.max(), sharedInputs=True),
             geometry=eval_geom,
             scale=dynamic_scale,
             maxPixels=1e13,
             tileScale=4,
             bestEffort=True
-        ).getInfo()
+        )) or {}
 
     result = {
         "Mean Suitability": round(stats.get("GWP_mean") or 0, 1),
@@ -345,7 +345,8 @@ def compute_wellscope_classify(aoi_config: dict, custom_weights: dict = None, n_
         n_classes=n_classes,
         reverse_palette=False,
         method=classify_method,
-        custom_labels=custom_labels
+        custom_labels=custom_labels,
+        aoi_config=aoi_config
     )
 
     raw_areas = classify.get("panels", [{}])[0].get("areas", {})
@@ -370,7 +371,7 @@ def compute_wellscope_export(aoi_config: dict, custom_weights: dict = None) -> d
     aoi, dynamic_scale, _, _, suitability_100 = _build_wellscope_base(aoi_config, custom_weights)
     from gee.aoi_utils import get_bounds_and_center
     bounds, _ = get_bounds_and_center(aoi, aoi_config=aoi_config)
-    dl_geom = ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds()
+    dl_geom = ee.Geometry.Polygon([bounds], "EPSG:4326", False) if bounds else aoi.bounds()
     dl_scale = max(dynamic_scale, 100)
 
     with gee_semaphore:

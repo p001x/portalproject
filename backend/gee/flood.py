@@ -1,5 +1,5 @@
 from gee.persistent_cache import with_cache
-from gee.aoi_utils import get_bounds_and_center
+from gee.aoi_utils import get_bounds_and_center, safe_get_info
 import json
 import math
 import ee
@@ -447,11 +447,11 @@ def compute_flood_stats(aoi_config: dict, start_year: int, end_year: int, weight
     ])
 
     bounds, _ = get_bounds_and_center(aoi, aoi_config=aoi_config)
-    calc_geom = ee.Geometry.Polygon([bounds]) if bounds else (ee.Geometry.Rectangle([-180, -85, 180, 85], "EPSG:4326", False) if is_global else aoi)
+    calc_geom = ee.Geometry.Polygon([bounds], "EPSG:4326", False) if bounds else (ee.Geometry.Rectangle([-180, -85, 180, 85], "EPSG:4326", False) if is_global else aoi)
     dyn_scale = get_dynamic_scale(aoi, aoi_config=aoi_config)
-    area_dict = area_img.reduceRegion(
+    area_dict = safe_get_info(area_img.reduceRegion(
         reducer=ee.Reducer.sum(), geometry=calc_geom, scale=dyn_scale, maxPixels=1e13, bestEffort=True, tileScale=16
-    ).getInfo()
+    )) or {}
 
     class_areas_km2 = {lbl: (area_dict.get(f"c{i}") or 0) / 1e6 for i, lbl in enumerate(labels)}
 
@@ -502,7 +502,8 @@ def compute_flood_classify(aoi_config: dict, start_year: int, end_year: int, wei
         scale=get_dynamic_scale(aoi, aoi_config=aoi_config), 
         n_classes=n_classes, 
         custom_labels=custom_labels or FLOOD_CLASS_NAMES, 
-        method=method
+        method=method,
+        aoi_config=aoi_config
     )
 
     result = {
@@ -516,16 +517,24 @@ def compute_flood_classify(aoi_config: dict, start_year: int, end_year: int, wei
 
 @with_cache
 def compute_flood_export(aoi_config: dict, start_year: int, end_year: int, weights: dict, reverse_flags: dict) -> dict:
+    cache_key = ("flood_export", json.dumps(aoi_config, sort_keys=True), start_year, end_year, json.dumps(weights, sort_keys=True), json.dumps(reverse_flags, sort_keys=True))
+    with _lock:
+        if cache_key in _cache:
+            return _cache[cache_key]
+
     suitability, _, _, aoi, is_global = _build_flood_image(aoi_config, start_year, end_year, weights, reverse_flags)
     
-    from threading import BoundedSemaphore
-    gee_semaphore = BoundedSemaphore(5)
+    bounds, _ = get_bounds_and_center(aoi, aoi_config=aoi_config)
     with gee_semaphore:
-        calc_geom = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False) if is_global else aoi.bounds(maxError=1000)
+        calc_geom = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False) if is_global else (ee.Geometry.Polygon([bounds], "EPSG:4326", False) if bounds else aoi.bounds(maxError=1000))
         try:
             scale = max(100, get_dynamic_scale(aoi, aoi_config=aoi_config))
             download_url = suitability.getDownloadURL({"scale": scale, "region": calc_geom, "format": "GEO_TIFF"})
         except Exception:
             download_url = None
-    return {"download_url": download_url}
+            
+    result = {"download_url": download_url}
+    with _lock:
+        _cache[cache_key] = result
+    return result
 

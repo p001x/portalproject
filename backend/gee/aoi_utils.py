@@ -5,21 +5,60 @@ import math
 import time
 import random
 
-def safe_get_info(ee_obj, retries=6):
+def safe_get_info(ee_obj, retries=8):
     """
-    Robust wrapper for ee.getInfo() that automatically implements exponential backoff 
-    when Google Earth Engine triggers HTTP 429 'Too Many Requests' due to concurrency limits 
-    in Restricted Mode (Free Tier).
+    Robust wrapper for ee.getInfo() that automatically shifts service accounts via
+    credential rotation and implements exponential backoff when Google Earth Engine triggers
+    HTTP 429 'Too Many Requests', concurrency, rate limits, or quota errors.
     """
     for i in range(retries):
         try:
             return ee_obj.getInfo()
         except Exception as e:
-            err_str = str(e)
-            if "429" in err_str or "Too Many Requests" in err_str or "concurrency" in err_str.lower():
+            err_str = str(e).lower()
+            if any(term in err_str for term in [
+                "429", "too many requests", "concurrency", "quota", 
+                "user limit", "rate limit", "deadline exceeded", 
+                "permission to use project", "serviceusage", "timeout", "timed out"
+            ]):
                 if i < retries - 1:
-                    sleep_time = (2 ** i) + random.uniform(0, 1)
-                    print(f"GEE 429 Concurrency Limit Hit. Retrying in {sleep_time:.2f}s...")
+                    try:
+                        from gee.auth import rotate_credentials
+                        rotated = rotate_credentials()
+                        if rotated:
+                            print(f"[safe_get_info] Automatically shifted active service account! Retrying immediately...")
+                            time.sleep(0.3)
+                            continue
+                    except Exception:
+                        pass
+                    sleep_time = (1.5 ** i) + random.uniform(0.5, 1.5)
+                    print(f"GEE Concurrency/Quota Limit Hit. Retrying in {sleep_time:.2f}s (attempt {i+1}/{retries})...")
+                    time.sleep(sleep_time)
+                    continue
+            raise
+
+def _safe_gee_call(func, *args, **kwargs):
+    retries = kwargs.pop("retries", 6)
+    for i in range(retries):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            err_str = str(e).lower()
+            if any(term in err_str for term in [
+                "429", "too many requests", "concurrency", "quota", 
+                "user limit", "rate limit", "deadline exceeded", 
+                "permission to use project", "serviceusage", "timeout", "timed out"
+            ]):
+                try:
+                    from gee.auth import rotate_credentials
+                    rotated = rotate_credentials()
+                    if rotated:
+                        time.sleep(0.3)
+                        continue
+                except Exception:
+                    pass
+                if i < retries - 1:
+                    sleep_time = (1.5 ** i) + random.uniform(0.5, 1.5)
                     time.sleep(sleep_time)
                     continue
             raise

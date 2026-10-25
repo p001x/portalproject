@@ -4,8 +4,10 @@ import json
 import math
 import ee
 
-from gee.aoi_utils import get_dynamic_scale
-
+import time
+import random
+from gee.aoi_utils import get_dynamic_scale, safe_get_info, get_bounds_and_center, COUNTRY_PRESETS
+from gee.auth import rotate_credentials
 from gee.persistent_cache import PersistentCache
 from threading import Lock, BoundedSemaphore
 import concurrent.futures
@@ -20,6 +22,20 @@ WEIGHTS = {
 
 gee_semaphore = BoundedSemaphore(5)
 
+def _safe_gee_call(func, *args, **kwargs):
+    retries = 5
+    for i in range(retries):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            err_str = str(e)
+            if "429" in err_str or "Too Many Requests" in err_str or "concurrency" in err_str.lower() or "quota" in err_str.lower():
+                rotate_credentials()
+                if i < retries - 1:
+                    time.sleep((2 ** i) + random.uniform(0, 1))
+                    continue
+            raise
+
 LSI_VIS = {"min": 1, "max": 5, "palette": ["#1a9850", "#91cf60", "#fee08b", "#fc8d59", "#d73027"]}
 LSI_CLASS_NAMES = ["Very Low", "Low", "Moderate", "High", "Very High"]
 
@@ -27,6 +43,7 @@ _cache_map = PersistentCache(ttl=3600)
 _cache_stats = PersistentCache(ttl=3600)
 _cache_classify = PersistentCache(ttl=3600)
 _cache_export = PersistentCache(ttl=3600)
+_cache_hist = PersistentCache(ttl=86400, namespace="landslide_hist")
 _cache_build = {}
 _lock = Lock()
 
@@ -82,10 +99,10 @@ def _build_lsi_images(
         slope_rad = slope.multiply(math.pi / 180)
         twi = flow_acc.add(1).log().subtract(slope_rad.tan().add(0.001).log()).rename("TWI")
 
-        from gee.aoi_utils import get_bounds_and_center, COUNTRY_PRESETS
+        from gee.aoi_utils import get_bounds_and_center, COUNTRY_PRESETS, safe_get_info
         b, center = get_bounds_and_center(aoi, aoi_config=aoi_config)
-        lats = [pt[1] for pt in b]
-        use_era5_precip = max(lats) > 50 or min(lats) < -50
+        lats = [pt[1] for pt in b] if b else [0]
+        use_era5_precip = (max(lats) > 50 or min(lats) < -50) if lats else False
 
         n_years = max(1, end_year - start_year + 1)
         if use_era5_precip:
@@ -106,23 +123,29 @@ def _build_lsi_images(
 
         landcover = ee.Image("ESA/WorldCover/v200/2021").select("Map").clip(aoi)
         
-        country = aoi_config.get("country", "")
+        country = aoi_config.get("country") or aoi_config.get("name") or ""
         is_massive = is_global or (country in COUNTRY_PRESETS and COUNTRY_PRESETS[country].get("is_massive"))
         if is_massive:
             area_sqkm = 10000000
         else:
             try:
-                area_sqkm = aoi.bounds().area(maxError=1000).divide(1e6).getInfo() if not is_global else 999999999
+                area_sqkm = safe_get_info(aoi.bounds().area(maxError=1000).divide(1e6)) if not is_global else 999999999
             except Exception:
                 area_sqkm = 999999999
+        if area_sqkm > 1000000:
+            is_massive = True
         
         if is_rwanda:
             soiltype = ee.Image("ISDASOIL/Africa/v1/texture_class").select("texture_0_20").clip(aoi)
-            roads = ee.FeatureCollection("projects/sat-io/open-datasets/GRIP4/Africa").filterBounds(aoi)
-            dist_roads = roads.distance(searchRadius=20000, maxError=500).clip(aoi).rename("dist_roads")
+            if area_sqkm > 25000:
+                coarse_road = landcover.eq(50).reproject(crs="EPSG:4326", scale=5000)
+                dist_roads = coarse_road.fastDistanceTransform(16).multiply(5000).divide(1000).clip(aoi).rename("dist_roads")
+            else:
+                roads = ee.FeatureCollection("projects/sat-io/open-datasets/GRIP4/Africa").filterBounds(aoi)
+                dist_roads = roads.distance(searchRadius=20000, maxError=500).clip(aoi).rename("dist_roads")
         else:
             soiltype = ee.Image("OpenLandMap/SOL/SOL_TEXTURE-CLASS_USDA-TT_M/v02").select("b0").clip(aoi)
-            if is_massive or area_sqkm > 100000:
+            if is_massive or area_sqkm > 50000:
                 # Built-up raster proxy to prevent computing vector distance over millions of roads across continents
                 coarse_road = landcover.eq(50).reproject(crs="EPSG:4326", scale=5000)
                 dist_roads = coarse_road.fastDistanceTransform(16).multiply(5000).divide(1000).clip(aoi).rename("dist_roads")
@@ -180,14 +203,24 @@ def _build_lsi_images(
         
         scale_hist = max(scale * 2, 2500) if is_massive else (scale * 2 if scale else 100)
         calc_geom = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False) if is_global else (
-            ee.Geometry.Polygon([b], None, False) if is_massive else aoi.bounds(maxError=1000)
+            ee.Geometry.Polygon([b], "EPSG:4326", False) if b else aoi.bounds(maxError=1000)
         )
-        hist_raw = continuous_bands.reduceRegion(
-            reducer=ee.Reducer.autoHistogram(maxBuckets=50),
-            geometry=calc_geom,
-            scale=scale_hist,
-            maxPixels=10000, bestEffort=True,
-        ).getInfo()
+        
+        # Check persistent histogram cache to avoid expensive reduceRegion
+        hist_cache_key = json.dumps({
+            "aoi": aoi_config, "sy": start_year, "ey": end_year, "scale": scale_hist
+        }, sort_keys=True)
+        if hist_cache_key in _cache_hist:
+            hist_raw = _cache_hist[hist_cache_key]
+        else:
+            hist_raw = safe_get_info(continuous_bands.reduceRegion(
+                reducer=ee.Reducer.autoHistogram(maxBuckets=50),
+                geometry=calc_geom,
+                scale=scale_hist,
+                maxPixels=1e13, bestEffort=True, tileScale=16,
+            )) or {}
+            if hist_raw:
+                _cache_hist[hist_cache_key] = hist_raw
 
         def apply_jenks(img, name, reverse_jenks=False, n=5):
             hist = hist_raw.get(name) or []
@@ -238,12 +271,22 @@ def _build_lsi_images(
             .add(ndvi_r.multiply(w.get("ndvi", 0))).rename("LSI")
         )
 
-        lsi_hist = lsi.reduceRegion(
-            reducer=ee.Reducer.autoHistogram(maxBuckets=50),
-            geometry=calc_geom,
-            scale=scale_hist,
-            maxPixels=10000, bestEffort=True,
-        ).getInfo()
+        lsi_cache_key = json.dumps({
+            "aoi": aoi_config, "sy": start_year, "ey": end_year,
+            "rs": reverse_slope, "rr": reverse_rainfall, "rl": reverse_litho, "rst": reverse_soiltype,
+            "rlc": reverse_landcover, "rt": reverse_twi, "rd": reverse_dist, "w": w, "scale": scale_hist
+        }, sort_keys=True)
+        if lsi_cache_key in _cache_hist:
+            lsi_hist = _cache_hist[lsi_cache_key]
+        else:
+            lsi_hist = safe_get_info(lsi.reduceRegion(
+                reducer=ee.Reducer.autoHistogram(maxBuckets=50),
+                geometry=calc_geom,
+                scale=scale_hist,
+                maxPixels=1e13, bestEffort=True, tileScale=16,
+            )) or {}
+            if lsi_hist:
+                _cache_hist[lsi_cache_key] = lsi_hist
 
         lsi_hist_data = lsi_hist.get("LSI", [])
         bps_lsi = get_jenks_breaks(lsi_hist_data, 5)
@@ -314,7 +357,8 @@ def compute_landslide_map(
     if custom_palettes is None: custom_palettes = {}
     cache_key = (json.dumps(aoi_config, sort_keys=True), start_year, end_year,
         reverse_slope, reverse_rainfall, reverse_litho, reverse_soiltype,
-        reverse_landcover, reverse_twi, reverse_dist, json.dumps(custom_palettes, sort_keys=True)
+        reverse_landcover, reverse_twi, reverse_dist, json.dumps(custom_palettes, sort_keys=True),
+        json.dumps(weights or {}, sort_keys=True)
     )
     with _lock:
         if cache_key in _cache_map:
@@ -328,9 +372,9 @@ def compute_landslide_map(
 
     with gee_semaphore:
         try:
-            lsi_map_id = lsi.getMapId(LSI_VIS)
-            lsi_class_map_id = lsi_class.getMapId({**LSI_VIS, "min": 1, "max": 5})
-        except ee.EEException as e:
+            lsi_map_id = _safe_gee_call(lambda: lsi.getMapId(LSI_VIS))
+            lsi_class_map_id = _safe_gee_call(lambda: lsi_class.getMapId({**LSI_VIS, "min": 1, "max": 5}))
+        except Exception as e:
             if "Memory limit" in str(e) or "User memory limit" in str(e):
                 raise ValueError("The selected region is too large or complex for real-time visualization. Please select a smaller area.") from e
             raise
@@ -341,8 +385,9 @@ def compute_landslide_map(
         vis = {"min": 1, "max": 5, "palette": palette}
         with gee_semaphore:
             try:
-                return key, {"tile_url": img.getMapId(vis)["tile_fetcher"].url_format}
-            except ee.EEException:
+                res_map = _safe_gee_call(lambda: img.getMapId(vis))
+                return key, {"tile_url": res_map["tile_fetcher"].url_format}
+            except Exception:
                 return key, None
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
@@ -379,7 +424,8 @@ def compute_landslide_stats(
 ) -> dict:
     cache_key = (json.dumps(aoi_config, sort_keys=True), start_year, end_year,
         reverse_slope, reverse_rainfall, reverse_litho, reverse_soiltype,
-        reverse_landcover, reverse_twi, reverse_dist
+        reverse_landcover, reverse_twi, reverse_dist,
+        json.dumps(weights or {}, sort_keys=True)
     )
     with _lock:
         if cache_key in _cache_stats:
@@ -395,23 +441,29 @@ def compute_landslide_stats(
         [lsi_class.eq(i + 1).multiply(ee.Image.pixelArea()).rename(f"c{i}") for i in range(5)]
     )
 
-    calc_geom = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False) if is_global else aoi.bounds(maxError=1000)
+    from gee.aoi_utils import get_bounds_and_center, safe_get_info, COUNTRY_PRESETS
+    b, _ = get_bounds_and_center(aoi, aoi_config=aoi_config)
+    country = aoi_config.get("country") or aoi_config.get("name") or ""
+    is_massive = is_global or (country in COUNTRY_PRESETS and COUNTRY_PRESETS[country].get("is_massive"))
+    calc_geom = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False) if is_global else (
+        ee.Geometry.Polygon([b], "EPSG:4326", False) if b else aoi.bounds(maxError=1000)
+    )
     dyn_scale = get_dynamic_scale(aoi, aoi_config=aoi_config)
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         f_stats = executor.submit(
-            lambda: lsi.reduceRegion(
+            lambda: safe_get_info(lsi.reduceRegion(
                 reducer=ee.Reducer.mean().combine(ee.Reducer.min(), sharedInputs=True)
                 .combine(ee.Reducer.max(), sharedInputs=True).combine(ee.Reducer.stdDev(), sharedInputs=True),
-                geometry=calc_geom, scale=dyn_scale, maxPixels=1e10,
-            ).getInfo()
+                geometry=calc_geom, scale=dyn_scale, maxPixels=1e13, bestEffort=True, tileScale=16,
+            ))
         )
         f_area = executor.submit(
-            lambda: class_area_bands.reduceRegion(
-                reducer=ee.Reducer.sum(), geometry=calc_geom, scale=dyn_scale, maxPixels=1e10,
-            ).getInfo()
+            lambda: safe_get_info(class_area_bands.reduceRegion(
+                reducer=ee.Reducer.sum(), geometry=calc_geom, scale=dyn_scale, maxPixels=1e13, bestEffort=True, tileScale=16,
+            ))
         )
-        stats_raw = f_stats.result()
-        class_area_dict = f_area.result()
+        stats_raw = f_stats.result() or {}
+        class_area_dict = f_area.result() or {}
 
     class_areas = {
         lbl: round((class_area_dict.get(f"c{i}", 0) or 0) / 1e6, 2)
@@ -442,18 +494,22 @@ def compute_landslide_classify(
 ) -> dict:
     cache_key = (json.dumps(aoi_config, sort_keys=True), start_year, end_year, n_classes,
         reverse_slope, reverse_rainfall, reverse_litho, reverse_soiltype,
-        reverse_landcover, reverse_twi, reverse_dist, method, tuple(custom_labels) if custom_labels else None
+        reverse_landcover, reverse_twi, reverse_dist, method, tuple(custom_labels) if custom_labels else None,
+        json.dumps(weights or {}, sort_keys=True)
     )
     with _lock:
         if cache_key in _cache_classify:
             return _cache_classify[cache_key]
 
-    aoi, lsi, lsi_class, factors, raw_factors = _build_lsi_images(
+    res = _build_lsi_images(
         aoi_config, start_year, end_year, reverse_slope, reverse_rainfall,
         reverse_litho, reverse_soiltype, reverse_landcover, reverse_twi, reverse_dist, weights=weights
     )
+    aoi, lsi, lsi_class, factors, raw_factors, is_global = (
+        res["aoi"], res["lsi"], res["lsi_class"], res["factors"], res["raw_factors"], res["is_global"]
+    )
 
-    n_classes = 5
+    n_classes = max(1, min(int(n_classes), 15))
     layers = [
         {"name": "LSI", "image": lsi, "title": "Landslide Susceptibility Index"},
         {"name": "Slope", "image": raw_factors["slope"], "title": "Slope (Degrees)"},
@@ -470,7 +526,8 @@ def compute_landslide_classify(
         layers=layers,
         aoi=aoi, scale=get_dynamic_scale(aoi, aoi_config=aoi_config), n_classes=n_classes,
         custom_labels=custom_labels or LSI_CLASS_NAMES,
-        method=method
+        method=method,
+        aoi_config=aoi_config
     )
 
     result = {
@@ -491,21 +548,29 @@ def compute_landslide_export(
     if custom_palettes is None: custom_palettes = {}
     cache_key = (json.dumps(aoi_config, sort_keys=True), start_year, end_year,
         reverse_slope, reverse_rainfall, reverse_litho, reverse_soiltype,
-        reverse_landcover, reverse_twi, reverse_dist, json.dumps(custom_palettes, sort_keys=True)
+        reverse_landcover, reverse_twi, reverse_dist, json.dumps(custom_palettes, sort_keys=True),
+        json.dumps(weights or {}, sort_keys=True)
     )
     with _lock:
         if cache_key in _cache_export:
             return _cache_export[cache_key]
 
-    aoi, lsi, lsi_class, factors, raw_factors = _build_lsi_images(
+    res = _build_lsi_images(
         aoi_config, start_year, end_year, reverse_slope, reverse_rainfall,
         reverse_litho, reverse_soiltype, reverse_landcover, reverse_twi, reverse_dist, weights=weights
     )
+    aoi, lsi, lsi_class, factors, raw_factors, is_global = (
+        res["aoi"], res["lsi"], res["lsi_class"], res["factors"], res["raw_factors"], res["is_global"]
+    )
 
-    from gee.aoi_utils import get_bounds_and_center
+    from gee.aoi_utils import get_bounds_and_center, COUNTRY_PRESETS
     bounds, center = get_bounds_and_center(aoi, aoi_config=aoi_config)
-    calc_geom = ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds()
-    calc_scale = max(get_dynamic_scale(aoi, aoi_config=aoi_config), 100)
+    country = aoi_config.get("country") or aoi_config.get("name") or ""
+    is_massive = is_global or (country in COUNTRY_PRESETS and COUNTRY_PRESETS[country].get("is_massive"))
+    calc_geom = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False) if is_global else (
+        ee.Geometry.Polygon([bounds], "EPSG:4326", False) if bounds else aoi.bounds(maxError=1000)
+    )
+    calc_scale = max(get_dynamic_scale(aoi, aoi_config=aoi_config), 2500 if is_massive else 100)
 
     factor_maps = {}
     import concurrent.futures
@@ -515,12 +580,12 @@ def compute_landslide_export(
         vis = {"min": 1, "max": 5, "palette": palette, "region": calc_geom, "dimensions": 800, "crs": "EPSG:4326", "format": "png"}
         with gee_semaphore:
             try:
-                thumb = img.getThumbURL(vis)
+                thumb = _safe_gee_call(lambda: img.getThumbURL(vis))
             except Exception as e:
                 thumb = None
                 print(f"[{key}] Thumb error: {e}")
             try:
-                dl = img.getDownloadURL({"region": calc_geom, "scale": calc_scale, "format": "GEO_TIFF", "crs": "EPSG:4326"})
+                dl = _safe_gee_call(lambda: img.getDownloadURL({"region": calc_geom, "scale": calc_scale, "format": "GEO_TIFF", "crs": "EPSG:4326"}))
             except Exception as e:
                 dl = None
                 print(f"[{key}] DL error: {e}")
@@ -532,14 +597,14 @@ def compute_landslide_export(
         def safe_thumb(img, vis):
             with gee_semaphore:
                 try:
-                    return img.getThumbURL(vis)
+                    return _safe_gee_call(lambda: img.getThumbURL(vis))
                 except Exception:
                     return None
         
         def safe_dl(img, params):
             with gee_semaphore:
                 try:
-                    return img.getDownloadURL(params)
+                    return _safe_gee_call(lambda: img.getDownloadURL(params))
                 except Exception:
                     return None
 

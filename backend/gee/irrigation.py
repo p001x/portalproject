@@ -1,12 +1,13 @@
 from gee.persistent_cache import with_cache
-from gee.aoi_utils import get_bounds_and_center
+from gee.aoi_utils import get_bounds_and_center, get_dynamic_scale, safe_get_info
+from gee.auth import rotate_credentials
 """Irrigation Scheduling Advisor — FastAPI backend."""
 import json
 import ee
+import time
+import random
 from typing import Optional
 from gee.classify_utils import quantile_classify
-
-from gee.aoi_utils import get_dynamic_scale
 
 from gee.persistent_cache import PersistentCache
 from threading import Lock
@@ -15,6 +16,20 @@ _cache_map = PersistentCache(ttl=3600)
 _cache_stats = PersistentCache(ttl=3600)
 _cache_export = PersistentCache(ttl=3600)
 _lock = Lock()
+
+def _safe_gee_call(func, *args, **kwargs):
+    retries = 5
+    for i in range(retries):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            err_str = str(e)
+            if "429" in err_str or "Too Many Requests" in err_str or "concurrency" in err_str.lower() or "quota" in err_str.lower():
+                rotate_credentials()
+                if i < retries - 1:
+                    time.sleep((2 ** i) + random.uniform(0, 1))
+                    continue
+            raise
 
 _DEFICIT_VIS = {"min": -20, "max": 20, "palette": ["#0000ff", "#a3ccff", "#ffffff", "#ff9999", "#ff0000"]}
 _ET_VIS = {"min": 0, "max": 30, "palette": ["#ffffcc", "#c2e699", "#78c679", "#31a354", "#006837"]}
@@ -94,10 +109,10 @@ def _build_irrigation_images(aoi_config: dict, start_date: str, end_date: str, p
     etc = pet_total.multiply(ee.Image.constant(kc)).rename("etc")
 
     try:
-        bounds_coords = aoi.bounds(maxError=1000).coordinates().get(0).getInfo()
+        bounds_coords = safe_get_info(aoi.bounds(maxError=1000).coordinates().get(0)) or []
         lats = [pt[1] for pt in bounds_coords]
         use_era5_precip = max(lats) > 50 or min(lats) < -50
-    except:
+    except Exception:
         use_era5_precip = True
 
     # 3. Effective Precipitation
@@ -155,13 +170,12 @@ def compute_irrigation_map(
 
     aoi, deficit, etc, precip, sm, kc = _build_irrigation_images(aoi_config, start_date, end_date, planting_date, crop_type)
     
-    map_id = deficit.getMapId(_DEFICIT_VIS)
-    etc_id = etc.getMapId(_ET_VIS)
-    precip_id = precip.getMapId(_PRECIP_VIS)
-    sm_id = sm.getMapId(_SM_VIS)
+    map_id = _safe_gee_call(lambda: deficit.getMapId(_DEFICIT_VIS))
+    etc_id = _safe_gee_call(lambda: etc.getMapId(_ET_VIS))
+    precip_id = _safe_gee_call(lambda: precip.getMapId(_PRECIP_VIS))
+    sm_id = _safe_gee_call(lambda: sm.getMapId(_SM_VIS))
 
-    centroid = aoi.centroid(maxError=100).coordinates().getInfo()
-    bounds, _ = get_bounds_and_center(aoi)
+    bounds, center = get_bounds_and_center(aoi)
     
     dynamic_scale = get_dynamic_scale(aoi)
 
@@ -186,7 +200,7 @@ def compute_irrigation_map(
     result = {
         "tile_url": map_id["tile_fetcher"].url_format,
         "factor_maps": factor_maps,
-        "center": [centroid[1], centroid[0]],
+        "center": center,
         "bbox": bounds,
         "method": method,
         "n_classes": n_classes,
@@ -212,10 +226,12 @@ def compute_irrigation_stats(
 
     aoi, deficit, etc, precip, sm, kc = _build_irrigation_images(aoi_config, start_date, end_date, planting_date, crop_type)
 
+    bounds, _ = get_bounds_and_center(aoi)
+    calc_geom = ee.Geometry.Polygon([bounds], "EPSG:4326", False) if bounds else aoi.bounds(maxError=1000)
     mean_reducer = ee.Reducer.mean()
     
     def get_mean(img):
-        res = img.reduceRegion(reducer=mean_reducer, geometry=aoi.bounds(maxError=1000), scale=get_dynamic_scale(aoi), maxPixels=1e10).getInfo()
+        res = safe_get_info(img.reduceRegion(reducer=mean_reducer, geometry=calc_geom, scale=get_dynamic_scale(aoi), maxPixels=1e13, tileScale=16, bestEffort=True))
         if not res: return 0.0
         vals = list(res.values())
         return vals[0] if vals and vals[0] is not None else 0.0
@@ -226,7 +242,7 @@ def compute_irrigation_stats(
     mean_taw = get_mean(sm)
     
     # Retrieve Kc value
-    kc_value = kc.getInfo()
+    kc_value = safe_get_info(kc) or 0.5
 
     # Generate Recommendation based on MAD
     # Management Allowable Depletion (MAD) is typically 50% of TAW
@@ -269,20 +285,19 @@ def compute_irrigation_export(
 
     aoi, deficit, etc, precip, sm, kc = _build_irrigation_images(aoi_config, start_date, end_date, planting_date, crop_type)
 
-    from gee.aoi_utils import get_bounds_and_center, get_dynamic_scale
     bounds, _ = get_bounds_and_center(aoi, aoi_config=aoi_config)
-    dl_geom = ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds()
+    dl_geom = ee.Geometry.Polygon([bounds], "EPSG:4326", False) if bounds else aoi.bounds(maxError=1000)
     scale = max(1000, get_dynamic_scale(aoi, aoi_config=aoi_config))
 
     def safe_url(img, name):
         try:
-            return img.getDownloadURL({"scale": scale, "region": dl_geom, "format": "GEO_TIFF"})
+            return _safe_gee_call(lambda: img.getDownloadURL({"scale": scale, "region": dl_geom, "format": "GEO_TIFF"}))
         except Exception:
             return None
 
     def safe_thumb(img, vis):
         try:
-            return img.getThumbURL({**vis, "region": dl_geom, "dimensions": 512, "crs": "EPSG:4326", "format": "png"})
+            return _safe_gee_call(lambda: img.getThumbURL({**vis, "region": dl_geom, "dimensions": 512, "crs": "EPSG:4326", "format": "png"}))
         except Exception:
             return None
             

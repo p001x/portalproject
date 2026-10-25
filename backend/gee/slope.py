@@ -6,6 +6,7 @@ from gee.persistent_cache import PersistentCache
 from threading import Lock, BoundedSemaphore
 import concurrent.futures
 from gee.classify_utils import quantile_classify
+from gee.aoi_utils import safe_get_info, _safe_gee_call
 
 _cache = PersistentCache(ttl=86400)
 _lock = Lock()
@@ -85,7 +86,7 @@ def compute_slope_map(aoi_config: dict) -> dict:
 
     from gee.aoi_utils import get_bounds_and_center
     bounds, center = get_bounds_and_center(aoi, aoi_config=aoi_config)
-    thumb_region = ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds()
+    thumb_region = ee.Geometry.Polygon([bounds], "EPSG:4326", False) if bounds else aoi.bounds()
 
     contours_masked = contours.updateMask(contours)
 
@@ -153,25 +154,25 @@ def compute_slope_stats(aoi_config: dict) -> dict:
 
     from gee.aoi_utils import get_bounds_and_center
     bounds, _ = get_bounds_and_center(aoi, aoi_config=aoi_config)
-    eval_geom = ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds(maxError=1000)
+    eval_geom = ee.Geometry.Polygon([bounds], "EPSG:4326", False) if bounds else aoi.bounds(maxError=1000)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         f_stats = executor.submit(
-            lambda: combined_stats_img.reduceRegion(
+            lambda: safe_get_info(combined_stats_img.reduceRegion(
                 reducer=ee.Reducer.mean()
                 .combine(ee.Reducer.max(), sharedInputs=True)
                 .combine(ee.Reducer.percentile([25, 75]), sharedInputs=True)
                 .combine(ee.Reducer.min(), sharedInputs=True),
-                geometry=eval_geom, scale=dynamic_scale, maxPixels=1e10,
-            ).getInfo()
+                geometry=eval_geom, scale=dynamic_scale, maxPixels=1e13, bestEffort=True, tileScale=4
+            ))
         )
         f_area = executor.submit(
-            lambda: area_img.reduceRegion(
-                reducer=ee.Reducer.sum(), geometry=eval_geom, scale=dynamic_scale, maxPixels=1e10
-            ).getInfo()
+            lambda: safe_get_info(area_img.reduceRegion(
+                reducer=ee.Reducer.sum(), geometry=eval_geom, scale=dynamic_scale, maxPixels=1e13, bestEffort=True, tileScale=4
+            ))
         )
-        combined_stats = f_stats.result()
-        area_dict = f_area.result()
+        combined_stats = f_stats.result() or {}
+        area_dict = f_area.result() or {}
 
     class_areas = {lbl: round((area_dict.get(f"c{i}", 0) or 0) / 1e6, 2) for i, lbl in enumerate(labels)}
 
@@ -214,7 +215,8 @@ def compute_slope_classify(aoi_config: dict, n_classes: int = 5, method: str = "
         ],
         aoi=aoi, scale=dynamic_scale, n_classes=n_classes,
         method=method, custom_labels=custom_labels,
-        custom_breaks={"slope": custom_breaks} if custom_breaks else None
+        custom_breaks={"slope": custom_breaks} if custom_breaks else None,
+        aoi_config=aoi_config
     )
 
     result = {
@@ -235,7 +237,7 @@ def compute_slope_export(aoi_config: dict) -> dict:
 
     from gee.aoi_utils import get_bounds_and_center
     bounds, _ = get_bounds_and_center(aoi, aoi_config=aoi_config)
-    dl_geom = ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds()
+    dl_geom = ee.Geometry.Polygon([bounds], "EPSG:4326", False) if bounds else aoi.bounds()
     scale = max(dynamic_scale, 100)
 
     def safe_dl(img):
@@ -270,12 +272,16 @@ def inspect_slope_point(lat: float, lon: float, aoi_config: dict) -> dict:
         upa.rename('upa')
     ])
     
-    data = combined.reduceRegion(
-        reducer=ee.Reducer.first(),
-        geometry=point,
-        scale=30,
-        maxPixels=1e9
-    ).getInfo()
+    data = safe_get_info(
+        combined.reduceRegion(
+            reducer=ee.Reducer.first(),
+            geometry=point,
+            scale=30,
+            maxPixels=1e13,
+            tileScale=16,
+            bestEffort=True,
+        )
+    )
     
     return data
 
@@ -295,11 +301,14 @@ def profile_slope_line(coords: list, aoi_config: dict) -> list:
     
     combined = dem.rename('elevation').addBands(slope.rename('slope'))
     
-    sampled = combined.reduceRegions(
-        collection=fc,
-        reducer=ee.Reducer.first(),
-        scale=30
-    ).getInfo()
+    sampled = safe_get_info(
+        combined.reduceRegions(
+            collection=fc,
+            reducer=ee.Reducer.first(),
+            scale=30,
+            tileScale=16,
+        )
+    ) or {}
     
     features = sampled.get("features", [])
     
@@ -339,7 +348,7 @@ def delineate_watershed(lat: float, lon: float, level: int = 12) -> dict:
     intersecting = basins.filterBounds(point)
     
     # Check if empty
-    size = intersecting.size().getInfo()
+    size = safe_get_info(intersecting.size()) or 0
     if size == 0:
         raise ValueError("No watershed found at this location. It may be over the ocean or outside data coverage.")
         
@@ -347,33 +356,34 @@ def delineate_watershed(lat: float, lon: float, level: int = 12) -> dict:
     
     # Export as a collection to allow SHP download
     fc = ee.FeatureCollection([basin])
-    url = fc.getDownloadURL(
-        filetype="SHP",
-        filename="watershed_basin"
+    url = _safe_gee_call(
+        fc.getDownloadURL,
+        {"filetype": "SHP", "filename": "watershed_basin"}
     )
     
     # Get river network intersecting the basin
     rivers = ee.FeatureCollection("WWF/HydroSHEDS/v1/FreeFlowingRivers").filterBounds(basin.geometry())
     rivers_url = ""
     rivers_geojson = None
-    if rivers.size().getInfo() > 0:
-        rivers_url = rivers.getDownloadURL(
-            filetype="SHP",
-            filename="watershed_rivers"
+    rivers_count = safe_get_info(rivers.size()) or 0
+    if rivers_count > 0:
+        rivers_url = _safe_gee_call(
+            rivers.getDownloadURL,
+            {"filetype": "SHP", "filename": "watershed_rivers"}
         )
-        rivers_geojson = rivers.getInfo()
+        rivers_geojson = safe_get_info(rivers)
     
-    geojson = basin.getInfo()
+    geojson = safe_get_info(basin) or {}
     
     props = geojson.get("properties", {})
     area_km2 = props.get("SUB_AREA")
     if area_km2 is None:
-        area_km2 = basin.bounds().area(maxError=1000).divide(1e6).getInfo()
+        area_km2 = (safe_get_info(basin.bounds().area(maxError=1000)) or 0) / 1e6
         
     res = {
         "geojson": geojson,
         "download_url": url,
-        "area_km2": round(area_km2, 2),
+        "area_km2": round(area_km2 or 0, 2),
         "river_geojson": rivers_geojson,
         "river_download_url": rivers_url
     }
@@ -408,21 +418,27 @@ def compute_earthwork(polygon_coords: list, target_elevation: float) -> dict:
     fill = diff.updateMask(diff.lt(0)).abs().multiply(pixel_area)
     
     # Reduce
-    cut_vol = cut.reduceRegion(
+    cut_dict = safe_get_info(cut.reduceRegion(
         reducer=ee.Reducer.sum(),
         geometry=poly,
         scale=30,
-        maxPixels=1e9
-    ).get("elevation").getInfo()
+        maxPixels=1e13,
+        tileScale=16,
+        bestEffort=True,
+    )) or {}
+    cut_vol = cut_dict.get("elevation", 0)
     
-    fill_vol = fill.reduceRegion(
+    fill_dict = safe_get_info(fill.reduceRegion(
         reducer=ee.Reducer.sum(),
         geometry=poly,
         scale=30,
-        maxPixels=1e9
-    ).get("elevation").getInfo()
+        maxPixels=1e13,
+        tileScale=16,
+        bestEffort=True,
+    )) or {}
+    fill_vol = fill_dict.get("elevation", 0)
     
-    area_m2 = poly.area(maxError=1).getInfo()
+    area_m2 = safe_get_info(poly.area(maxError=1)) or 0
     
     return {
         "cut_m3": round(cut_vol or 0, 2),

@@ -3,7 +3,7 @@ import json
 """DVI computation — AHP-Weighted Drought Vulnerability Map"""
 import ee
 
-from gee.aoi_utils import get_dynamic_scale
+from gee.aoi_utils import get_dynamic_scale, safe_get_info, _safe_gee_call
 
 from gee.persistent_cache import PersistentCache
 from threading import Lock
@@ -111,7 +111,7 @@ def build_dvi_image(aoi_config, start_date, end_date, weights=None, corridor=Non
 
     if area_sqkm is None:
         try:
-            area_sqkm = geometry.bounds().area(maxError=1000).divide(1e6).getInfo() if not is_global else 999999999
+            area_sqkm = ((safe_get_info(geometry.bounds().area(maxError=1000)) or 0) / 1e6) if not is_global else 999999999
         except Exception:
             area_sqkm = 999999999
 
@@ -350,8 +350,10 @@ def compute_dvi(
 
     import concurrent.futures
 
+    from gee.aoi_utils import get_bounds_and_center
     scale = get_dynamic_scale(geometry, aoi_config)
-    calc_geom = geometry.bounds(maxError=1000)
+    bounds_pts, center = get_bounds_and_center(geometry)
+    calc_geom = ee.Geometry.Polygon([bounds_pts], "EPSG:4326", False) if bounds_pts else geometry.bounds(maxError=1000)
 
     class_area_bands = ee.Image.cat([vuln_class.eq(i+1).multiply(ee.Image.pixelArea()).rename(f"c{i}") for i in range(5)])
 
@@ -361,15 +363,17 @@ def compute_dvi(
                 reducer=ee.Reducer.mean().combine(ee.Reducer.min(), sharedInputs=True).combine(ee.Reducer.max(), sharedInputs=True).combine(ee.Reducer.stdDev(), sharedInputs=True),
                 geometry=calc_geom,
                 scale=scale, 
-                maxPixels=1e10,
+                maxPixels=1e13,
+                tileScale=16,
+                bestEffort=True
             ),
             "areas": class_area_bands.reduceRegion(
-                reducer=ee.Reducer.sum(), geometry=calc_geom, scale=scale, maxPixels=1e10
+                reducer=ee.Reducer.sum(), geometry=calc_geom, scale=scale, maxPixels=1e13, tileScale=16, bestEffort=True
             ),
             "bounds": geometry.bounds()
         })
         with gee_semaphore:
-            return _safe_gee_call(lambda: combined.getInfo())
+            return safe_get_info(combined)
 
     def get_classify():
         with gee_semaphore:

@@ -70,7 +70,8 @@ def lst_image_and_aoi(aoi_config: dict, start_date: str, end_date: str):
         area_sqkm = 10000000
     else:
         try:
-            area_sqkm = aoi.bounds().area(maxError=1000).divide(1e6).getInfo()
+            from gee.aoi_utils import safe_get_info
+            area_sqkm = (safe_get_info(aoi.bounds().area(maxError=1000)) or 0) / 1e6
         except Exception:
             area_sqkm = 0
 
@@ -135,25 +136,30 @@ def compute_lst(aoi_config: dict, start_date: str, end_date: str, n_classes: int
         [classes[lbl].multiply(ee.Image.pixelArea()).rename(f"c{i}") for i, lbl in enumerate(labels)]
     )
 
-    from gee.aoi_utils import get_dynamic_scale, get_bounds_and_center
+    from gee.aoi_utils import get_dynamic_scale, get_bounds_and_center, safe_get_info, _safe_gee_call
     dyn_scale = get_dynamic_scale(aoi, aoi_config)
     bounds, center = get_bounds_and_center(aoi, aoi_config)
+    calc_geom = ee.Geometry.Polygon([bounds], "EPSG:4326", False)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
         f_stats = executor.submit(
-            lambda: lst_land_only.reduceRegion(
-                reducer=ee.Reducer.mean()
-                .combine(ee.Reducer.min(), sharedInputs=True)
-                .combine(ee.Reducer.max(), sharedInputs=True)
-                .combine(ee.Reducer.stdDev(), sharedInputs=True),
-                geometry=aoi.bounds(maxError=1000), scale=dyn_scale, maxPixels=1e10,
-            ).getInfo()
+            lambda: safe_get_info(
+                lst_land_only.reduceRegion(
+                    reducer=ee.Reducer.mean()
+                    .combine(ee.Reducer.min(), sharedInputs=True)
+                    .combine(ee.Reducer.max(), sharedInputs=True)
+                    .combine(ee.Reducer.stdDev(), sharedInputs=True),
+                    geometry=calc_geom, scale=dyn_scale, maxPixels=1e13, tileScale=16, bestEffort=True,
+                )
+            )
         )
 
         f_area = executor.submit(
-            lambda: area_img.reduceRegion(
-                reducer=ee.Reducer.sum(), geometry=aoi.bounds(maxError=1000), scale=dyn_scale, maxPixels=1e10
-            ).getInfo()
+            lambda: safe_get_info(
+                area_img.reduceRegion(
+                    reducer=ee.Reducer.sum(), geometry=calc_geom, scale=dyn_scale, maxPixels=1e13, tileScale=16, bestEffort=True,
+                )
+            )
         )
 
         f_classify = executor.submit(
@@ -200,8 +206,8 @@ def compute_lst(aoi_config: dict, start_date: str, end_date: str, n_classes: int
     water_rgb = water.updateMask(water).visualize(palette=["#08306b"])
     final_viz = ee.ImageCollection([lst_rgb, water_rgb]).mosaic().clip(aoi)
 
-    map_id = final_viz.getMapId()
-    thumb_url = final_viz.getThumbURL({"region": aoi.bounds(), "dimensions": 800, "crs": "EPSG:4326", "format": "png"})
+    map_id = _safe_gee_call(final_viz.getMapId)
+    thumb_url = _safe_gee_call(final_viz.getThumbURL, {"region": calc_geom, "dimensions": 800, "crs": "EPSG:4326", "format": "png"})
 
     result = {
         "tile_url": map_id["tile_fetcher"].url_format,

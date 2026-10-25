@@ -16,9 +16,27 @@ from shapely.geometry import shape as shapely_shape
 from scipy import stats as scipy_stats
 from gee.persistent_cache import PersistentCache
 from threading import Lock
+import time
+import random
+from gee.auth import rotate_credentials
+from gee.aoi_utils import get_dynamic_scale, get_bounds_and_center, safe_get_info, COUNTRY_PRESETS
 
 _cache = PersistentCache(ttl=3600)
 _lock = Lock()
+
+def _safe_gee_call(func, *args, **kwargs):
+    retries = 5
+    for i in range(retries):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            err_str = str(e)
+            if "429" in err_str or "Too Many Requests" in err_str or "concurrency" in err_str.lower() or "quota" in err_str.lower():
+                rotate_credentials()
+                if i < retries - 1:
+                    time.sleep((2 ** i) + random.uniform(0, 1))
+                    continue
+            raise
 
 _c_ll = (232, 232, 232)
 _c_hl = (190, 100, 172)
@@ -156,7 +174,7 @@ def _build_uhi_base(aoi_config: dict, start_date: str, end_date: str, grid_size:
     sectors_gdf, grid_fc = _get_sectors_fc(aoi, is_global or is_massive)
     
     scale = get_dynamic_scale(aoi, aoi_config=aoi_config)
-    stats_fc = combined.reduceRegions(collection=grid_fc, reducer=ee.Reducer.mean(), scale=scale)
+    stats_fc = combined.reduceRegions(collection=grid_fc, reducer=ee.Reducer.mean(), scale=scale, tileScale=16)
         
     return aoi, lst, ndbi, ndvi, stats_fc, sectors_gdf, is_global
 
@@ -248,18 +266,18 @@ def compute_uhi(aoi_config: dict, start_date: str, end_date: str, grid_size: int
     scale = get_dynamic_scale(aoi, aoi_config=aoi_config)
 
     calc_geom = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False) if is_global else (
-        ee.Geometry.Polygon([bounds], None, False) if is_massive else aoi.bounds(maxError=1000)
+        ee.Geometry.Polygon([bounds], "EPSG:4326", False) if bounds else aoi.bounds(maxError=1000)
     )
     # Server-side percentile reduction for LST and NDBI
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         f_lst_pct = executor.submit(
-            lambda: lst_median.reduceRegion(reducer=ee.Reducer.percentile([2, 98]), geometry=calc_geom, scale=scale, maxPixels=1e10).getInfo()
+            lambda: safe_get_info(lst_median.reduceRegion(reducer=ee.Reducer.percentile([2, 98]), geometry=calc_geom, scale=scale, maxPixels=1e13, tileScale=16, bestEffort=True))
         )
         f_ndbi_pct = executor.submit(
-            lambda: ndbi_median.reduceRegion(reducer=ee.Reducer.percentile([2, 98]), geometry=calc_geom, scale=scale, maxPixels=1e10).getInfo()
+            lambda: safe_get_info(ndbi_median.reduceRegion(reducer=ee.Reducer.percentile([2, 98]), geometry=calc_geom, scale=scale, maxPixels=1e13, tileScale=16, bestEffort=True))
         )
-        lst_pct = f_lst_pct.result()
-        ndbi_pct = f_ndbi_pct.result()
+        lst_pct = f_lst_pct.result() or {}
+        ndbi_pct = f_ndbi_pct.result() or {}
 
     lst_vis_cont = {"min": lst_pct.get("LST_p2", 15), "max": lst_pct.get("LST_p98", 40),
                "palette": ["#313695", "#74add1", "#fee090", "#f46d43", "#a50026"]}
@@ -267,17 +285,21 @@ def compute_uhi(aoi_config: dict, start_date: str, end_date: str, grid_size: int
                 "palette": ["#1a9850", "#d9ef8b", "#fee08b", "#f46d43", "#a50026"]}
 
     # Create Map IDs for the frontend Map component
-    # Also push bivariate class visualization completely to GEE if we had time, but
-    # the frontend relies on bivariate_png. We will serve both!
+    lst_tile_url = _safe_gee_call(lambda: lst_median.getMapId(lst_vis_cont))["tile_fetcher"].url_format
+    ndbi_tile_url = _safe_gee_call(lambda: ndbi_median.getMapId(ndbi_vis_cont))["tile_fetcher"].url_format
     
-    lst_tile_url = lst_median.getMapId(lst_vis_cont)["tile_fetcher"].url_format
-    ndbi_tile_url = ndbi_median.getMapId(ndbi_vis_cont)["tile_fetcher"].url_format
-    
-    lst_thumb_url = lst_median.getThumbURL({**lst_vis_cont, "region": calc_geom, "dimensions": 800, "crs": "EPSG:4326", "format": "png"})
-    ndbi_thumb_url = ndbi_median.getThumbURL({**ndbi_vis_cont, "region": calc_geom, "dimensions": 800, "crs": "EPSG:4326", "format": "png"})
+    try:
+        lst_thumb_url = _safe_gee_call(lambda: lst_median.getThumbURL({**lst_vis_cont, "region": calc_geom, "dimensions": 800, "crs": "EPSG:4326", "format": "png"}))
+    except Exception:
+        lst_thumb_url = ""
+    try:
+        ndbi_thumb_url = _safe_gee_call(lambda: ndbi_median.getThumbURL({**ndbi_vis_cont, "region": calc_geom, "dimensions": 800, "crs": "EPSG:4326", "format": "png"}))
+    except Exception:
+        ndbi_thumb_url = ""
 
     # Zonal Stats
-    features = stats_fc.getInfo()["features"]
+    stats_info = safe_get_info(stats_fc) or {}
+    features = stats_info.get("features", [])
     
     n_classes = max(4, min(n_classes, 10))
     bivar_labels = custom_labels if custom_labels and len(custom_labels) == n_classes else [f"Class {i+1}" for i in range(n_classes)]

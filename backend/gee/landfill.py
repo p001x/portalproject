@@ -3,8 +3,11 @@ import json
 """Landfill site suitability (SMCE / Weighted Overlay) — FastAPI backend."""
 import math
 import ee
+import time
+import random
 
-from gee.aoi_utils import get_dynamic_scale
+from gee.aoi_utils import get_dynamic_scale, safe_get_info, get_bounds_and_center
+from gee.auth import rotate_credentials
 
 from gee.persistent_cache import PersistentCache
 from threading import Lock
@@ -13,6 +16,20 @@ from gee.classify_utils import quantile_classify
 
 _cache = PersistentCache(ttl=86400)
 _lock = Lock()
+
+def _safe_gee_call(func, *args, **kwargs):
+    retries = 5
+    for i in range(retries):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            err_str = str(e)
+            if "429" in err_str or "Too Many Requests" in err_str or "concurrency" in err_str.lower() or "quota" in err_str.lower():
+                rotate_credentials()
+                if i < retries - 1:
+                    time.sleep((2 ** i) + random.uniform(0, 1))
+                    continue
+            raise
 
 DEFAULT_WEIGHTS = {"river": 0.30, "residential": 0.25, "slope": 0.20, "road": 0.15, "lulc": 0.10}
 FACTOR_ORDER = ["river", "residential", "slope", "road", "lulc"]
@@ -121,23 +138,22 @@ def _apply_reverse(score_img, flag):
 def _factor_urls(image, key: str, aoi, scale=None, aoi_config=None) -> dict:
     if scale is None:
         scale = max(100, get_dynamic_scale(aoi, aoi_config=aoi_config))
-    from gee.aoi_utils import get_bounds_and_center
     bounds, _ = get_bounds_and_center(aoi, aoi_config=aoi_config)
-    dl_geom = ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds()
+    dl_geom = ee.Geometry.Polygon([bounds], "EPSG:4326", False) if bounds else aoi.bounds(maxError=1000)
 
-    tile_url = image.getMapId(_SCORE_VIS)["tile_fetcher"].url_format
+    tile_url = _safe_gee_call(lambda: image.getMapId(_SCORE_VIS))["tile_fetcher"].url_format
     try:
-        thumb_url = image.getThumbURL({
+        thumb_url = _safe_gee_call(lambda: image.getThumbURL({
             **_SCORE_VIS, "region": dl_geom, "dimensions": 512, "crs": "EPSG:4326", "format": "png"
-        })
+        }))
     except Exception:
         thumb_url = None
 
     try:
-        download_url = image.getDownloadURL({
+        download_url = _safe_gee_call(lambda: image.getDownloadURL({
             "name": f"Landfill_{key}_score", "scale": scale,
             "region": dl_geom, "format": "GEO_TIFF", "filePerBand": False,
-        })
+        }))
     except Exception:
         download_url = None
 
@@ -276,18 +292,18 @@ def compute_landfill_map(
         aoi_config, reverse_river, reverse_residential, reverse_slope, reverse_road, reverse_lulc, custom_weights
     )
     
-    map_id = suitability.getMapId(_SCORE_VIS)
+    map_id = _safe_gee_call(lambda: suitability.getMapId(_SCORE_VIS))
 
     from gee.aoi_utils import get_bounds_and_center
     bounds, center = get_bounds_and_center(aoi, aoi_config=aoi_config)
-    dl_geom = ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds()
+    dl_geom = ee.Geometry.Polygon([bounds], "EPSG:4326", False) if bounds else aoi.bounds(maxError=1000)
     scale = max(100, get_dynamic_scale(aoi, aoi_config=aoi_config))
 
     final_thumb_url = None
     try:
-        final_thumb_url = suitability.getThumbURL({
+        final_thumb_url = _safe_gee_call(lambda: suitability.getThumbURL({
             **_SCORE_VIS, "region": dl_geom, "dimensions": 512, "crs": "EPSG:4326", "format": "png",
-        })
+        }))
     except Exception:
         pass
 
@@ -444,13 +460,13 @@ def compute_landfill_export(
 
     from gee.aoi_utils import get_bounds_and_center
     bounds, _ = get_bounds_and_center(aoi, aoi_config=aoi_config)
-    dl_geom = ee.Geometry.Polygon([bounds]) if bounds else aoi.bounds()
+    dl_geom = ee.Geometry.Polygon([bounds], "EPSG:4326", False) if bounds else aoi.bounds(maxError=1000)
     scale = max(100, get_dynamic_scale(aoi, aoi_config=aoi_config))
 
     try:
-        download_url = suitability.getDownloadURL({
+        download_url = _safe_gee_call(lambda: suitability.getDownloadURL({
             "scale": scale, "region": dl_geom, "format": "GEO_TIFF"
-        })
+        }))
     except Exception:
         download_url = None
 

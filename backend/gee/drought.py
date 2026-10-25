@@ -300,7 +300,7 @@ def _build_drought_image(aoi_config, start_year, end_year, season="season_b", st
         area_sqkm = 10000000
     else:
         try:
-            area_sqkm = geometry.bounds().area(maxError=1000).divide(1e6).getInfo()
+            area_sqkm = safe_get_info(geometry.bounds().area(maxError=1000).divide(1e6)) or 999999999
         except Exception:
             area_sqkm = 999999999
 
@@ -474,7 +474,10 @@ def compute_drought_stats(aoi_config, start_year, end_year, season="season_b", s
             aoi_config, start_year, end_year, season, start_month, end_month, start_date, end_date, drought_type, weights
         )
 
-        calc_geom = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False) if is_global else geometry.bounds(maxError=1000)
+        bounds_pts, _ = get_bounds_and_center(geometry)
+        calc_geom = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False) if is_global else (
+            ee.Geometry.Polygon([bounds_pts], "EPSG:4326", False) if bounds_pts else geometry.bounds(maxError=1000)
+        )
 
         # Corridor-aware scale
         if corridor == "global":
@@ -554,7 +557,10 @@ def compute_drought_export(aoi_config, start_year, end_year, season="season_b", 
         factor_maps = {}
         import concurrent.futures
 
-        calc_geom = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False) if is_global else geometry.bounds(maxError=1000)
+        bounds_pts, _ = get_bounds_and_center(geometry)
+        calc_geom = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False) if is_global else (
+            ee.Geometry.Polygon([bounds_pts], "EPSG:4326", False) if bounds_pts else geometry.bounds(maxError=1000)
+        )
 
         MAX_VAL_LOOKUP = {
             "WRSI": 100, "AET": 600, "PET": 800,

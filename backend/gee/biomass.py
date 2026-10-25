@@ -1,8 +1,25 @@
 import ee
-from .aoi_utils import get_aoi_geometry
+import time
+import random
+from .aoi_utils import get_aoi_geometry, get_dynamic_scale, safe_get_info, get_bounds_and_center
+from gee.auth import rotate_credentials
 import concurrent.futures
 from .classify_utils import quantile_classify
 from gee.persistent_cache import with_cache
+
+def _safe_gee_call(func, *args, **kwargs):
+    retries = 5
+    for i in range(retries):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            err_str = str(e)
+            if "429" in err_str or "Too Many Requests" in err_str or "concurrency" in err_str.lower() or "quota" in err_str.lower():
+                rotate_credentials()
+                if i < retries - 1:
+                    time.sleep((2 ** i) + random.uniform(0, 1))
+                    continue
+            raise
 
 _PALETTE = ["#0000ff", "#00ffff", "#00ff00", "#ffff00", "#ff0000"]
 _VIS = {"min": 0, "max": 100, "palette": _PALETTE}
@@ -296,8 +313,12 @@ def compute_biomass_stats(aoi_config: dict, buffer_km: float = 3.0, start_year: 
     forest_area_km2 = forest_mask.multiply(ee.Image.pixelArea()).divide(1e6)
     pop_img = pop.unmask(0)
 
-    calc_geom = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False) if is_global else aoi.bounds(maxError=1000)
-    stats_raw = ee.Image.cat([
+    from gee.aoi_utils import get_bounds_and_center
+    bounds, _ = get_bounds_and_center(aoi)
+    calc_geom = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False) if is_global else (
+        ee.Geometry.Polygon([bounds], "EPSG:4326", False) if bounds else aoi.bounds(maxError=1000)
+    )
+    stats_raw = safe_get_info(ee.Image.cat([
         depletion_score.rename('depletion_risk'),
         standing_biomass_img.rename('standing_biomass_tonnes'),
         biomass_lost_img.rename('biomass_lost_tonnes'),
@@ -307,8 +328,10 @@ def compute_biomass_stats(aoi_config: dict, buffer_km: float = 3.0, start_year: 
         reducer=ee.Reducer.mean().combine(ee.Reducer.max(), sharedInputs=True).combine(ee.Reducer.sum(), sharedInputs=True),
         geometry=calc_geom,
         scale=dynamic_scale,
-        maxPixels=1e10
-    ).getInfo()
+        maxPixels=1e13,
+        bestEffort=True,
+        tileScale=16
+    )) or {}
 
     mean_risk = round(stats_raw.get("depletion_risk_mean", 0) or 0, 1)
     max_risk = round(stats_raw.get("depletion_risk_max", 0) or 0, 1)
@@ -371,15 +394,20 @@ def compute_biomass_classify(aoi_config: dict, buffer_km: float = 3.0, start_yea
 
 @with_cache
 def compute_biomass_export(aoi_config: dict, buffer_km: float = 3.0, start_year: int = 2019, end_year: int = 2023) -> dict:
-    aoi, dynamic_scale, depletion_score, proximity_risk, recent_loss, degradation_risk, forest_mask, clear_cut, gradual_gathering, future_loss_pred, agb_tonnes_ha, pop = _build_biomass_base(aoi_config, buffer_km, start_year, end_year)
+    aoi, dynamic_scale, depletion_score, proximity_risk, recent_loss, degradation_risk, forest_mask, clear_cut, gradual_gathering, future_loss_pred, agb_tonnes_ha, pop, is_global = _build_biomass_base(aoi_config, buffer_km, start_year, end_year)
+    from gee.aoi_utils import get_bounds_and_center
+    bounds, _ = get_bounds_and_center(aoi)
+    calc_geom = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False) if is_global else (
+        ee.Geometry.Polygon([bounds], "EPSG:4326", False) if bounds else aoi.bounds(maxError=1000)
+    )
     
-    url = depletion_score.getDownloadURL({
+    url = _safe_gee_call(lambda: depletion_score.getDownloadURL({
         "name": "biomass_depletion_risk",
-        "scale": dynamic_scale,
+        "scale": max(dynamic_scale, 100),
         "region": calc_geom,
         "format": "GEO_TIFF",
         "crs": "EPSG:4326"
-    })
+    }))
     
     return {
         "download_url": url,
@@ -388,7 +416,11 @@ def compute_biomass_export(aoi_config: dict, buffer_km: float = 3.0, start_year:
 
 def export_factor_map(aoi_config: dict, factor_key: str, palette: list = None, buffer_km: float = 3.0, start_year: int = 2019, end_year: int = 2023):
     aoi, dynamic_scale, _, proximity_risk, recent_loss, degradation_risk, forest_mask, clear_cut, gradual_gathering, future_loss_pred, agb_tonnes_ha, pop, is_global = _build_biomass_base(aoi_config, buffer_km, start_year, end_year)
-    calc_geom = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False) if is_global else aoi.bounds(maxError=1000)
+    from gee.aoi_utils import get_bounds_and_center
+    bounds, _ = get_bounds_and_center(aoi)
+    calc_geom = ee.Geometry.Rectangle([-180, -89, 180, 89], "EPSG:4326", False) if is_global else (
+        ee.Geometry.Polygon([bounds], "EPSG:4326", False) if bounds else aoi.bounds(maxError=1000)
+    )
     
     if factor_key == "proximity":
         img = proximity_risk.clip(aoi).multiply(100).round()
@@ -418,9 +450,9 @@ def export_factor_map(aoi_config: dict, factor_key: str, palette: list = None, b
     try:
         if palette:
             styled = img.visualize(min=vis_min, max=vis_max, palette=palette)
-            url = styled.getDownloadURL({"name": f"biomass_{factor_key}_styled", "scale": max(dynamic_scale, 100), "region": calc_geom, "format": "GEO_TIFF"})
+            url = _safe_gee_call(lambda: styled.getDownloadURL({"name": f"biomass_{factor_key}_styled", "scale": max(dynamic_scale, 100), "region": calc_geom, "format": "GEO_TIFF"}))
         else:
-            url = img.toFloat().getDownloadURL({"name": f"biomass_{factor_key}_raw", "scale": max(dynamic_scale, 100), "region": calc_geom, "format": "GEO_TIFF"})
+            url = _safe_gee_call(lambda: img.toFloat().getDownloadURL({"name": f"biomass_{factor_key}_raw", "scale": max(dynamic_scale, 100), "region": calc_geom, "format": "GEO_TIFF"}))
     except Exception:
         url = None
         

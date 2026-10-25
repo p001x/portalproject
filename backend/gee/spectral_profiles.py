@@ -120,7 +120,8 @@ def compute_spectral_profiles(
         geometries=False
     )
 
-    info = sampled_fc.getInfo()
+    from gee.aoi_utils import safe_get_info
+    info = safe_get_info(sampled_fc) or {}
     features = info.get("features", [])
     if not features:
         raise ValueError(
