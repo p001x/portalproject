@@ -379,6 +379,7 @@ export interface AccessibilityRequest {
   method?: string;
   custom_labels?: string[];
   proposed_facilities?: number[][];
+  transport_mode?: string;
 }
 export interface AccessibilityMapResult {
   travel_time_tile_url: string;
@@ -390,13 +391,9 @@ export interface AccessibilityMapResult {
   facilities?: { lon: number; lat: number; name: string; type: string }[];
   origins?: { lon: number; lat: number; name: string; type: string }[];
   nearest_road_geojson?: any;
-  start_year?: number;
-  end_year?: number;
   farthest_road_geojson?: any;
-  start_year?: number;
-  end_year?: number;
   incidents?: { lon: number; lat: number; name: string }[];
-  routes?: { geometry: any; incident_name: string; facility_name: string; distance_km: number }[];
+  routes?: { geometry: any; incident_name: string; facility_name: string; distance_km: number; duration_mins?: number }[];
 }
 export interface AccessibilityStatsResult {
   stats: Record<string, number>;

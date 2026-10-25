@@ -54,6 +54,12 @@ def haversine(lon1, lat1, lon2, lat2):
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return R * c
 
+def _safe_first_val(d, default=0):
+    if not isinstance(d, dict) or not d:
+        return default
+    vals = [v for v in d.values() if v is not None]
+    return vals[0] if vals else default
+
 
 import os
 import geopandas as gpd
@@ -108,19 +114,23 @@ def fetch_local_points(amenities: list[str], bbox: list[float]) -> tuple[list[ee
         return [], []
         
     minx, miny, maxx, maxy = bbox
-    cache_key = (f"{miny:.6f},{minx:.6f},{maxy:.6f},{maxx:.6f}", "-".join(sorted(amenities)), "v10")
+    cache_key = (f"{miny:.6f},{minx:.6f},{maxy:.6f},{maxx:.6f}", "-".join(sorted(amenities)), "v11")
     
     with _lock:
         if cache_key in _cache_overpass:
-            cached_result = _cache_overpass[cache_key]
-            if isinstance(cached_result, Exception):
-                raise cached_result
-            return cached_result
+            cached_points = _cache_overpass[cache_key]
+            if isinstance(cached_points, Exception):
+                raise cached_points
+            features = []
+            for p in cached_points:
+                try:
+                    features.append(ee.Feature(ee.Geometry.Point([p["lon"], p["lat"]])))
+                except Exception:
+                    pass
+            return features, cached_points
             
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
     dataset_dir = os.path.join(base_dir, "dataset vector")
-    
-    osm_names_cache = _fetch_osm_names(bbox, amenities)
     
     sector_gdf = None
     sector_path = os.path.join(dataset_dir, "sector.shp")
@@ -137,8 +147,23 @@ def fetch_local_points(amenities: list[str], bbox: list[float]) -> tuple[list[ee
         "secondary_school": "CROM_Vector.gdb|Schools|Secondary",
         "superior_school": "Schools_superior.shp",
         "marketplace": "CROM_Vector.gdb|Markets",
-        "hospital": "CROM_Vector.gdb|Health_facilities",
-        "clinic": "CROM_Vector.gdb|Health_facilities"
+        "hospital": "CROM_Vector.gdb|Health_facilities|Hospital",
+        "clinic": "CROM_Vector.gdb|Health_facilities|Health Centre",
+        "health_facility": "CROM_Vector.gdb|Health_facilities",
+    }
+    
+    # Multi-value filter patterns: when a single amenity key needs to match
+    # multiple TYPE values, use regex OR via str.contains.
+    amenity_filter_patterns = {
+        "hospital": "Hospital",
+        "clinic": "Health Centre|Clinic|Dispens|Post",
+    }
+    
+    amenity_to_standalone_shp = {
+        "primary_school": "Schools_primary.shp",
+        "secondary_school": "Schools_secondary.shp",
+        "superior_school": "Schools_superior.shp",
+        "marketplace": "Markets.shp",
     }
     
     features = []
@@ -149,6 +174,8 @@ def fetch_local_points(amenities: list[str], bbox: list[float]) -> tuple[list[ee
             continue
             
         shp_file = amenity_to_shp[am]
+        gdf = None
+        filter_val = None
         
         if "|" in shp_file:
             parts = shp_file.split("|")
@@ -156,109 +183,148 @@ def fetch_local_points(amenities: list[str], bbox: list[float]) -> tuple[list[ee
             layer_name = parts[1]
             filter_val = parts[2] if len(parts) > 2 else None
             shp_path = os.path.join(dataset_dir, gdb_name)
-            if not os.path.exists(shp_path):
-                continue
-            try:
-                gdf = gpd.read_file(shp_path, layer=layer_name)
-                if filter_val and 'Highest_Ed' in gdf.columns:
-                    gdf = gdf[gdf['Highest_Ed'].str.contains(filter_val, na=False, case=False)]
-                    
-                name_col = None
-                for col in ['NOMFORMATI', 'TRADENAME', 'Name', 'NAME']:
-                    if col in gdf.columns:
-                        name_col = col
-                        break
-            except Exception as e:
-                logger.error(f"Failed to load {layer_name} from {gdb_name}: {e}")
-                continue
+            if os.path.exists(shp_path):
+                try:
+                    gdf = gpd.read_file(shp_path, layer=layer_name)
+                except Exception as e:
+                    logger.warning(f"Failed to load {layer_name} from {gdb_name}: {e}")
+                    gdf = None
         else:
             shp_path = os.path.join(dataset_dir, shp_file)
-            if not os.path.exists(shp_path):
-                continue
-            try:
-                gdf = gpd.read_file(shp_path)
-                name_col = None
-                for col in ['NOMFORMATI', 'TRADENAME', 'Name', 'NAME', 'DESCR1', 'DESCR2']:
-                    if col in gdf.columns:
-                        name_col = col
-                        break
-            except Exception as e:
-                logger.error(f"Failed to load {shp_file}: {e}")
-                continue
+            if os.path.exists(shp_path):
+                try:
+                    gdf = gpd.read_file(shp_path)
+                except Exception as e:
+                    logger.warning(f"Failed to load {shp_file}: {e}")
+                    gdf = None
+                    
+        # Fallback to standalone shapefile if GDB loading returned empty
+        if (gdf is None or len(gdf) == 0) and am in amenity_to_standalone_shp:
+            fallback_path = os.path.join(dataset_dir, amenity_to_standalone_shp[am])
+            if os.path.exists(fallback_path):
+                try:
+                    gdf = gpd.read_file(fallback_path)
+                    filter_val = None
+                except Exception as e:
+                    logger.warning(f"Failed to load fallback shapefile {fallback_path}: {e}")
+                    
+        if gdf is None or len(gdf) == 0:
+            continue
+            
+        # Use multi-value pattern from amenity_filter_patterns if available,
+        # otherwise fall back to the pipe-split filter_val from the shp config
+        actual_filter = amenity_filter_patterns.get(am, filter_val)
+        if actual_filter:
+            if 'Highest_Ed' in gdf.columns:
+                gdf = gdf[gdf['Highest_Ed'].str.contains(actual_filter, na=False, case=False)]
+            elif 'TYPE' in gdf.columns:
+                gdf = gdf[gdf['TYPE'].str.contains(actual_filter, na=False, case=False)]
+                
+        name_col = None
+        for col in ['NOMFORMATI', 'TRADENAME', 'Name', 'NAME', 'DESCR1', 'DESCR2']:
+            if col in gdf.columns:
+                name_col = col
+                break
+                
         # Make sure it's in WGS84
-        if gdf.crs and gdf.crs.to_epsg() != 4326:
-            gdf = gdf.to_crs(epsg=4326)
+        if gdf.crs:
+            try:
+                if gdf.crs.to_epsg() != 4326:
+                    gdf = gdf.to_crs(epsg=4326)
+            except Exception:
+                try:
+                    gdf = gdf.to_crs(epsg=4326)
+                except Exception as e:
+                    logger.warning(f"CRS conversion failed: {e}")
             
-        # Get bounds in the CRS of the file to filter efficiently
-        bbox_geom = gpd.GeoSeries.from_wkt([f"POLYGON (({minx} {miny}, {maxx} {miny}, {maxx} {maxy}, {minx} {maxy}, {minx} {miny}))"], crs="EPSG:4326")
-        
-        if gdf.crs and gdf.crs.to_epsg() != 4326:
-            bbox_geom = bbox_geom.to_crs(gdf.crs)
-            
-        bounds = bbox_geom.total_bounds
-        
-        # We can just filter on the WGS84 geometry though
-        local_gdf = gdf.cx[minx:maxx, miny:maxy]
+        # Filter within bbox with slight buffer (0.01 deg ~= 1.1km)
+        buf = 0.01
+        local_gdf = gdf.cx[minx - buf:maxx + buf, miny - buf:maxy + buf]
         
         if len(local_gdf) == 0:
             continue
             
         if sector_gdf is not None:
-            # Spatial join to get sector names
             try:
                 local_gdf = gpd.sjoin(local_gdf, sector_gdf, how="left", predicate="intersects")
             except Exception as e:
-                logger.error(f"Sjoin failed: {e}")
+                logger.warning(f"Sjoin failed: {e}")
         
         for idx, row in local_gdf.iterrows():
             geom = row.geometry
-            if geom and geom.is_valid and not geom.is_empty:
+            c_lon, c_lat = None, None
+            if geom and not geom.is_empty and geom.is_valid:
                 centroid = geom.centroid
+                c_lon, c_lat = centroid.x, centroid.y
+            elif 'Longitude' in row and 'Latitude' in row and pd.notna(row['Longitude']) and pd.notna(row['Latitude']):
+                c_lon, c_lat = float(row['Longitude']), float(row['Latitude'])
+            elif 'X' in row and 'Y' in row and pd.notna(row['X']) and pd.notna(row['Y']):
+                c_lon, c_lat = float(row['X']), float(row['Y'])
                 
-                name = None
-                if name_col and name_col in row and pd.notna(row[name_col]) and str(row[name_col]).strip() and str(row[name_col]).strip().lower() != 'nan':
-                    name = str(row[name_col]).strip()
+            if c_lon is None or c_lat is None:
+                continue
                 
-                # Try fallback names if empty
-                if not name:
-                    id_val = ""
-                    for id_col in ["FID_", "FID", "NO", "CODE1", "id", "ID", "CODE_DE_PR", "OBJECTID"]:
-                        if id_col in row and pd.notna(row[id_col]):
-                            try:
-                                id_val = f"#{int(row[id_col])}"
-                            except ValueError:
-                                id_val = f"#{row[id_col]}"
-                            break
-                            
-                    if id_val:
-                        name = f"{id_val}"
-                    elif 'Sector' in row and pd.notna(row['Sector']) and str(row['Sector']).strip().lower() != 'nan':
-                        name = f"in {row['Sector']} Sector"
-                    elif 'Sector_Nam' in row and pd.notna(row['Sector_Nam']) and str(row['Sector_Nam']).strip().lower() != 'nan':
-                        name = f"in {row['Sector_Nam']} Sector"
-                    else:
-                        name = f"Unnamed"
-                    
-                features.append(ee.Feature(ee.Geometry.Point([centroid.x, centroid.y])))
-                raw_points.append({"lon": centroid.x, "lat": centroid.y, "name": name, "type": am})
-        # Catch any errors in the processing loop but continue
-        # (Removed orphaned try-except here since read_file is already handled above)
-    if not features:
+            name = None
+            if name_col and name_col in row and pd.notna(row[name_col]) and str(row[name_col]).strip() and str(row[name_col]).strip().lower() != 'nan':
+                name = str(row[name_col]).strip()
+            
+            # Try fallback names if empty
+            if not name:
+                id_val = ""
+                for id_col in ["FID_", "FID", "NO", "CODE1", "id", "ID", "CODE_DE_PR", "OBJECTID", "TRADEID", "School_ID"]:
+                    if id_col in row and pd.notna(row[id_col]):
+                        try:
+                            id_val = f"#{int(row[id_col])}"
+                        except ValueError:
+                            id_val = f"#{row[id_col]}"
+                        break
+                        
+                sector_found = None
+                for sec_col in ['SECT_NAME', 'NOMSECT', 'Sector', 'Sector_Nam']:
+                    if sec_col in row and pd.notna(row[sec_col]) and str(row[sec_col]).strip().lower() != 'nan':
+                        sector_found = str(row[sec_col]).strip()
+                        break
+                        
+                if id_val:
+                    name = f"{id_val}"
+                elif sector_found:
+                    name = f"in {sector_found} Sector"
+                else:
+                    name = "Unnamed"
+                
+            try:
+                features.append(ee.Feature(ee.Geometry.Point([c_lon, c_lat])))
+            except Exception:
+                pass
+            raw_points.append({"lon": c_lon, "lat": c_lat, "name": name, "type": am})
+
+    if not raw_points:
         logger.warning(f"No local features found for {amenities} in bbox {bbox}.")
         return [], []
         
     with _lock:
-        _cache_overpass[cache_key] = (features, raw_points)
+        _cache_overpass[cache_key] = raw_points
         
     return features, raw_points
 
 
 def _build_accessibility_images(aoi_config: dict, amenities: list[str], dest_amenities: list[str] = None, n_classes: int = 4, service_threshold_mins: int = 30, proposed_facilities: list = None, transport_mode: str = "walking"):
-    # Enforce Rwanda study areas only (Accessibility uses local CROM geodatabase and Rwandan road networks)
+    # Normalize aoi_config if empty or partial
+    if not isinstance(aoi_config, dict):
+        aoi_config = {"type": "rwanda", "country": "Rwanda", "name": str(aoi_config or "Rwanda"), "district": str(aoi_config or "Rwanda")}
+    if not aoi_config.get("type"):
+        if aoi_config.get("district"):
+            aoi_config["type"] = "rwanda"
+            aoi_config["country"] = "Rwanda"
+        else:
+            aoi_config["type"] = "rwanda"
+            aoi_config["country"] = "Rwanda"
+            aoi_config["name"] = aoi_config.get("name", "Rwanda")
+
     aoi_type = (aoi_config.get("type") or "").lower()
     aoi_country = (aoi_config.get("country") or "").lower()
     
-    if aoi_type in ("world", "global") or (aoi_country and aoi_country != "rwanda" and aoi_type.startswith("gaul")):
+    if aoi_type in ("world", "global") or (aoi_country and aoi_country != "rwanda" and aoi_type.startswith("gaul") and aoi_country != "rwanda"):
         raise ValueError(
             "Accessibility analysis uses local Rwandan vector data and infrastructure geodatabases. "
             "Only Rwanda study areas (National, Province, District, Sector, or Cell) are supported."
@@ -267,7 +333,7 @@ def _build_accessibility_images(aoi_config: dict, amenities: list[str], dest_ame
     from gee.aoi_utils import get_aoi_geometry
     aoi = get_aoi_geometry(aoi_config)
 
-    bounds, center = get_bounds_and_center(aoi, aoi_config)
+    bounds, center = get_bounds_and_center(aoi, aoi_config=aoi_config)
     if not bounds:
         bounds_info = safe_get_info(aoi.bounds()) or {}
         bounds = bounds_info.get("coordinates", [[]])[0]
@@ -290,6 +356,8 @@ def _build_accessibility_images(aoi_config: dict, amenities: list[str], dest_ame
     target_amenities = dest_amenities if dest_amenities and len(dest_amenities) > 0 else amenities
     
     points, raw_points = fetch_local_points(target_amenities, bbox)
+    if not points and raw_points:
+        points = [ee.Feature(ee.Geometry.Point([p["lon"], p["lat"]]), {"name": p.get("name", "Facility")}) for p in raw_points]
 
     if proposed_facilities:
         for pf in proposed_facilities:
@@ -301,7 +369,7 @@ def _build_accessibility_images(aoi_config: dict, amenities: list[str], dest_ame
         # Outside Rwanda or no local amenities: sample built-up center points so global analysis completes
         try:
             lc_built = ee.ImageCollection("ESA/WorldCover/v100").first().select("Map").eq(50).clip(aoi)
-            sampled = lc_built.stratifiedSample(numPoints=15, classBand="Map", region=aoi, scale=max(500, get_dynamic_scale(aoi)), geometries=True)
+            sampled = lc_built.stratifiedSample(numPoints=15, classBand="Map", region=aoi, scale=max(500, get_dynamic_scale(aoi, aoi_config=aoi_config)), geometries=True)
             sampled_info = safe_get_info(sampled)
             for feat in (sampled_info or {}).get("features", []):
                 coords = feat.get("geometry", {}).get("coordinates", [])
@@ -379,10 +447,15 @@ def _build_accessibility_images(aoi_config: dict, amenities: list[str], dest_ame
     is_massive = country in COUNTRY_PRESETS and COUNTRY_PRESETS[country].get("is_massive")
 
     road_pace = 3.6 / road_speed_kmh
+    roads = None
     if is_rwanda:
-        roads = ee.FeatureCollection("projects/sat-io/open-datasets/GRIP4/Africa").filterBounds(aoi)
-        roads_raster = ee.Image(1).paint(roads, road_pace)
-        cost = base_cost.where(roads_raster.neq(1), roads_raster).rename("cost")
+        try:
+            roads = ee.FeatureCollection("projects/sat-io/open-datasets/GRIP4/Africa").filterBounds(aoi)
+            roads_raster = ee.Image(1).paint(roads, road_pace)
+            cost = base_cost.where(roads_raster.neq(1), roads_raster).rename("cost")
+        except Exception as e:
+            logger.warning(f"Could not load GRIP4 Africa roads: {e}")
+            cost = base_cost
     elif is_massive:
         cost = base_cost.where(lc.eq(50), road_pace).rename("cost")
     else:
@@ -402,9 +475,9 @@ def _build_accessibility_images(aoi_config: dict, amenities: list[str], dest_ame
         maxDistance=max_dist_meters
     ).clip(aoi).rename("travel_time")
     
-    # Cap at 3600s (60 minutes) and mask invalid (unreachable)
+    # Cap at 3600s (60 minutes) and mask invalid (unreachable) pixels inside AOI
     travel_time = travel_time.where(travel_time.gt(3600), 3600)
-    travel_time = travel_time.unmask(3600)
+    travel_time = travel_time.unmask(3600).clip(aoi)
     
     # 4. Classify dynamically based on n_classes (equal intervals up to 3600s)
     acc_class = ee.Image(0).clip(aoi).rename("accessibility_class")
@@ -419,6 +492,7 @@ def _build_accessibility_images(aoi_config: dict, amenities: list[str], dest_ame
         else:
             acc_class = acc_class.where(travel_time.gt(lower).And(travel_time.lte(upper)), i + 1)
 
+    acc_class = acc_class.clip(aoi)
     
     return aoi, travel_time, acc_class, {
         "cost_surface": cost,
@@ -521,20 +595,47 @@ def _get_closest_road_geojson(roads_fc, pt_lon, pt_lat):
 
 def fetch_sample_population(bbox: list[float], limit=15) -> list[dict]:
     minx, miny, maxx, maxy = bbox
-    cache_key = f"{miny:.6f},{minx:.6f},{maxy:.6f},{maxx:.6f}"
+    cache_key = f"{miny:.6f},{minx:.6f},{maxy:.6f},{maxx:.6f}_{limit}"
     with _lock:
         if cache_key in _cache_population:
             return _cache_population[cache_key]
             
+    # Try local villages shapefile first (instant, 100% reliable)
+    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+    villages_path = os.path.join(base_dir, "sectrstu", "villages.shp")
+    if os.path.exists(villages_path):
+        try:
+            v_gdf = gpd.read_file(villages_path)
+            if v_gdf.crs and v_gdf.crs.to_epsg() != 4326:
+                v_gdf = v_gdf.to_crs(epsg=4326)
+            sub = v_gdf.cx[minx:maxx, miny:maxy]
+            if len(sub) > 0:
+                sample_count = min(limit, len(sub))
+                sampled = sub.sample(n=sample_count, random_state=42) if len(sub) > limit else sub
+                incidents = []
+                for _, row in sampled.iterrows():
+                    c = row.geometry.centroid
+                    v_name = row.get("NAME_5") or row.get("NAME_4") or "Village"
+                    s_name = row.get("NAME_3")
+                    display_name = f"{v_name} ({s_name})" if s_name and pd.notna(s_name) else str(v_name)
+                    incidents.append({"lat": c.y, "lon": c.x, "name": display_name})
+                with _lock:
+                    _cache_population[cache_key] = incidents
+                return incidents
+        except Exception as e:
+            logger.warning(f"Failed to query local villages.shp: {e}")
+            
+    # Fallback to Overpass API
     query = f"""
-    [out:json][timeout:25];
+    [out:json][timeout:15];
     (
       node["place"~"village|town|hamlet"]({miny},{minx},{maxy},{maxx});
     );
     out body {limit};
     """
     try:
-        response = requests.post("https://overpass-api.de/api/interpreter", data={"data": query}, timeout=30)
+        headers = {"User-Agent": "RwandaGeoportal/1.0 (contact@example.com)"}
+        response = requests.post("https://overpass-api.de/api/interpreter", data={"data": query}, headers=headers, timeout=10)
         res = response.json()
         incidents = []
         for node in res.get("elements", []):
@@ -551,22 +652,27 @@ def fetch_sample_population(bbox: list[float], limit=15) -> list[dict]:
         logger.error(f"Failed to fetch population from OSM: {e}")
         return []
 
+_osrm_backoff_until = 0.0
+
 def fetch_osrm_route(start_lon, start_lat, end_lon, end_lat):
-    url = f"http://router.project-osrm.org/route/v1/driving/{start_lon},{start_lat};{end_lon},{end_lat}?overview=full&geometries=geojson"
-    try:
-        headers = {"User-Agent": "RwandaGeoportal/1.0 (contact@example.com)"}
-        response = requests.get(url, headers=headers, timeout=10)
-        time.sleep(0.3)  # Respect public API rate limits (1 req/sec max recommended)
-        if response.status_code == 200:
-            res = response.json()
-            if res.get("code") == "Ok" and res.get("routes"):
-                return res["routes"][0]
-        else:
-            logger.warning(f"OSRM request failed with status: {response.status_code}")
-    except Exception as e:
-        logger.warning(f"OSRM request failed, falling back to straight line: {e}")
+    global _osrm_backoff_until
+    now = time.time()
+    if now > _osrm_backoff_until:
+        url = f"http://router.project-osrm.org/route/v1/driving/{start_lon},{start_lat};{end_lon},{end_lat}?overview=full&geometries=geojson"
+        try:
+            headers = {"User-Agent": "RwandaGeoportal/1.0 (contact@example.com)"}
+            response = requests.get(url, headers=headers, timeout=2)
+            if response.status_code == 200:
+                res = response.json()
+                if res.get("code") == "Ok" and res.get("routes"):
+                    return res["routes"][0]
+            elif response.status_code in (403, 429, 500, 502, 503, 504):
+                _osrm_backoff_until = now + 60.0
+        except Exception as e:
+            _osrm_backoff_until = now + 60.0
+            logger.warning(f"OSRM request failed, falling back to straight line: {e}")
         
-    # Fallback to straight line (Euclidean) path if OSRM fails
+    # Fallback to straight line (Euclidean) path if OSRM fails or in backoff
     dist = haversine(start_lon, start_lat, end_lon, end_lat)
     return {
         "geometry": {
@@ -580,7 +686,7 @@ def fetch_osrm_route(start_lon, start_lat, end_lon, end_lat):
 @with_cache
 def compute_accessibility_map(aoi_config: dict, amenities: list[str], dest_amenities: list[str] = None, n_classes: int = 4, service_threshold_mins: int = 30, method: str = "natural_breaks", proposed_facilities: list = None, transport_mode: str = "walking") -> dict:
     dest_am = dest_amenities or []
-    cache_key = (json.dumps(aoi_config, sort_keys=True), "-".join(sorted(amenities)), "-".join(sorted(dest_am)), n_classes, service_threshold_mins, method, transport_mode, "v12")
+    cache_key = (json.dumps(aoi_config, sort_keys=True), "-".join(sorted(amenities)), "-".join(sorted(dest_am)), n_classes, service_threshold_mins, method, transport_mode, "v13")
     with _lock:
         if cache_key in _cache_map:
             return _cache_map[cache_key]
@@ -595,8 +701,8 @@ def compute_accessibility_map(aoi_config: dict, amenities: list[str], dest_ameni
     # We use reverse_labels=True because low travel time = High accessibility, and the palette is already green to red.
     classify = quantile_classify(
         layers=[{"name": "TravelTime", "image": travel_time, "title": "Travel Time (seconds)"}],
-        aoi=aoi, scale=get_dynamic_scale(aoi), n_classes=n_classes,
-        method=method, reverse_labels=True
+        aoi=aoi, scale=get_dynamic_scale(aoi, aoi_config=aoi_config), n_classes=n_classes,
+        method=method, reverse_labels=True, aoi_config=aoi_config
     )
     
     acc_class_tile_url = classify["panels"][0]["tile_url"]
@@ -604,9 +710,15 @@ def compute_accessibility_map(aoi_config: dict, amenities: list[str], dest_ameni
     travel_time_vis = {"min": 0, "max": 3600, "palette": ["#ffffff", "#f5e6ce", "#d4b179", "#a16b38", "#572b0c"]}
     travel_time_map_id = _safe_gee_call(lambda: travel_time.getMapId(travel_time_vis))
     
-    roads_map_id = _safe_gee_call(lambda: ee.Image().byte().paint(roads, 1, 1).getMapId({"palette": ["#FF0000"]})) if roads else {"tile_fetcher": type('obj', (object,), {'url_format': ''})}
+    roads_tile_url = ""
+    if roads:
+        try:
+            roads_map_id = _safe_gee_call(lambda: ee.Image().byte().paint(roads, 1, 1).getMapId({"palette": ["#FF0000"]}))
+            roads_tile_url = roads_map_id["tile_fetcher"].url_format
+        except Exception as e:
+            logger.warning(f"Could not generate roads tile url: {e}")
 
-    bounds, center = get_bounds_and_center(aoi)
+    bounds, center = get_bounds_and_center(aoi, aoi_config=aoi_config)
     lons = [p[0] for p in bounds]
     lats = [p[1] for p in bounds]
     bbox = [min(lons), min(lats), max(lons), max(lats)]
@@ -624,52 +736,40 @@ def compute_accessibility_map(aoi_config: dict, amenities: list[str], dest_ameni
 
     routes = []
     # Use origin amenities if present, otherwise sample population
-    incidents = origin_raw_points if len(origin_raw_points) > 0 else fetch_sample_population(bbox)
+    incidents = origin_raw_points if len(origin_raw_points) > 0 else fetch_sample_population(bbox, limit=12)
     
     if incidents and raw_points:
-        # If there are many origins, cap the routes to 25 to prevent freezing
-        if len(origin_raw_points) > 0:
-             incidents = incidents[:25]
+        incidents = incidents[:12]
              
+        def _get_name(pt, default_type):
+            n = pt.get("name", "Unnamed")
+            if n.startswith("Unnamed"):
+                id_part = n.replace("Unnamed", "")
+                res = f"{pt.get('type', default_type)}{id_part}"
+                if "Sector" not in res:
+                    res += " Location"
+                return res
+            return n
+
         for inc in incidents:
             pts_sorted = sorted(raw_points, key=lambda f: haversine(inc["lon"], inc["lat"], f["lon"], f["lat"]))
-            candidates = pts_sorted[:3] # Route to the 3 nearest by straight line
+            best_fac = pts_sorted[0]
+            route = fetch_osrm_route(inc["lon"], inc["lat"], best_fac["lon"], best_fac["lat"])
             
-            best_route = None
-            best_duration = float('inf')
-            best_fac = None
-            
-            for fac in candidates:
-                route = fetch_osrm_route(inc["lon"], inc["lat"], fac["lon"], fac["lat"])
-                if route and "duration" in route and route["duration"] < best_duration:
-                    best_duration = route["duration"]
-                    best_route = route
-                    best_fac = fac
-            
-            if best_route and best_fac:
-                def _get_name(pt, default_type):
-                    n = pt.get("name", "Unnamed")
-                    if n.startswith("Unnamed"):
-                        id_part = n.replace("Unnamed", "")
-                        res = f"{pt.get('type', default_type)}{id_part}"
-                        if "Sector" not in res:
-                            res += " Location"
-                        return res
-                    return n
-                    
+            if route and best_fac:
                 routes.append({
-                    "geometry": best_route.get("geometry", best_route),
+                    "geometry": route.get("geometry", route),
                     "incident_name": _get_name(inc, "Origin"),
                     "facility_name": _get_name(best_fac, "Destination"),
-                    "distance_km": round(best_route.get("distance", 0) / 1000, 2),
-                    "duration_mins": round(best_route.get("duration", 0) / 60, 2)
+                    "distance_km": round(route.get("distance", 0) / 1000, 2),
+                    "duration_mins": round(route.get("duration", 0) / 60, 2)
                 })
 
     result = {
         "travel_time_tile_url": travel_time_map_id["tile_fetcher"].url_format,
         "acc_class_tile_url": acc_class_tile_url,
-        "roads_tile_url": roads_map_id["tile_fetcher"].url_format,
-        "center": [centroid[1], centroid[0]],
+        "roads_tile_url": roads_tile_url,
+        "center": center,
         "bbox": bounds,
         "district": aoi_config.get("district", aoi_config.get("name", "Custom AOI")),
         "facilities": raw_points,
@@ -687,7 +787,7 @@ def compute_accessibility_map(aoi_config: dict, amenities: list[str], dest_ameni
 @with_cache
 def compute_accessibility_stats(aoi_config: dict, amenities: list[str], dest_amenities: list[str] = None, n_classes: int = 4, service_threshold_mins: int = 30, proposed_facilities: list = None, transport_mode: str = "walking") -> dict:
     dest_am = dest_amenities or []
-    cache_key = (json.dumps(aoi_config, sort_keys=True), "-".join(sorted(amenities)), "-".join(sorted(dest_am)), n_classes, service_threshold_mins, transport_mode, "v12")
+    cache_key = (json.dumps(aoi_config, sort_keys=True), "-".join(sorted(amenities)), "-".join(sorted(dest_am)), n_classes, service_threshold_mins, transport_mode, "v13")
     with _lock:
         if cache_key in _cache_stats:
             return _cache_stats[cache_key]
@@ -702,8 +802,8 @@ def compute_accessibility_stats(aoi_config: dict, amenities: list[str], dest_ame
         c_bands = ee.Image.cat([a_class.eq(i + 1).multiply(ee.Image.pixelArea()).rename(f"c{i}") for i in range(n_classes)])
         s_mask = t_time.lte(service_threshold_mins * 60)
         pop_img = ee.ImageCollection("WorldPop/GP/100m/pop").filter(ee.Filter.inList('year', [2020])).first().clip(area_of_interest)
-        sc = get_dynamic_scale(area_of_interest)
-        bounds, _ = get_bounds_and_center(area_of_interest)
+        sc = get_dynamic_scale(area_of_interest, aoi_config=aoi_config)
+        bounds, _ = get_bounds_and_center(area_of_interest, aoi_config=aoi_config)
         calc_geom = ee.Geometry.Polygon([bounds], "EPSG:4326", False) if bounds else area_of_interest.bounds(maxError=1000)
         
         return {
@@ -721,17 +821,17 @@ def compute_accessibility_stats(aoi_config: dict, amenities: list[str], dest_ame
         lbls = class_labels(n_classes)
         interval = 3600 / n_classes
         c_areas = {}
-        c_dict = futures['area'].result()
+        c_dict = futures['area'].result() or {}
         for i, lbl in enumerate(lbls):
             lower_min = int((i * interval) / 60)
             upper_min = int(((i + 1) * interval) / 60)
             label = f"{lbl} ({lower_min}-{upper_min}m)" if i < n_classes - 1 else f"{lbl} (>{lower_min}m)"
             c_areas[label] = round((c_dict.get(f"c{i}", 0) or 0) / 1e6, 2)
             
-        s_raw = futures['stats'].result()
-        s_area = round((list(futures['served'].result().values())[0] or 0) / 1e6, 2)
-        s_pop = int(list(futures['pop'].result().values())[0] or 0)
-        t_pop = int(list(futures['total_pop'].result().values())[0] or 0)
+        s_raw = futures['stats'].result() or {}
+        s_area = round((_safe_first_val(futures['served'].result(), 0) or 0) / 1e6, 2)
+        s_pop = int(_safe_first_val(futures['pop'].result(), 0) or 0)
+        t_pop = int(_safe_first_val(futures['total_pop'].result(), 0) or 0)
         
         return {
             "stats": {
@@ -784,7 +884,7 @@ def compute_accessibility_stats(aoi_config: dict, amenities: list[str], dest_ame
 @with_cache
 def compute_accessibility_classify(aoi_config: dict, amenities: list[str], dest_amenities: list[str] = None, n_classes: int = 4, service_threshold_mins: int = 30, method: str = "natural_breaks", custom_labels: list[str] = None, proposed_facilities: list = None, transport_mode: str = "walking") -> dict:
     dest_am = dest_amenities or []
-    cache_key = (json.dumps(aoi_config, sort_keys=True), "-".join(sorted(amenities)), "-".join(sorted(dest_am)), n_classes, service_threshold_mins, method, tuple(custom_labels) if custom_labels else None, transport_mode, "v12")
+    cache_key = (json.dumps(aoi_config, sort_keys=True), "-".join(sorted(amenities)), "-".join(sorted(dest_am)), n_classes, service_threshold_mins, method, tuple(custom_labels) if custom_labels else None, transport_mode, "v13")
     with _lock:
         if cache_key in _cache_classify:
             return _cache_classify[cache_key]
@@ -795,8 +895,8 @@ def compute_accessibility_classify(aoi_config: dict, amenities: list[str], dest_
         layers=[
             {"name": "TravelTime", "image": travel_time, "title": "Travel Time (seconds)"},
         ],
-        aoi=aoi, scale=get_dynamic_scale(aoi), n_classes=n_classes,
-        method=method, custom_labels=custom_labels, reverse_labels=True
+        aoi=aoi, scale=get_dynamic_scale(aoi, aoi_config=aoi_config), n_classes=n_classes,
+        method=method, custom_labels=custom_labels, reverse_labels=True, aoi_config=aoi_config
     )
 
     result = {
@@ -810,7 +910,7 @@ def compute_accessibility_classify(aoi_config: dict, amenities: list[str], dest_
 @with_cache
 def compute_accessibility_export(aoi_config: dict, amenities: list[str], dest_amenities: list[str] = None, n_classes: int = 4, service_threshold_mins: int = 30, proposed_facilities: list = None, transport_mode: str = "walking") -> dict:
     dest_am = dest_amenities or []
-    cache_key = (json.dumps(aoi_config, sort_keys=True), "-".join(sorted(amenities)), "-".join(sorted(dest_am)), n_classes, service_threshold_mins, transport_mode, "v12")
+    cache_key = (json.dumps(aoi_config, sort_keys=True), "-".join(sorted(amenities)), "-".join(sorted(dest_am)), n_classes, service_threshold_mins, transport_mode, "v13")
     with _lock:
         if cache_key in _cache_export:
             return _cache_export[cache_key]
@@ -882,17 +982,63 @@ def compute_accessibility_export(aoi_config: dict, amenities: list[str], dest_am
 
 @with_cache
 def compute_accessibility_analysis(
-    district_or_aoi, amenities: list[str], n_classes: int = 4
+    district_or_aoi,
+    amenities: list[str],
+    dest_amenities: list[str] = None,
+    n_classes: int = 4,
+    service_threshold_mins: int = 30,
+    method: str = "natural_breaks",
+    proposed_facilities: list = None,
+    transport_mode: str = "walking",
 ) -> dict:
     if isinstance(district_or_aoi, str):
-        aoi_config = {"type": "gaul2", "country": "Rwanda", "name": district_or_aoi, "level2": district_or_aoi}
+        aoi_config = {
+            "type": "rwanda",
+            "country": "Rwanda",
+            "name": district_or_aoi,
+            "district": district_or_aoi,
+        }
     else:
         aoi_config = district_or_aoi
 
-    map_res = compute_accessibility_map(aoi_config, amenities)
-    stats_res = compute_accessibility_stats(aoi_config, amenities)
-    classify_res = compute_accessibility_classify(aoi_config, amenities, n_classes)
-    export_res = compute_accessibility_export(aoi_config, amenities)
+    map_res = compute_accessibility_map(
+        aoi_config,
+        amenities=amenities,
+        dest_amenities=dest_amenities,
+        n_classes=n_classes,
+        service_threshold_mins=service_threshold_mins,
+        method=method,
+        proposed_facilities=proposed_facilities,
+        transport_mode=transport_mode,
+    )
+    stats_res = compute_accessibility_stats(
+        aoi_config,
+        amenities=amenities,
+        dest_amenities=dest_amenities,
+        n_classes=n_classes,
+        service_threshold_mins=service_threshold_mins,
+        proposed_facilities=proposed_facilities,
+        transport_mode=transport_mode,
+    )
+    classify_res = compute_accessibility_classify(
+        aoi_config,
+        amenities=amenities,
+        dest_amenities=dest_amenities,
+        n_classes=n_classes,
+        service_threshold_mins=service_threshold_mins,
+        method=method,
+        proposed_facilities=proposed_facilities,
+        transport_mode=transport_mode,
+    )
+    export_res = compute_accessibility_export(
+        aoi_config,
+        amenities=amenities,
+        dest_amenities=dest_amenities,
+        n_classes=n_classes,
+        service_threshold_mins=service_threshold_mins,
+        proposed_facilities=proposed_facilities,
+        transport_mode=transport_mode,
+    )
 
     return {
         **map_res,

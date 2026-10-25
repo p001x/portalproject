@@ -2218,11 +2218,24 @@ def landslide_export_endpoint(req: LandslideRequest):
         raise HTTPException(500, str(exc)) from exc
 
 
+def _resolve_accessibility_aoi(req: AccessibilityRequest) -> dict:
+    aoi = dict(req.aoi) if req.aoi else {}
+    if not aoi.get("name") and req.district:
+        aoi["name"] = req.district
+    if not aoi.get("district") and req.district:
+        aoi["district"] = req.district
+    if not aoi.get("type"):
+        aoi["type"] = "rwanda"
+    if not aoi.get("country"):
+        aoi["country"] = "Rwanda"
+    return aoi
+
 @app.post("/api/accessibility/map", tags=["analysis"])
 def accessibility_map_endpoint(req: AccessibilityRequest):
     _require_gee()
     try:
-        return compute_accessibility_map(req.aoi, req.amenities, req.dest_amenities, req.n_classes, req.service_threshold_mins, method=req.method, proposed_facilities=req.proposed_facilities, transport_mode=req.transport_mode)
+        aoi = _resolve_accessibility_aoi(req)
+        return compute_accessibility_map(aoi, req.amenities, req.dest_amenities, req.n_classes, req.service_threshold_mins, method=req.method, proposed_facilities=req.proposed_facilities, transport_mode=req.transport_mode)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except Exception as exc:
@@ -2233,7 +2246,8 @@ def accessibility_map_endpoint(req: AccessibilityRequest):
 def accessibility_stats_endpoint(req: AccessibilityRequest):
     _require_gee()
     try:
-        return compute_accessibility_stats(req.aoi, req.amenities, req.dest_amenities, req.n_classes, req.service_threshold_mins, proposed_facilities=req.proposed_facilities, transport_mode=req.transport_mode)
+        aoi = _resolve_accessibility_aoi(req)
+        return compute_accessibility_stats(aoi, req.amenities, req.dest_amenities, req.n_classes, req.service_threshold_mins, proposed_facilities=req.proposed_facilities, transport_mode=req.transport_mode)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except Exception as exc:
@@ -2244,7 +2258,8 @@ def accessibility_stats_endpoint(req: AccessibilityRequest):
 def accessibility_classify_endpoint(req: AccessibilityRequest):
     _require_gee()
     try:
-        return compute_accessibility_classify(req.aoi, req.amenities, req.dest_amenities, req.n_classes, req.service_threshold_mins, method=req.method, custom_labels=req.custom_labels, proposed_facilities=req.proposed_facilities, transport_mode=req.transport_mode)
+        aoi = _resolve_accessibility_aoi(req)
+        return compute_accessibility_classify(aoi, req.amenities, req.dest_amenities, req.n_classes, req.service_threshold_mins, method=req.method, custom_labels=req.custom_labels, proposed_facilities=req.proposed_facilities, transport_mode=req.transport_mode)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except Exception as exc:
@@ -2255,7 +2270,8 @@ def accessibility_classify_endpoint(req: AccessibilityRequest):
 def accessibility_export_endpoint(req: AccessibilityRequest):
     _require_gee()
     try:
-        return compute_accessibility_export(req.aoi, req.amenities, req.dest_amenities, req.n_classes, req.service_threshold_mins, proposed_facilities=req.proposed_facilities, transport_mode=req.transport_mode)
+        aoi = _resolve_accessibility_aoi(req)
+        return compute_accessibility_export(aoi, req.amenities, req.dest_amenities, req.n_classes, req.service_threshold_mins, proposed_facilities=req.proposed_facilities, transport_mode=req.transport_mode)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except Exception as exc:

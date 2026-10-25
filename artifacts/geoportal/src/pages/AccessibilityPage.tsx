@@ -44,7 +44,10 @@ const AMENITY_OPTIONS = [
   { id: "primary_school", label: "Primary School" },
   { id: "secondary_school", label: "Secondary School" },
   { id: "superior_school", label: "College / University" },
-  { id: "marketplace", label: "Marketplace" }
+  { id: "marketplace", label: "Marketplace" },
+  { id: "hospital", label: "Hospital" },
+  { id: "clinic", label: "Health Center / Clinic" },
+  { id: "health_facility", label: "All Health Facilities" },
 ];
 
 
@@ -115,10 +118,12 @@ export function AccessibilityPage() {
   };
 
   const getReq = () => {
-    // Enforce Rwanda study area for Accessibility
-    const validAoi = (aoi.type === "world" || (aoi.country && aoi.country.toLowerCase() !== "rwanda") || aoi.type === "custom")
+    // Allow Rwanda districts, sectors, and Rwanda-bounded custom polygons
+    const validAoi = (aoi.type === "world" || (aoi.country && aoi.country.toLowerCase() !== "rwanda" && aoi.type !== "custom"))
       ? { type: "rwanda" as const, country: "Rwanda", name: "Rwanda" }
-      : aoi;
+      : aoi.type === "custom"
+        ? { ...aoi, country: aoi.country || "Rwanda" }
+        : aoi;
 
     return {
       aoi: validAoi,
@@ -169,7 +174,7 @@ export function AccessibilityPage() {
   const currentTileUrl = (() => {
     if (!mapData) return undefined;
     if (activeLayer === "continuous") return mapData.travel_time_tile_url;
-    if (activeLayer === "classified") return mapData.acc_class_tile_url;
+    if (activeLayer === "classified") return classifyData?.classify?.panels?.[0]?.tile_url || mapData.acc_class_tile_url;
     return undefined;
   })();
 
@@ -184,7 +189,7 @@ export function AccessibilityPage() {
   })();
 
   const activeAreas = useMemo(() => {
-    const rawAreas = classifyData?.panels?.[0]?.class_areas || statsData?.class_areas_km2;
+    const rawAreas = classifyData?.classify?.panels?.[0]?.class_areas || statsData?.class_areas_km2;
     if (!rawAreas) return undefined;
     const mapped: Record<string, number> = {};
     const keys = Object.keys(rawAreas);
@@ -466,6 +471,7 @@ export function AccessibilityPage() {
                   <div className="h-[520px] rounded-lg overflow-hidden border">
                     <DistrictMap 
                       center={mapData.center} 
+                      bbox={mapData.bbox}
                       tileUrl={currentTileUrl || ""} 
                       overlayUrl={showRoads && mapData.roads_tile_url ? mapData.roads_tile_url : undefined}
                       facilities={enrichedFacilities}
@@ -478,15 +484,43 @@ export function AccessibilityPage() {
                     />
                   </div>
                   <div className="mt-3 flex flex-wrap gap-3 text-xs">
-                    {ACCESSIBILITY_LABELS.map((label, i) => (
-                      <span key={label} className="flex items-center gap-1.5">
-                        <span
-                          className="w-3 h-3 rounded-sm inline-block"
-                          style={{ background: ACCESSIBILITY_COLORS[i % ACCESSIBILITY_COLORS.length] }}
-                        />
-                        {label}
-                      </span>
-                    ))}
+                    {activeLayer === "continuous" ? (
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-muted-foreground font-medium">Travel Time:</span>
+                          <div
+                            className="h-3 w-48 rounded-xs border border-border"
+                            style={{
+                              background: "linear-gradient(to right, #ffffff, #f5e6ce, #d4b179, #a16b38, #572b0c)",
+                            }}
+                          />
+                        </div>
+                        <div className="flex justify-between w-48 text-[10px] text-muted-foreground pl-[75px]">
+                          <span>0 min (Optimal)</span>
+                          <span>60+ min (Remote)</span>
+                        </div>
+                      </div>
+                    ) : classifyData?.classify?.panels?.[0]?.legend ? (
+                      classifyData.classify.panels[0].legend.map((item, i) => (
+                        <span key={item.label || i} className="flex items-center gap-1.5">
+                          <span
+                            className="w-3 h-3 rounded-sm inline-block shrink-0"
+                            style={{ background: item.color }}
+                          />
+                          <span className="text-foreground">{item.label}</span>
+                        </span>
+                      ))
+                    ) : (
+                      ACCESSIBILITY_LABELS.map((label, i) => (
+                        <span key={label} className="flex items-center gap-1.5">
+                          <span
+                            className="w-3 h-3 rounded-sm inline-block shrink-0"
+                            style={{ background: ACCESSIBILITY_COLORS[i % ACCESSIBILITY_COLORS.length] }}
+                          />
+                          {label}
+                        </span>
+                      ))
+                    )}
                   </div>
                 </>
               ) : null}
@@ -582,47 +616,53 @@ export function AccessibilityPage() {
 
                   <div>
                     <h3 className="font-medium mb-3">Accessibility Class Areas</h3>
-                    <ResponsiveContainer width="100%" height={240}>
-                      <BarChart
-                        data={Object.entries(statsData.class_areas_km2).map(([k, v], i) => ({
-                          name: k,
-                          area: v,
-                          fill: ACCESSIBILITY_COLORS[i % ACCESSIBILITY_COLORS.length],
-                        }))}
-                      >
-                        <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                        <YAxis unit=" km²" tick={{ fontSize: 11 }} />
-                        <Tooltip formatter={(v: number) => [`${v} km²`, "Area"]} />
-                        <Bar dataKey="area" radius={[4, 4, 0, 0]}>
-                          {Object.keys(statsData.class_areas_km2).map((_, i) => (
-                            <Cell key={i} fill={ACCESSIBILITY_COLORS[i % ACCESSIBILITY_COLORS.length]} />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
+                    {(activeAreas || statsData.class_areas_km2) && Object.keys(activeAreas || statsData.class_areas_km2!).length > 0 ? (
+                      <>
+                        <ResponsiveContainer width="100%" height={240}>
+                          <BarChart
+                            data={Object.entries(activeAreas || statsData.class_areas_km2!).map(([k, v], i) => ({
+                              name: k,
+                              area: v,
+                              fill: classifyData?.classify?.panels?.[0]?.legend?.[i]?.color || ACCESSIBILITY_COLORS[i % ACCESSIBILITY_COLORS.length],
+                            }))}
+                          >
+                            <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                            <YAxis unit=" km²" tick={{ fontSize: 11 }} />
+                            <Tooltip formatter={(v: number) => [`${v} km²`, "Area"]} />
+                            <Bar dataKey="area" radius={[4, 4, 0, 0]}>
+                              {Object.keys(activeAreas || statsData.class_areas_km2!).map((_, i) => (
+                                <Cell key={i} fill={classifyData?.classify?.panels?.[0]?.legend?.[i]?.color || ACCESSIBILITY_COLORS[i % ACCESSIBILITY_COLORS.length]} />
+                              ))}
+                            </Bar>
+                          </BarChart>
+                        </ResponsiveContainer>
 
-                    <table className="w-full text-sm mt-4 border rounded-lg overflow-hidden">
-                      <thead className="bg-muted">
-                        <tr>
-                          <th className="text-left px-3 py-2 font-medium">Class</th>
-                          <th className="text-right px-3 py-2 font-medium">Area (km²)</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {Object.entries(statsData.class_areas_km2).map(([cls, km2], i) => (
-                          <tr key={cls} className={i % 2 === 0 ? "bg-background" : "bg-muted/30"}>
-                            <td className="px-3 py-1.5 flex items-center gap-2">
-                              <span
-                                className="w-2.5 h-2.5 rounded-sm inline-block shrink-0"
-                                style={{ background: ACCESSIBILITY_COLORS[i % ACCESSIBILITY_COLORS.length] }}
-                              />
-                              {cls}
-                            </td>
-                            <td className="px-3 py-1.5 text-right tabular-nums">{km2}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        <table className="w-full text-sm mt-4 border rounded-lg overflow-hidden">
+                          <thead className="bg-muted">
+                            <tr>
+                              <th className="text-left px-3 py-2 font-medium">Class</th>
+                              <th className="text-right px-3 py-2 font-medium">Area (km²)</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {Object.entries(activeAreas || statsData.class_areas_km2!).map(([cls, km2], i) => (
+                              <tr key={cls} className={i % 2 === 0 ? "bg-background" : "bg-muted/30"}>
+                                <td className="px-3 py-1.5 flex items-center gap-2">
+                                  <span
+                                    className="w-2.5 h-2.5 rounded-sm inline-block shrink-0"
+                                    style={{ background: classifyData?.classify?.panels?.[0]?.legend?.[i]?.color || ACCESSIBILITY_COLORS[i % ACCESSIBILITY_COLORS.length] }}
+                                  />
+                                  {cls}
+                                </td>
+                                <td className="px-3 py-1.5 text-right tabular-nums">{km2}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">Class area data is currently unavailable.</p>
+                    )}
                   </div>
                 </>
               ) : null}
@@ -665,7 +705,7 @@ export function AccessibilityPage() {
                     downloadUrl={activeLayer === "continuous" ? exportData.travel_time_download_url : undefined}
                     district={mapData.district || aoi.name || "Custom"}
                     title={activeLayer === "continuous" ? "Travel Time Continuous Map" : "Accessibility Classes Map"}
-                    classAreas={activeLayer === "classified" ? statsData?.class_areas_km2 : undefined}
+                    classAreas={activeLayer === "classified" ? (activeAreas || statsData?.class_areas_km2) : undefined}
                     bbox={mapData?.bbox || undefined}
                     proposedFacilities={proposedFacilities.length > 0 ? proposedFacilities : undefined}
                   />
@@ -691,7 +731,7 @@ export function AccessibilityPage() {
                     district={mapData.district || aoi.name || "Custom"}
                     dateRange={`Current`}
                     stats={statsData.stats as Record<string, number>}
-                    classAreas={statsData.class_areas_km2}
+                    classAreas={activeAreas || statsData.class_areas_km2}
                     extraNotes={`Accessibility mapped for ${selectedAmenities.join(", ")}.`}
                     maps={[
                       exportData.travel_time_thumb_url ? ["Travel Time Continuous Map", exportData.travel_time_thumb_url] : undefined,
