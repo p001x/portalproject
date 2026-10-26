@@ -76,6 +76,8 @@ export interface ClassifyPanel {
   thumb_url: string;
   clean_thumb_url?: string;
   areas: Record<string, number>;
+  class_areas?: Record<string, number>;
+  legend?: { label: string; color: string }[];
   breakpoints: number[];
 }
 
@@ -386,7 +388,7 @@ export interface AccessibilityMapResult {
   acc_class_tile_url: string;
   roads_tile_url?: string;
   center: [number, number];
-  bbox?: number[];
+  bbox?: number[] | number[][];
   district?: string;
   facilities?: { lon: number; lat: number; name: string; type: string }[];
   origins?: { lon: number; lat: number; name: string; type: string }[];

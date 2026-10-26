@@ -78,7 +78,7 @@ export function AccessibilityPage() {
   const [nClasses, setNClasses] = useState(4);
   const [method, setMethod] = useState("natural_breaks");
   const [transportMode, setTransportMode] = useState("walking");
-  const [customClassNames, setCustomClassNames] = useState<string[]>(() => getDefaultLabels(5));
+  const [customClassNames, setCustomClassNames] = useState<string[]>(() => getDefaultLabels(4));
 
   useEffect(() => {
     setCustomClassNames((prev) => {
@@ -189,7 +189,7 @@ export function AccessibilityPage() {
   })();
 
   const activeAreas = useMemo(() => {
-    const rawAreas = classifyData?.classify?.panels?.[0]?.class_areas || statsData?.class_areas_km2;
+    const rawAreas = classifyData?.classify?.panels?.[0]?.class_areas || classifyData?.classify?.panels?.[0]?.areas || statsData?.class_areas_km2;
     if (!rawAreas) return undefined;
     const mapped: Record<string, number> = {};
     const keys = Object.keys(rawAreas);
@@ -507,7 +507,17 @@ export function AccessibilityPage() {
                             className="w-3 h-3 rounded-sm inline-block shrink-0"
                             style={{ background: item.color }}
                           />
-                          <span className="text-foreground">{item.label}</span>
+                          <span className="text-foreground">{customClassNames[i] || item.label}</span>
+                        </span>
+                      ))
+                    ) : activeAreas && Object.keys(activeAreas).length > 0 ? (
+                      Object.keys(activeAreas).map((label, i) => (
+                        <span key={label} className="flex items-center gap-1.5">
+                          <span
+                            className="w-3 h-3 rounded-sm inline-block shrink-0"
+                            style={{ background: ACCESSIBILITY_COLORS[i % ACCESSIBILITY_COLORS.length] }}
+                          />
+                          <span className="text-foreground">{label}</span>
                         </span>
                       ))
                     ) : (

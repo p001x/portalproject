@@ -31,7 +31,7 @@ interface MapExportControlsProps {
   title: string;
   classAreas?: Record<string, number>;
   downloadUrl?: string;
-  bbox?: number[];
+  bbox?: number[] | number[][];
   proposedFacilities?: [number, number][];
   overridePalette?: string[];
 }

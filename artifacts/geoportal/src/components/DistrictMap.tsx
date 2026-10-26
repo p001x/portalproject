@@ -32,7 +32,7 @@ export interface MapFacility {
 
 interface Props {
   center?: [number, number];
-  bbox?: number[][];
+  bbox?: number[][] | number[];
   tileUrl?: string;
   zoom?: number;
   title?: string;
@@ -142,7 +142,7 @@ function GEELayer({ tileUrl }: { tileUrl: string }) {
 }
 
 /** Fly to a new center/bounds when it changes. */
-function FlyTo({ center, zoom, bbox }: { center?: [number, number]; zoom: number; bbox?: number[][] }) {
+function FlyTo({ center, zoom, bbox }: { center?: [number, number]; zoom: number; bbox?: number[][] | number[] }) {
   const map = useMap();
   const safeCenter = center || [-1.94, 29.87]; // Default to Rwanda center
   const centerStr = JSON.stringify(safeCenter);
@@ -154,14 +154,27 @@ function FlyTo({ center, zoom, bbox }: { center?: [number, number]; zoom: number
     const parsedBbox = JSON.parse(bboxStr);
 
     if (parsedBbox && parsedBbox.length >= 4) {
-      const latMin = Math.min(...parsedBbox.map((c: any) => c[1]));
-      const latMax = Math.max(...parsedBbox.map((c: any) => c[1]));
-      const lonMin = Math.min(...parsedBbox.map((c: any) => c[0]));
-      const lonMax = Math.max(...parsedBbox.map((c: any) => c[0]));
-      map.flyToBounds([[latMin, lonMin], [latMax, lonMax]], { duration: 1.2, maxZoom: 14 });
-    } else {
-      map.flyTo(parsedCenter, zoom, { duration: 1.2 });
+      if (Array.isArray(parsedBbox[0])) {
+        const latMin = Math.min(...parsedBbox.map((c: any) => c[1]));
+        const latMax = Math.max(...parsedBbox.map((c: any) => c[1]));
+        const lonMin = Math.min(...parsedBbox.map((c: any) => c[0]));
+        const lonMax = Math.max(...parsedBbox.map((c: any) => c[0]));
+        if (!isNaN(latMin) && !isNaN(latMax) && !isNaN(lonMin) && !isNaN(lonMax) && latMin < latMax && lonMin < lonMax) {
+          map.flyToBounds([[latMin, lonMin], [latMax, lonMax]], { duration: 1.2, maxZoom: 14 });
+          return;
+        }
+      } else if (typeof parsedBbox[0] === "number") {
+        const lonMin = parsedBbox[0];
+        const latMin = parsedBbox[1];
+        const lonMax = parsedBbox[2];
+        const latMax = parsedBbox[3];
+        if (!isNaN(latMin) && !isNaN(latMax) && !isNaN(lonMin) && !isNaN(lonMax) && latMin < latMax && lonMin < lonMax) {
+          map.flyToBounds([[latMin, lonMin], [latMax, lonMax]], { duration: 1.2, maxZoom: 14 });
+          return;
+        }
+      }
     }
+    map.flyTo(parsedCenter, zoom, { duration: 1.2 });
   }, [centerStr, zoom, bboxStr, map]);
   return null;
 }

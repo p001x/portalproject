@@ -397,11 +397,24 @@ def quantile_classify(layers: list, aoi, scale: int, n_classes: int, reverse_pal
             elif ci == 0:
                 suffix = f" (<{bps[0]:.3g})" if bps else ""
             elif ci == n - 1:
-                suffix = f" (Ã¢â€°Â¥{bps[-1]:.3g})" if bps else ""
+                suffix = f" (≥{bps[-1]:.3g})" if bps else ""
             else:
-                suffix = f" ({bps[ci-1]:.3g}Ã¢â‚¬â€œ{bps[ci]:.3g})"
+                suffix = f" ({bps[ci-1]:.3g}–{bps[ci]:.3g})"
             km2 = round((area_raw.get(f"b{j}c{ci}", 0) or 0) / 1e6, 2)
             areas[lbl + suffix] = km2
+
+        # Build legend entries: [{label, color}, ...] for frontend rendering
+        legend = []
+        for ci, lbl in enumerate(lbls):
+            if n == 1:
+                suffix = ""
+            elif ci == 0:
+                suffix = f" (<{bps[0]:.3g})" if bps else ""
+            elif ci == n - 1:
+                suffix = f" (≥{bps[-1]:.3g})" if bps else ""
+            else:
+                suffix = f" ({bps[ci-1]:.3g}–{bps[ci]:.3g})"
+            legend.append({"label": lbl + suffix, "color": pal[ci % len(pal)]})
 
         return {
             "letter":      PANEL_LETTERS[j],
@@ -412,6 +425,8 @@ def quantile_classify(layers: list, aoi, scale: int, n_classes: int, reverse_pal
             "clean_thumb_url": thumb_url,
             "download_url": download_url,
             "areas":       areas,
+            "class_areas": areas,  # alias for frontend compatibility
+            "legend":      legend,
             "breakpoints": bps,
         }
 
