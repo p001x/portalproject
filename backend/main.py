@@ -2411,7 +2411,12 @@ def add_dataset_link(req: DatasetLinkRequest):
 
 @app.get("/api/datasets/{dataset_id}/download", tags=["rare-data"])
 @app.get("/api/datasets/{dataset_id}/raw", tags=["rare-data"])
-def download_dataset(dataset_id: str, source: Optional[str] = Query(None)):
+def download_dataset(
+    dataset_id: str,
+    source: Optional[str] = Query(None),
+    inline: bool = Query(False),
+    request: Request = None,
+):
     record = None
     if source in ("admin", "community"):
         records = load_metadata(source=source)
@@ -2419,7 +2424,7 @@ def download_dataset(dataset_id: str, source: Optional[str] = Query(None)):
     
     # Robust fallback across both sources
     if record is None:
-        for s in ("community", "admin"):
+        for s in ("admin", "community"):
             records = load_metadata(source=s)
             record = next((r for r in records if r["id"] == dataset_id), None)
             if record:
@@ -2428,19 +2433,32 @@ def download_dataset(dataset_id: str, source: Optional[str] = Query(None)):
     if record is None:
         raise HTTPException(404, "Dataset not found")
     try:
-        file_bytes = download_dataset_bytes(record["storage_key"])
+        file_bytes = download_dataset_bytes(record["storage_key"], fallback_url=record.get("source_url"))
     except Exception as exc:
-        raise HTTPException(500, f"Could not fetch file: {exc}") from exc
+        if record.get("source_url"):
+            try:
+                from storage.link_resolver import resolve_link
+                file_bytes, _, _ = resolve_link(record["source_url"], max_mb=5000)
+            except Exception as fb_exc:
+                logger.error(f"Download error for {dataset_id}: {exc} (fallback: {fb_exc})")
+                raise HTTPException(500, f"Could not fetch dataset file: {exc}") from exc
+        else:
+            logger.error(f"Download error for {dataset_id}: {exc}")
+            raise HTTPException(500, f"Could not fetch dataset file: {exc}") from exc
 
     content_type = "image/tiff" if record.get("file_type") == "raster" or record.get("original_filename", "").endswith((".tif", ".tiff")) else "application/octet-stream"
+
+    is_raw_req = request is not None and "/raw" in request.url.path
+    disposition = "inline" if (inline or is_raw_req) else "attachment"
 
     return Response(
         content=file_bytes,
         media_type=content_type,
         headers={
-            "Content-Disposition": f'inline; filename="{record["original_filename"]}"',
+            "Content-Disposition": f'{disposition}; filename="{record["original_filename"]}"',
             "Accept-Ranges": "bytes",
             "Access-Control-Allow-Origin": "*",
+            "Access-Control-Expose-Headers": "Content-Disposition",
         },
     )
 
@@ -2485,7 +2503,7 @@ def clip_dataset(dataset_id: str, req: DatasetClipRequest):
 
     try:
         from storage.dataset_storage import download_dataset_bytes, clip_dataset_by_mask
-        file_bytes = download_dataset_bytes(record["storage_key"])
+        file_bytes = download_dataset_bytes(record["storage_key"], fallback_url=record.get("source_url"))
         clipped_bytes, new_filename = clip_dataset_by_mask(record, file_bytes, mask_geojson)
         if req.district:
             base_name = record.get("original_filename", "dataset")
@@ -2545,7 +2563,7 @@ def download_all_datasets(source: str = Query("admin", pattern="^(admin|communit
     with zf_mod.ZipFile(tmp, "w", zf_mod.ZIP_DEFLATED) as zf:
         for r in records:
             try:
-                data = download_dataset_bytes(r["storage_key"])
+                data = download_dataset_bytes(r["storage_key"], fallback_url=r.get("source_url"))
                 zf.writestr(r["original_filename"], data)
             except Exception:
                 continue

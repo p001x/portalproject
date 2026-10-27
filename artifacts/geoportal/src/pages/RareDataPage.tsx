@@ -234,6 +234,20 @@ function DatasetList({
     return list;
   }, [records, search, filterType, filterCategory, onlySpatial, sortBy]);
 
+  const handleDirectDownload = (r: DatasetRecord) => {
+    const url = `${BASE}/datasets/${r.id}/download?source=${r.source ?? source}`;
+    const a = document.createElement("a");
+    a.href = url;
+    a.setAttribute("download", r.original_filename || `${r.name}.tif`);
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    toast({
+      title: "Download Started",
+      description: `Downloading "${r.name}" (${(r.file_type || "RAW").toUpperCase()})...`,
+    });
+  };
+
   const copyDownloadLink = (r: DatasetRecord) => {
     const origin = window.location.origin;
     const url = `${origin}${BASE}/datasets/${r.id}/download?source=${r.source ?? source}`;
@@ -345,7 +359,7 @@ function DatasetList({
                       { label: "Colab / GEE Snippet", icon: <Code2 className="w-4 h-4" />, onClick: () => setColabDataset(r) },
                       { label: "Edit Metadata", icon: <Edit3 className="w-4 h-4" />, onClick: () => setEditDataset(r), disabled: !canEdit, dividerAfter: true },
                       { label: "Copy Download Link", icon: <Copy className="w-4 h-4" />, onClick: () => copyDownloadLink(r) },
-                      { label: "Download File", icon: <Download className="w-4 h-4" />, onClick: () => { window.open(`${BASE}/datasets/${r.id}/download?source=${r.source ?? source}`, '_blank'); } },
+                      { label: "Download File", icon: <Download className="w-4 h-4" />, onClick: () => handleDirectDownload(r) },
                       ...(onDelete ? [{ label: "Delete Dataset", icon: <Trash2 className="w-4 h-4" />, onClick: () => setDeleteTarget(r), variant: "danger" as const }] : []),
                     ], r)}
                   >
@@ -404,18 +418,30 @@ function DatasetList({
                       {r.file_size_mb != null ? r.file_size_mb.toFixed(2) : "—"}
                     </td>
 
-                    {/* Clean single Properties button */}
+                    {/* Action buttons: Direct Download + Properties */}
                     <td className="px-4 py-3 text-right pr-6" onClick={(e) => e.stopPropagation()}>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-8 px-3 text-xs gap-1.5 font-medium border-border/80 hover:border-primary hover:text-primary hover:bg-primary/5 transition-all shadow-2xs cursor-pointer"
-                        onClick={() => setPropertiesDataset(r)}
-                        title="Open dataset properties, operations & tools"
-                      >
-                        <Settings2 className="w-3.5 h-3.5 text-primary" />
-                        Properties
-                      </Button>
+                      <div className="flex items-center justify-end gap-1.5">
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          className="h-8 px-2.5 text-xs gap-1 font-medium bg-blue-50 text-blue-700 hover:bg-blue-100 hover:text-blue-800 dark:bg-blue-950/60 dark:text-blue-300 dark:hover:bg-blue-900/80 border border-blue-200 dark:border-blue-800 transition-all shadow-2xs cursor-pointer"
+                          onClick={() => handleDirectDownload(r)}
+                          title={`Download ${r.name} (${(r.file_type || 'RAW').toUpperCase()})`}
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          Download
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 px-2.5 text-xs gap-1 font-medium border-border/80 hover:border-primary hover:text-primary hover:bg-primary/5 transition-all shadow-2xs cursor-pointer"
+                          onClick={() => setPropertiesDataset(r)}
+                          title="Open dataset properties, operations & tools"
+                        >
+                          <Settings2 className="w-3.5 h-3.5 text-primary" />
+                          Properties
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 );

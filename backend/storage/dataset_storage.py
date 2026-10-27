@@ -308,26 +308,269 @@ def _delete_from_huggingface(filename: str) -> None:
         logging.error(f"Failed to delete {filename} from Hugging Face: {e}")
 
 
-def download_from_kaggle(kaggle_uri: str) -> bytes:
-    import tempfile
+def get_kaggle_api():
+    """Safely obtain an authenticated KaggleApi instance, handling sandboxed config dirs gracefully."""
     import os
-    api = get_kaggle_api()
-    # URI format: kaggle://username/dataset/filename
-    parts = kaggle_uri.replace("kaggle://", "").split("/")
-    if len(parts) < 3: raise ValueError("Invalid kaggle uri")
+    import tempfile
+    import logging
+    try:
+        # Prevent PermissionError on restricted Windows/Docker environments
+        safe_home = os.path.join(tempfile.gettempdir(), ".kaggle_env")
+        os.makedirs(safe_home, exist_ok=True)
+        if "KAGGLE_CONFIG_DIR" not in os.environ:
+            os.environ["KAGGLE_CONFIG_DIR"] = safe_home
+        if "USERPROFILE" not in os.environ or os.environ.get("USERPROFILE") == r"C:\Users\user":
+            os.environ["USERPROFILE"] = safe_home
+        from kaggle.api.kaggle_api_extended import KaggleApi
+        api = KaggleApi()
+        api.authenticate()
+        return api
+    except Exception as e:
+        logging.warning(f"KaggleApi auth not configured or failed: {e}")
+        return None
+
+
+def download_from_kaggle(kaggle_uri: str, fallback_url: Optional[str] = None) -> bytes:
+    """
+    Download a dataset file from Kaggle using multiple fallback tiers:
+    1. Local storage / cache check (including smart base filename & UUID matching)
+    2. Direct Kaggle REST API (returns public pre-signed GCS download URL via 302 redirect)
+    3. Official Kaggle CLI / Python SDK
+    4. Hugging Face dataset mirror check
+    5. Provided fallback_url (e.g. Google Drive) via link_resolver
+    """
+    import os
+    import re
+    import io
+    import tempfile
+    import urllib.parse
+    import zipfile
+    import logging
+    import requests
+
+    # 1. Parse URI (kaggle://username/dataset/filename)
+    clean_uri = kaggle_uri.replace("kaggle://", "").strip()
+    parts = clean_uri.split("/")
+    if len(parts) < 3:
+        raise ValueError(f"Invalid kaggle uri: {kaggle_uri}")
     dataset = f"{parts[0]}/{parts[1]}"
     filename = "/".join(parts[2:])
-    
-    with tempfile.TemporaryDirectory() as tmpdir:
-        api.dataset_download_file(dataset, file_name=filename, path=tmpdir)
-        downloaded = os.path.join(tmpdir, filename)
-        # Kaggle might zip it
-        if not os.path.exists(downloaded) and os.path.exists(downloaded + ".zip"):
-            import zipfile
-            with zipfile.ZipFile(downloaded + ".zip", 'r') as zip_ref:
-                zip_ref.extractall(tmpdir)
-        with open(downloaded, "rb") as f:
+
+    # Clean any trailing artifacts like " - Google Drive" from filename
+    clean_filename = re.sub(r'\s*-\s*Google\s*Drive\s*$', '', filename).strip()
+
+    # 2. Check local client / storage directory first
+    client = _get_client()
+    if client.exists(clean_filename):
+        try:
+            return client.download_as_bytes(clean_filename)
+        except Exception:
+            pass
+    if client.exists(filename):
+        try:
+            return client.download_as_bytes(filename)
+        except Exception:
+            pass
+
+    storage_dir = getattr(client, "storage_dir", None)
+    if storage_dir and os.path.exists(storage_dir):
+        direct_path = os.path.join(storage_dir, clean_filename)
+        if os.path.exists(direct_path):
+            with open(direct_path, "rb") as f:
+                return f.read()
+
+        uuid_part = clean_filename.split("_")[0] if "_" in clean_filename else None
+        if uuid_part and len(uuid_part) >= 8:
+            for fname in os.listdir(storage_dir):
+                if uuid_part in fname:
+                    full_p = os.path.join(storage_dir, fname)
+                    if os.path.isfile(full_p):
+                        with open(full_p, "rb") as f:
+                            return f.read()
+
+        # Match by base filename without UUID prefix
+        base_name = clean_filename.split("_", 1)[1] if "_" in clean_filename else clean_filename
+        if base_name and len(base_name) > 3:
+            for fname in os.listdir(storage_dir):
+                if fname.endswith(base_name) or base_name in fname:
+                    full_p = os.path.join(storage_dir, fname)
+                    if os.path.isfile(full_p):
+                        with open(full_p, "rb") as f:
+                            return f.read()
+
+    # Check local disk cache
+    cache_dir = os.path.join(tempfile.gettempdir(), "blacportal_kaggle_cache", dataset.replace("/", "_"))
+    os.makedirs(cache_dir, exist_ok=True)
+    cached_path = os.path.join(cache_dir, clean_filename.replace("/", "_"))
+    if os.path.exists(cached_path) and os.path.getsize(cached_path) > 0:
+        try:
+            with open(cached_path, "rb") as f:
+                return f.read()
+        except Exception:
+            pass
+
+    # 3. Direct HTTP download from Kaggle public API endpoint
+    candidates = [clean_filename]
+    if clean_filename != filename:
+        candidates.append(filename)
+
+    for cand in candidates:
+        quoted = urllib.parse.quote(cand)
+        url = f"https://www.kaggle.com/api/v1/datasets/download/{dataset}/{quoted}"
+        headers = {"User-Agent": "SPETRO-GeoPortal/2.0"}
+
+        if "KAGGLE_API_TOKEN" in os.environ:
+            headers["Authorization"] = f"Bearer {os.environ['KAGGLE_API_TOKEN']}"
+        auth = None
+        if "KAGGLE_USERNAME" in os.environ and "KAGGLE_KEY" in os.environ:
+            auth = (os.environ["KAGGLE_USERNAME"], os.environ["KAGGLE_KEY"])
+
+        try:
+            resp = requests.get(url, headers=headers, auth=auth, allow_redirects=True, timeout=120, stream=True)
+            if resp.status_code == 200:
+                raw_bytes = resp.content
+                # If Kaggle wrapped download in a zip archive, extract target file
+                if raw_bytes[:4] == b"PK\x03\x04":
+                    with zipfile.ZipFile(io.BytesIO(raw_bytes)) as zf:
+                        names = zf.namelist()
+                        target = next((n for n in names if n == cand or n.endswith(cand)), names[0] if names else None)
+                        if target:
+                            raw_bytes = zf.read(target)
+                if raw_bytes:
+                    try:
+                        with open(cached_path, "wb") as f:
+                            f.write(raw_bytes)
+                    except Exception:
+                        pass
+                    return raw_bytes
+        except Exception as e:
+            logging.warning(f"Kaggle HTTP direct download failed for {cand}: {e}")
+
+    # 4. Try Kaggle Python SDK
+    api = get_kaggle_api()
+    if api:
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                api.dataset_download_file(dataset, file_name=clean_filename, path=tmpdir)
+                downloaded = os.path.join(tmpdir, clean_filename)
+                if not os.path.exists(downloaded) and os.path.exists(downloaded + ".zip"):
+                    with zipfile.ZipFile(downloaded + ".zip", "r") as zip_ref:
+                        zip_ref.extractall(tmpdir)
+                if os.path.exists(downloaded):
+                    with open(downloaded, "rb") as f:
+                        file_bytes = f.read()
+                    try:
+                        with open(cached_path, "wb") as f:
+                            f.write(file_bytes)
+                    except Exception:
+                        pass
+                    return file_bytes
+        except Exception as e:
+            logging.warning(f"Kaggle API dataset_download_file failed: {e}")
+
+    # 5. Check Hugging Face mirror
+    hf_repo = os.environ.get("HF_REPO_ID", "petersstore/blacportal-datasets")
+    hf_token = os.environ.get("HF_TOKEN")
+    for cand in candidates:
+        hf_url = f"https://huggingface.co/datasets/{hf_repo}/resolve/main/{urllib.parse.quote(cand)}?download=true"
+        hf_headers = {"Authorization": f"Bearer {hf_token}"} if hf_token else {}
+        try:
+            hf_resp = requests.get(hf_url, headers=hf_headers, timeout=60, stream=True)
+            if hf_resp.status_code == 200:
+                raw_bytes = hf_resp.content
+                if raw_bytes:
+                    try:
+                        with open(cached_path, "wb") as f:
+                            f.write(raw_bytes)
+                    except Exception:
+                        pass
+                    return raw_bytes
+        except Exception as e:
+            logging.warning(f"HF mirror check for {cand} failed: {e}")
+
+    # 6. Fallback to source_url (e.g. Google Drive) if provided
+    if fallback_url:
+        try:
+            from storage.link_resolver import resolve_link
+            fb_bytes, _, _ = resolve_link(fallback_url, max_mb=5000)
+            if fb_bytes:
+                try:
+                    with open(cached_path, "wb") as f:
+                        f.write(fb_bytes)
+                except Exception:
+                    pass
+                return fb_bytes
+        except Exception as e:
+            logging.warning(f"Fallback URL {fallback_url} failed: {e}")
+
+    raise ValueError(f"Could not retrieve dataset file from Kaggle ({kaggle_uri}) or fallbacks")
+
+
+def download_from_hf(storage_key: str, fallback_url: Optional[str] = None) -> bytes:
+    """Download a dataset file from Hugging Face Hub with HTTP streaming and local caching."""
+    import os
+    import urllib.parse
+    import tempfile
+    import requests
+    import logging
+
+    hf_token = os.environ.get("HF_TOKEN")
+    parts = storage_key.replace("hf://", "").split("/", 2)
+    if len(parts) == 3:
+        r_id = f"{parts[0]}/{parts[1]}"
+        filename = parts[2]
+    elif len(parts) == 2:
+        r_id = f"{parts[0]}/{parts[1]}"
+        filename = parts[1]
+    else:
+        r_id = os.environ.get("HF_REPO_ID", "petersstore/blacportal-datasets")
+        filename = storage_key.replace("hf://", "")
+
+    client = _get_client()
+    if client.exists(filename):
+        try:
+            return client.download_as_bytes(filename)
+        except Exception:
+            pass
+
+    cache_dir = os.path.join(tempfile.gettempdir(), "hf_cache", r_id.replace("/", "_"))
+    os.makedirs(cache_dir, exist_ok=True)
+    local_path = os.path.join(cache_dir, filename.replace("/", "_"))
+    if os.path.exists(local_path) and os.path.getsize(local_path) > 0:
+        with open(local_path, "rb") as f:
             return f.read()
+
+    url = f"https://huggingface.co/datasets/{r_id}/resolve/main/{urllib.parse.quote(filename)}?download=true"
+    headers = {"Authorization": f"Bearer {hf_token}"} if hf_token else {}
+    try:
+        resp = requests.get(url, headers=headers, stream=True, timeout=120)
+        if resp.status_code == 200:
+            with open(local_path, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=1024 * 1024):
+                    if chunk:
+                        f.write(chunk)
+            with open(local_path, "rb") as f:
+                return f.read()
+    except Exception as e:
+        logging.warning(f"HF direct download failed: {e}")
+
+    try:
+        from huggingface_hub import hf_hub_download
+        path = hf_hub_download(repo_id=r_id, repo_type="dataset", filename=filename, token=hf_token)
+        with open(path, "rb") as f:
+            return f.read()
+    except Exception as e:
+        logging.warning(f"hf_hub_download failed: {e}")
+
+    if fallback_url:
+        try:
+            from storage.link_resolver import resolve_link
+            fb_bytes, _, _ = resolve_link(fallback_url, max_mb=5000)
+            return fb_bytes
+        except Exception as e:
+            logging.warning(f"Fallback URL {fallback_url} failed: {e}")
+
+    raise ValueError(f"Could not download Hugging Face dataset: {storage_key}")
 
 
 @dataclass
@@ -785,46 +1028,90 @@ def process_and_store_link(url: str, name: str, description: str,
     return record
 
 
-def download_dataset_bytes(storage_key: str) -> bytes:
+def download_dataset_bytes(storage_key: str, fallback_url: Optional[str] = None) -> bytes:
+    try:
+        if storage_key.startswith(LINK_KEY_PREFIX):
+            from storage.link_resolver import resolve_link
+            file_bytes, _, _ = resolve_link(storage_key[len(LINK_KEY_PREFIX):], max_mb=5000)
+            return file_bytes
+        if storage_key.startswith("kaggle://"):
+            return download_from_kaggle(storage_key, fallback_url=fallback_url)
+        
+        if storage_key.startswith("hf://"):
+            return download_from_hf(storage_key, fallback_url=fallback_url)
+        
+        key = storage_key
+        if key.startswith("r2://"):
+            # Format: r2://bucket_name/filename
+            parts = key.replace("r2://", "").split("/", 1)
+            if len(parts) > 1:
+                key = parts[1]
+        elif key.startswith("local://"):
+            key = key[8:]
+        elif key.startswith("local::"):
+            key = key[7:]
+
+        client = _get_client()
+        if client.exists(key):
+            return client.download_as_bytes(key)
+
+        # Fallback to direct file search in storage directory
+        storage_dir = getattr(client, "storage_dir", None)
+        if storage_dir and os.path.exists(storage_dir):
+            base_k = os.path.basename(key)
+            alt_p = os.path.join(storage_dir, base_k)
+            if os.path.exists(alt_p):
+                with open(alt_p, "rb") as f:
+                    return f.read()
+            clean_k = key.replace("/", "_")
+            flat_p = os.path.join(storage_dir, clean_k)
+            if os.path.exists(flat_p):
+                with open(flat_p, "rb") as f:
+                    return f.read()
+
+        return client.download_as_bytes(key)
+    except Exception as primary_exc:
+        if fallback_url:
+            try:
+                from storage.link_resolver import resolve_link
+                fb_bytes, _, _ = resolve_link(fallback_url, max_mb=5000)
+                if fb_bytes:
+                    return fb_bytes
+            except Exception as fb_exc:
+                raise ValueError(f"Primary download failed ({primary_exc}) and fallback failed ({fb_exc})") from primary_exc
+        raise
+
+
+def get_dataset_local_path(storage_key: str, fallback_url: Optional[str] = None) -> Optional[str]:
+    import tempfile
+    import os
+
     if storage_key.startswith(LINK_KEY_PREFIX):
-        from storage.link_resolver import resolve_link
-        file_bytes, _, _ = resolve_link(storage_key[len(LINK_KEY_PREFIX):], max_mb=5000)
-        return file_bytes
-    if storage_key.startswith("kaggle://"):
-        return download_from_kaggle(storage_key)
-    
-    if storage_key.startswith("hf://"):
-        import os
-        from huggingface_hub import hf_hub_download
-        hf_token = os.environ.get("HF_TOKEN")
-        parts = storage_key.replace("hf://", "").split("/", 2)
-        if len(parts) == 3:
-            r_id = f"{parts[0]}/{parts[1]}"
-            filename = parts[2]
-        else:
-            r_id = os.environ.get("HF_REPO_ID", "petersstore/blacportal-datasets")
-            filename = storage_key.replace("hf://", "")
-        path = hf_hub_download(repo_id=r_id, repo_type="dataset", filename=filename, token=hf_token)
-        with open(path, "rb") as f:
-            return f.read()
-    
-    key = storage_key
-    if key.startswith("r2://"):
-        # Format: r2://bucket_name/filename
-        parts = key.replace("r2://", "").split("/", 1)
-        if len(parts) > 1:
-            key = parts[1]
-    elif key.startswith("local://"):
-        key = key[8:]
-    elif key.startswith("local::"):
-        key = key[7:]
-    return _get_client().download_as_bytes(key)
-
-
-def get_dataset_local_path(storage_key: str) -> Optional[str]:
-    if storage_key.startswith(LINK_KEY_PREFIX) or storage_key.startswith("kaggle://"):
         return None
         
+    if storage_key.startswith("kaggle://"):
+        try:
+            # Download and cache locally so GDAL / rasterio can open directly
+            clean_uri = storage_key.replace("kaggle://", "").strip()
+            parts = clean_uri.split("/")
+            dataset = f"{parts[0]}/{parts[1]}"
+            filename = "/".join(parts[2:])
+            import re
+            clean_filename = re.sub(r'\s*-\s*Google\s*Drive\s*$', '', filename).strip()
+
+            cache_dir = os.path.join(tempfile.gettempdir(), "blacportal_kaggle_cache", dataset.replace("/", "_"))
+            os.makedirs(cache_dir, exist_ok=True)
+            cached_path = os.path.join(cache_dir, clean_filename.replace("/", "_"))
+            if os.path.exists(cached_path) and os.path.getsize(cached_path) > 0:
+                return cached_path
+
+            data = download_from_kaggle(storage_key, fallback_url=fallback_url)
+            with open(cached_path, "wb") as f:
+                f.write(data)
+            return cached_path
+        except Exception:
+            return None
+
     if storage_key.startswith("hf://"):
         import os
         hf_token = os.environ.get("HF_TOKEN")
@@ -839,7 +1126,6 @@ def get_dataset_local_path(storage_key: str) -> Optional[str]:
             from huggingface_hub import hf_hub_download
             return hf_hub_download(repo_id=r_id, repo_type="dataset", filename=filename, token=hf_token)
         except ImportError:
-            # Fallback for environments where pip is broken and huggingface_hub is missing
             import requests, tempfile
             cache_dir = os.path.join(tempfile.gettempdir(), "hf_cache", r_id.replace("/", "_"))
             os.makedirs(cache_dir, exist_ok=True)
@@ -1033,7 +1319,7 @@ def get_dataset_preview(record: dict[str, Any], file_bytes: Optional[bytes] = No
         from storage.link_resolver import resolve_link_url
         url = resolve_link_url(raw_url)
     elif file_bytes is None and not is_url and record.get("storage_key"):
-        file_bytes = download_dataset_bytes(record["storage_key"])
+        file_bytes = download_dataset_bytes(record["storage_key"], fallback_url=record.get("source_url"))
 
     if file_type in ["geojson", "shapefile"]:
         import geopandas as gpd
@@ -1046,7 +1332,7 @@ def get_dataset_preview(record: dict[str, Any], file_bytes: Optional[bytes] = No
                 resp.raise_for_status()
                 file_bytes = resp.content
             elif file_bytes is None and not is_url:
-                file_bytes = download_dataset_bytes(record["storage_key"])
+                file_bytes = download_dataset_bytes(record["storage_key"], fallback_url=record.get("source_url"))
                 
             with tempfile.TemporaryDirectory() as tmpdir:
                 with zipfile.ZipFile(io.BytesIO(file_bytes), 'r') as zf:
