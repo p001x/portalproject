@@ -2357,6 +2357,10 @@ def drought_export_endpoint(req: DroughtRequest):
 
 # ── RARE DATA — Dataset Repository ─────────────────────────────────────────
 
+def _sanitize_download_filename(name: str) -> str:
+    """Remove characters that break Content-Disposition headers."""
+    return name.replace('"', '').replace('\n', '').replace('\r', '').strip() or "dataset"
+
 @app.get("/api/datasets", tags=["rare-data"])
 def list_datasets(source: str = Query("admin", pattern="^(admin|community|all)$")):
     if source == "all":
@@ -2364,8 +2368,53 @@ def list_datasets(source: str = Query("admin", pattern="^(admin|community|all)$"
     return {"records": load_metadata(source=source)}
 
 
+# NOTE: download-all MUST be defined BEFORE {dataset_id} routes to avoid
+# FastAPI matching "download-all" as a dataset_id.
+@app.get("/api/datasets/download-all", tags=["rare-data"])
+def download_all_datasets(source: str = Query("admin", pattern="^(admin|community)$")):
+    import os
+    import tempfile, zipfile as zf_mod
+    from fastapi.responses import FileResponse
+    from starlette.background import BackgroundTask
+    from storage.dataset_storage import get_dataset_local_path
+    records = load_metadata(source=source)
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")
+    tmp_path = tmp.name
+    tmp.close()
+    try:
+        with zf_mod.ZipFile(tmp_path, "w", zf_mod.ZIP_DEFLATED) as zf:
+            for r in records:
+                try:
+                    local_p = get_dataset_local_path(r["storage_key"], fallback_url=r.get("source_url"))
+                    if local_p and os.path.exists(local_p):
+                        zf.write(local_p, arcname=r.get("original_filename") or f"{r['id']}.tif")
+                    else:
+                        data = download_dataset_bytes(r["storage_key"], fallback_url=r.get("source_url"))
+                        zf.writestr(r.get("original_filename") or f"{r['id']}.tif", data)
+                except Exception:
+                    continue
+        return FileResponse(
+            tmp_path,
+            media_type="application/zip",
+            filename=f"{source}_all_datasets.zip",
+            background=BackgroundTask(os.unlink, tmp_path),
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Expose-Headers": "Content-Disposition, Content-Length",
+            }
+        )
+    except Exception:
+        import os
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+        raise
+
+
 @app.post("/api/datasets/upload", tags=["rare-data"])
 async def upload_dataset(
+    request: Request,
     file: UploadFile = File(...),
     name: str = Form(...),
     description: str = Form(""),
@@ -2375,6 +2424,10 @@ async def upload_dataset(
 ):
     if source not in ("admin", "community"):
         raise HTTPException(400, "source must be 'admin' or 'community'")
+    # Pre-check Content-Length before reading all bytes into memory
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > 50000 * 1024 * 1024:
+        raise HTTPException(413, f"Upload exceeds maximum allowed size (50 GB).")
     file_bytes = await file.read()
     record = process_and_store_upload(
         filename=file.filename or "upload",
@@ -2417,6 +2470,7 @@ def download_dataset(
     inline: bool = Query(False),
     request: Request = None,
 ):
+    from fastapi.responses import StreamingResponse
     record = None
     if source in ("admin", "community"):
         records = load_metadata(source=source)
@@ -2432,6 +2486,29 @@ def download_dataset(
 
     if record is None:
         raise HTTPException(404, "Dataset not found")
+    content_type = "image/tiff" if record.get("file_type") == "raster" or record.get("original_filename", "").endswith((".tif", ".tiff")) else "application/octet-stream"
+    is_raw_req = request is not None and "/raw" in request.url.path
+    disposition = "inline" if (inline or is_raw_req) else "attachment"
+    safe_filename = _sanitize_download_filename(record["original_filename"])
+
+    # 1. Fast zero-copy streaming via FileResponse if file exists locally on disk
+    from storage.dataset_storage import get_dataset_local_path
+    local_path = get_dataset_local_path(record["storage_key"], fallback_url=record.get("source_url"))
+    if local_path and os.path.exists(local_path):
+        from fastapi.responses import FileResponse
+        return FileResponse(
+            path=local_path,
+            media_type=content_type,
+            filename=safe_filename,
+            content_disposition_type=disposition,
+            headers={
+                "Accept-Ranges": "bytes",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Expose-Headers": "Content-Disposition, Content-Length",
+            },
+        )
+
+    # 2. Remote download or dynamic link fallback
     try:
         file_bytes = download_dataset_bytes(record["storage_key"], fallback_url=record.get("source_url"))
     except Exception as exc:
@@ -2446,19 +2523,21 @@ def download_dataset(
             logger.error(f"Download error for {dataset_id}: {exc}")
             raise HTTPException(500, f"Could not fetch dataset file: {exc}") from exc
 
-    content_type = "image/tiff" if record.get("file_type") == "raster" or record.get("original_filename", "").endswith((".tif", ".tiff")) else "application/octet-stream"
+    # Stream via chunked iterator to avoid holding the full file in the response buffer
+    def iter_bytes():
+        chunk_size = 4 * 1024 * 1024  # 4 MB chunks
+        for i in range(0, len(file_bytes), chunk_size):
+            yield file_bytes[i:i + chunk_size]
 
-    is_raw_req = request is not None and "/raw" in request.url.path
-    disposition = "inline" if (inline or is_raw_req) else "attachment"
-
-    return Response(
-        content=file_bytes,
+    return StreamingResponse(
+        iter_bytes(),
         media_type=content_type,
         headers={
-            "Content-Disposition": f'{disposition}; filename="{record["original_filename"]}"',
+            "Content-Disposition": f'{disposition}; filename="{safe_filename}"',
+            "Content-Length": str(len(file_bytes)),
             "Accept-Ranges": "bytes",
             "Access-Control-Allow-Origin": "*",
-            "Access-Control-Expose-Headers": "Content-Disposition",
+            "Access-Control-Expose-Headers": "Content-Disposition, Content-Length",
         },
     )
 
@@ -2553,26 +2632,7 @@ def delete_dataset(dataset_id: str, source: str = Query("admin", pattern="^(admi
     return {"ok": True}
 
 
-@app.get("/api/datasets/download-all", tags=["rare-data"])
-def download_all_datasets(source: str = Query("admin", pattern="^(admin|community)$")):
-    from fastapi.responses import StreamingResponse
-    import tempfile, zipfile as zf_mod
-    records = load_metadata(source=source)
-    # Stream via temp file to avoid holding everything in RAM
-    tmp = tempfile.SpooledTemporaryFile(max_size=50 * 1024 * 1024)  # spill to disk after 50MB
-    with zf_mod.ZipFile(tmp, "w", zf_mod.ZIP_DEFLATED) as zf:
-        for r in records:
-            try:
-                data = download_dataset_bytes(r["storage_key"], fallback_url=r.get("source_url"))
-                zf.writestr(r["original_filename"], data)
-            except Exception:
-                continue
-    tmp.seek(0)
-    return StreamingResponse(
-        tmp,
-        media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{source}_all_datasets.zip"'},
-    )
+# download-all was moved before {dataset_id} routes (see above) to fix route shadowing
 
 
 # ── Admin auth ──────────────────────────────────────────────────────────────
@@ -3434,6 +3494,22 @@ import json
 
 @app.get("/api/datasets/scrape-directory", tags=["rare-data"])
 def scrape_directory_endpoint(url: str):
+    # SSRF protection: reject private/internal network URLs
+    import ipaddress
+    from urllib.parse import urlparse as _up
+    import socket
+    parsed = _up(url)
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(400, "Only http and https URLs are allowed.")
+    try:
+        hostname = parsed.hostname or ""
+        resolved_ip = socket.gethostbyname(hostname)
+        ip_obj = ipaddress.ip_address(resolved_ip)
+        if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_reserved or ip_obj.is_link_local:
+            raise HTTPException(400, "URLs pointing to private/internal networks are not allowed.")
+    except (socket.gaierror, ValueError):
+        raise HTTPException(400, "Could not resolve the provided URL hostname.")
+
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=10) as response:
@@ -3454,7 +3530,7 @@ def scrape_directory_endpoint(url: str):
                         elif isinstance(obj, dict):
                             for v in obj.values(): extract_strings(v)
                     extract_strings(data)
-                except:
+                except Exception:
                     pass
             else:
                 html_str = content.decode('utf-8', errors='ignore')
@@ -3471,6 +3547,8 @@ def scrape_directory_endpoint(url: str):
             
             return {"links": absolute_links}
             
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(500, f"Failed to scrape directory: {str(e)}")
 

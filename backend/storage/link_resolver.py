@@ -465,6 +465,7 @@ def _stream_to_file(resp, output_path: str, max_mb: float, progress_callback=Non
                     progress_callback(size)
 
 def _parallel_download(url: str, output_path: str, file_size: int, headers: dict, max_mb: float, progress_callback=None) -> None:
+    import threading as _thr
     num_threads = 4
     chunk_size = file_size // num_threads
     
@@ -474,6 +475,7 @@ def _parallel_download(url: str, output_path: str, file_size: int, headers: dict
         f.write(b'\0')
         
     downloaded_bytes = 0
+    write_lock = _thr.Lock()
     
     def download_range(start: int, end: int):
         range_headers = headers.copy()
@@ -485,11 +487,13 @@ def _parallel_download(url: str, output_path: str, file_size: int, headers: dict
             raise ValueError("Server ignored Range header, falling back to single stream")
         
         nonlocal downloaded_bytes
-        with open(output_path, "r+b") as f:
-            f.seek(start)
-            for chunk in resp.iter_content(chunk_size=4 * 1024 * 1024):
-                if chunk:
-                    f.write(chunk)
+        for chunk in resp.iter_content(chunk_size=4 * 1024 * 1024):
+            if chunk:
+                with write_lock:
+                    with open(output_path, "r+b") as f:
+                        f.seek(start)
+                        f.write(chunk)
+                    start += len(chunk)
                     downloaded_bytes += len(chunk)
                     if progress_callback:
                         progress_callback(downloaded_bytes, file_size)

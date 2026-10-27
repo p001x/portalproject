@@ -236,16 +236,16 @@ function DatasetList({
 
   const handleDirectDownload = (r: DatasetRecord) => {
     const url = `${BASE}/datasets/${r.id}/download?source=${r.source ?? source}`;
+    toast({
+      title: "Download Started",
+      description: `Downloading "${r.name}" (${(r.file_type || "RAW").toUpperCase()})...`,
+    });
     const a = document.createElement("a");
     a.href = url;
     a.setAttribute("download", r.original_filename || `${r.name}.tif`);
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    toast({
-      title: "Download Started",
-      description: `Downloading "${r.name}" (${(r.file_type || "RAW").toUpperCase()})...`,
-    });
   };
 
   const copyDownloadLink = (r: DatasetRecord) => {

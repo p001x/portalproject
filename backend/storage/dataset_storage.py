@@ -21,38 +21,68 @@ DATA_PREFIXES  = {"admin": "rare_data/files/",       "community": "rare_data/com
 
 _client: Optional[Any] = None
 
+import threading
+_metadata_lock = threading.Lock()
+
 class LocalClient:
     def __init__(self, storage_dir: str):
         self.storage_dir = storage_dir
         os.makedirs(storage_dir, exist_ok=True)
 
     def _resolve_path(self, key: str) -> str:
-        # 1. Try resolving directly inside storage_dir (e.g. backend/data/files/datasets_metadata.json)
-        cleaned = key.replace('/', '_')
-        p_direct = os.path.join(self.storage_dir, key)
-        if os.path.exists(p_direct):
-            return p_direct
+        # 1. Clean prefixes and trailing artifacts
+        stripped = key
+        for prefix in ("local://", "local::", "kaggle://", "hf://", "r2://"):
+            if stripped.startswith(prefix):
+                stripped = stripped[len(prefix):]
+                break
 
-        p_flat = os.path.join(self.storage_dir, cleaned)
-        if os.path.exists(p_flat):
-            return p_flat
+        import re
+        stripped = re.sub(r'\s*-\s*Google\s*Drive\s*$', '', stripped).strip()
+        cleaned = stripped.replace('/', '_')
+        base_name = os.path.basename(stripped)
+        candidates = [stripped, cleaned, base_name]
 
-        # 2. Try resolving relative to parent directory
-        p_parent = os.path.normpath(os.path.join(self.storage_dir, "..", key))
-        if os.path.exists(p_parent):
-            return p_parent
-
-        p_parent_flat = os.path.normpath(os.path.join(self.storage_dir, "..", cleaned))
-        if os.path.exists(p_parent_flat):
-            return p_parent_flat
-
-        # 3. Try alt directory (metadata/files swap)
+        # Directories to search
+        dirs_to_search = [self.storage_dir]
+        kaggle_dir = os.path.normpath(os.path.join(self.storage_dir, "..", "kaggle_cache"))
+        if os.path.exists(kaggle_dir):
+            dirs_to_search.append(kaggle_dir)
         alt_dir = os.path.abspath(os.path.join(self.storage_dir, "..", "files") if "metadata" in self.storage_dir else os.path.join(self.storage_dir, "..", "metadata"))
-        p_alt = os.path.join(alt_dir, cleaned)
-        if os.path.exists(p_alt):
-            return p_alt
+        if os.path.exists(alt_dir) and alt_dir not in dirs_to_search:
+            dirs_to_search.append(alt_dir)
 
-        return p_flat
+        # 1. Direct candidate matching
+        for d in dirs_to_search:
+            if not os.path.exists(d):
+                continue
+            for cand in candidates:
+                p = os.path.join(d, cand)
+                if os.path.exists(p) and os.path.isfile(p):
+                    return p
+
+        # 2. Match by UUID prefix if key has uuid
+        uuid_part = base_name.split("_")[0] if "_" in base_name else None
+        if uuid_part and len(uuid_part) >= 8:
+            for d in dirs_to_search:
+                if os.path.exists(d):
+                    for fname in os.listdir(d):
+                        if uuid_part in fname:
+                            p = os.path.join(d, fname)
+                            if os.path.isfile(p):
+                                return p
+
+        # 3. Match by partial base_name
+        if len(base_name) > 3:
+            for d in dirs_to_search:
+                if os.path.exists(d):
+                    for fname in os.listdir(d):
+                        if fname.endswith(base_name) or base_name in fname:
+                            p = os.path.join(d, fname)
+                            if os.path.isfile(p):
+                                return p
+
+        return os.path.join(self.storage_dir, cleaned)
 
     def upload_from_bytes(self, key: str, data: bytes) -> None:
         path = os.path.join(self.storage_dir, key.replace('/', '_'))
@@ -90,6 +120,7 @@ class S3Client:
     def __init__(self, endpoint_url: str, access_key: str, secret_key: str, bucket_name: str, public_url: str = ""):
         self.bucket_name = bucket_name
         self.public_url = public_url.rstrip("/")
+        self.local_client = LocalClient(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "files")))
         self.s3 = None
         try:
             import boto3
@@ -115,34 +146,64 @@ class S3Client:
             import logging
             logging.error(f"boto3 is not available. Cloudflare R2 uploads will fail. {e}")
 
+    @property
+    def storage_dir(self) -> str:
+        return self.local_client.storage_dir
+
+    def _resolve_path(self, key: str) -> str:
+        return self.local_client._resolve_path(key)
+
     def upload_from_bytes(self, key: str, data: bytes) -> None:
-        if self.s3 is None: raise RuntimeError("boto3 is not installed or configured correctly.")
-        self.s3.put_object(Bucket=self.bucket_name, Key=key, Body=data)
+        try:
+            self.local_client.upload_from_bytes(key, data)
+        except Exception:
+            pass
+        if self.s3:
+            try:
+                self.s3.put_object(Bucket=self.bucket_name, Key=key, Body=data)
+            except Exception as e:
+                import logging
+                logging.error(f"S3 upload error: {e}")
 
     def upload_from_text(self, key: str, text: str) -> None:
-        if self.s3 is None: raise RuntimeError("boto3 is not installed or configured correctly.")
-        self.s3.put_object(Bucket=self.bucket_name, Key=key, Body=text.encode('utf-8'))
+        try:
+            self.local_client.upload_from_text(key, text)
+        except Exception:
+            pass
+        if self.s3:
+            try:
+                self.s3.put_object(Bucket=self.bucket_name, Key=key, Body=text.encode('utf-8'))
+            except Exception as e:
+                import logging
+                logging.error(f"S3 upload error: {e}")
 
     def download_as_bytes(self, key: str) -> bytes:
-        if self.s3 is None: raise RuntimeError("boto3 is not installed or configured correctly.")
-        response = self.s3.get_object(Bucket=self.bucket_name, Key=key)
-        return response['Body'].read()
+        if self.s3:
+            try:
+                response = self.s3.get_object(Bucket=self.bucket_name, Key=key)
+                return response['Body'].read()
+            except Exception:
+                pass
+        return self.local_client.download_as_bytes(key)
 
     def download_as_text(self, key: str) -> str:
-        if self.s3 is None: return "[]"
-        try:
-            return self.download_as_bytes(key).decode('utf-8')
-        except Exception:
-            return "[]"
+        if self.s3:
+            try:
+                response = self.s3.get_object(Bucket=self.bucket_name, Key=key)
+                return response['Body'].read().decode('utf-8')
+            except Exception:
+                pass
+        return self.local_client.download_as_text(key)
 
     def exists(self, key: str) -> bool:
-        if self.s3 is None: return False
-        try:
-            self.s3.head_object(Bucket=self.bucket_name, Key=key)
-            return True
-        except Exception:
-            return False
-            
+        if self.s3:
+            try:
+                self.s3.head_object(Bucket=self.bucket_name, Key=key)
+                return True
+            except Exception:
+                pass
+        return self.local_client.exists(key)
+
     def get_presigned_url(self, key: str, expires_in: int = 3600) -> str:
         if self.s3 is None: return ""
         try:
@@ -155,11 +216,15 @@ class S3Client:
             return ""
 
     def delete(self, key: str) -> None:
-        if self.s3 is None: raise RuntimeError("boto3 is not installed or configured correctly.")
         try:
-            self.s3.delete_object(Bucket=self.bucket_name, Key=key)
+            self.local_client.delete(key)
         except Exception:
             pass
+        if self.s3:
+            try:
+                self.s3.delete_object(Bucket=self.bucket_name, Key=key)
+            except Exception:
+                pass
 
 def _get_client():
     global _client
@@ -372,18 +437,26 @@ def download_from_kaggle(kaggle_uri: str, fallback_url: Optional[str] = None) ->
         except Exception:
             pass
 
+    search_dirs = []
     storage_dir = getattr(client, "storage_dir", None)
     if storage_dir and os.path.exists(storage_dir):
-        direct_path = os.path.join(storage_dir, clean_filename)
-        if os.path.exists(direct_path):
-            with open(direct_path, "rb") as f:
-                return f.read()
+        search_dirs.append(storage_dir)
+    backend_kaggle_cache = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "data", "kaggle_cache"))
+    if os.path.exists(backend_kaggle_cache) and backend_kaggle_cache not in search_dirs:
+        search_dirs.append(backend_kaggle_cache)
+
+    for s_dir in search_dirs:
+        for cand in [clean_filename, filename, os.path.basename(clean_filename)]:
+            direct_path = os.path.join(s_dir, cand)
+            if os.path.exists(direct_path) and os.path.isfile(direct_path):
+                with open(direct_path, "rb") as f:
+                    return f.read()
 
         uuid_part = clean_filename.split("_")[0] if "_" in clean_filename else None
         if uuid_part and len(uuid_part) >= 8:
-            for fname in os.listdir(storage_dir):
+            for fname in os.listdir(s_dir):
                 if uuid_part in fname:
-                    full_p = os.path.join(storage_dir, fname)
+                    full_p = os.path.join(s_dir, fname)
                     if os.path.isfile(full_p):
                         with open(full_p, "rb") as f:
                             return f.read()
@@ -391,9 +464,9 @@ def download_from_kaggle(kaggle_uri: str, fallback_url: Optional[str] = None) ->
         # Match by base filename without UUID prefix
         base_name = clean_filename.split("_", 1)[1] if "_" in clean_filename else clean_filename
         if base_name and len(base_name) > 3:
-            for fname in os.listdir(storage_dir):
+            for fname in os.listdir(s_dir):
                 if fname.endswith(base_name) or base_name in fname:
-                    full_p = os.path.join(storage_dir, fname)
+                    full_p = os.path.join(s_dir, fname)
                     if os.path.isfile(full_p):
                         with open(full_p, "rb") as f:
                             return f.read()
@@ -602,12 +675,18 @@ def load_metadata(source: str = "admin") -> list[dict[str, Any]]:
     client = _get_client()
     try:
         key = METADATA_KEYS[source]
-        
-        if not client.exists(key):
-            return []
-        raw = client.download_as_text(key)
-        data = json.loads(raw)
-        return data if isinstance(data, list) else []
+        raw = ""
+        if client.exists(key):
+            raw = client.download_as_text(key)
+        if not raw or raw.strip() in ("", "[]"):
+            alt_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "metadata", key))
+            if os.path.exists(alt_path):
+                with open(alt_path, "r", encoding="utf-8") as f:
+                    raw = f.read()
+        if raw:
+            data = json.loads(raw)
+            return data if isinstance(data, list) else []
+        return []
     except Exception as e:
         import logging
         logging.error(f"Error loading metadata: {e}")
@@ -628,57 +707,60 @@ def get_dataset_data(dataset_id: str, source: str = "admin") -> bytes:
 
 
 def add_record(record: DatasetRecord, source: str = "admin") -> None:
-    records = load_metadata(source=source)
-    records.append(record.to_dict())
-    save_metadata(records, source=source)
+    with _metadata_lock:
+        records = load_metadata(source=source)
+        records.append(record.to_dict())
+        save_metadata(records, source=source)
 
 
 def update_record(dataset_id: str, updates: dict[str, Any], source: str = "admin") -> Optional[dict[str, Any]]:
-    records = load_metadata(source=source)
-    target = next((r for r in records if r["id"] == dataset_id), None)
-    target_source = source
-    if not target:
-        alt = "community" if source == "admin" else "admin"
-        records = load_metadata(source=alt)
+    with _metadata_lock:
+        records = load_metadata(source=source)
         target = next((r for r in records if r["id"] == dataset_id), None)
-        target_source = alt
-    if not target:
-        return None
-    for k, v in updates.items():
-        if v is not None:
-            target[k] = v
-    save_metadata(records, source=target_source)
-    return target
+        target_source = source
+        if not target:
+            alt = "community" if source == "admin" else "admin"
+            records = load_metadata(source=alt)
+            target = next((r for r in records if r["id"] == dataset_id), None)
+            target_source = alt
+        if not target:
+            return None
+        for k, v in updates.items():
+            if v is not None:
+                target[k] = v
+        save_metadata(records, source=target_source)
+        return target
 
 
 def delete_record(dataset_id: str, source: str = "admin") -> bool:
     import logging
-    records = load_metadata(source=source)
-    target = next((r for r in records if r["id"] == dataset_id), None)
-    if target is None:
-        logging.warning(f"delete_record: Dataset {dataset_id} not found in {source}.")
-        return False
-        
-    storage_key = target.get("storage_key", "")
-    if storage_key and not storage_key.startswith(LINK_KEY_PREFIX):
-        client = _get_client()
+    with _metadata_lock:
+        records = load_metadata(source=source)
+        target = next((r for r in records if r["id"] == dataset_id), None)
+        if target is None:
+            logging.warning(f"delete_record: Dataset {dataset_id} not found in {source}.")
+            return False
+            
+        storage_key = target.get("storage_key", "")
+        if storage_key and not storage_key.startswith(LINK_KEY_PREFIX):
+            client = _get_client()
+            try:
+                if client.exists(storage_key):
+                    client.delete(storage_key)
+            except Exception as e:
+                logging.error(f"delete_record: Error deleting file from storage: {e}")
+                
+            import threading as _thr
+            filename = storage_key.split("/")[-1]
+            _thr.Thread(target=_delete_from_huggingface, args=(filename,), daemon=True).start()
+                
+        remaining = [r for r in records if r["id"] != dataset_id]
         try:
-            if client.exists(storage_key):
-                client.delete(storage_key)
+            save_metadata(remaining, source=source)
         except Exception as e:
-            logging.error(f"delete_record: Error deleting file from storage: {e}")
-            
-        import threading
-        filename = storage_key.split("/")[-1]
-        threading.Thread(target=_delete_from_huggingface, args=(filename,), daemon=True).start()
-            
-    remaining = [r for r in records if r["id"] != dataset_id]
-    try:
-        save_metadata(remaining, source=source)
-    except Exception as e:
-        logging.error(f"delete_record: Error saving metadata: {e}")
-        return False
-    return True
+            logging.error(f"delete_record: Error saving metadata: {e}")
+            return False
+        return True
 
 
 # ── Bbox extraction ─────────────────────────────────────────────────────────
@@ -1089,6 +1171,10 @@ def get_dataset_local_path(storage_key: str, fallback_url: Optional[str] = None)
     if storage_key.startswith(LINK_KEY_PREFIX):
         return None
         
+    client = _get_client()
+    if hasattr(client, "exists") and hasattr(client, "_resolve_path") and client.exists(storage_key):
+        return client._resolve_path(storage_key)
+
     if storage_key.startswith("kaggle://"):
         try:
             # Download and cache locally so GDAL / rasterio can open directly
@@ -1241,7 +1327,7 @@ def clip_dataset_by_mask(record: dict[str, Any], file_bytes: bytes, mask_geojson
             tmp_zip = Path(tmpdir) / "upload.zip"
             tmp_zip.write_bytes(file_bytes)
             with zipfile.ZipFile(tmp_zip) as zf:
-                zf.extractall(tmpdir)
+                safe_extractall(zf, tmpdir)
             shp_files = list(Path(tmpdir).rglob("*.shp"))
             if not shp_files:
                 raise ValueError("No .shp file found inside the zip.")
@@ -1336,7 +1422,7 @@ def get_dataset_preview(record: dict[str, Any], file_bytes: Optional[bytes] = No
                 
             with tempfile.TemporaryDirectory() as tmpdir:
                 with zipfile.ZipFile(io.BytesIO(file_bytes), 'r') as zf:
-                    zf.extractall(tmpdir)
+                    safe_extractall(zf, tmpdir)
                 shp_files = list(Path(tmpdir).rglob("*.shp"))
                 if not shp_files:
                     raise ValueError("No .shp file found inside the zip.")
