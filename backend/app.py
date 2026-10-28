@@ -865,14 +865,32 @@ def add_dataset_link():
 @app.route("/api/datasets/<dataset_id>/download", methods=["GET"])
 def download_dataset(dataset_id):
     source = request.args.get("source", "admin")
-    records = load_metadata(source=source)
-    record = next((r for r in records if r["id"] == dataset_id), None)
+    record = None
+    if source in ("admin", "community"):
+        records = load_metadata(source=source)
+        record = next((r for r in records if r["id"] == dataset_id), None)
+    if record is None:
+        for s in ("admin", "community"):
+            records = load_metadata(source=s)
+            record = next((r for r in records if r["id"] == dataset_id), None)
+            if record:
+                break
     if record is None:
         return jsonify({"detail": "Dataset not found"}), 404
+
+    from storage.dataset_storage import get_dataset_local_path
+    local_path = get_dataset_local_path(record["storage_key"], fallback_url=record.get("source_url"))
+    if local_path and os.path.exists(local_path):
+        return send_file(
+            local_path,
+            as_attachment=True,
+            download_name=record.get("original_filename", "download")
+        )
+
     try:
-        file_bytes = download_dataset_bytes(record["storage_key"])
+        file_bytes = download_dataset_bytes(record["storage_key"], fallback_url=record.get("source_url"))
     except Exception as exc:
-        return jsonify({"detail": f"Could not fetch file: {exc}"}), 500
+        return jsonify({"detail": f"Could not fetch dataset file: {exc}"}), 500
     
     return Response(
         file_bytes,
