@@ -2391,7 +2391,9 @@ def download_all_datasets(source: str = Query("admin", pattern="^(admin|communit
                     else:
                         data = download_dataset_bytes(r["storage_key"], fallback_url=r.get("source_url"))
                         zf.writestr(r.get("original_filename") or f"{r['id']}.tif", data)
-                except Exception:
+                        del data
+                except Exception as e:
+                    logger.warning(f"Skipping dataset {r.get('id')} in zip: {e}")
                     continue
         return FileResponse(
             tmp_path,
@@ -2424,20 +2426,59 @@ async def upload_dataset(
 ):
     if source not in ("admin", "community"):
         raise HTTPException(400, "source must be 'admin' or 'community'")
-    # Pre-check Content-Length before reading all bytes into memory
+    # Pre-check Content-Length before reading
     content_length = request.headers.get("content-length")
     if content_length and int(content_length) > 50000 * 1024 * 1024:
         raise HTTPException(413, f"Upload exceeds maximum allowed size (50 GB).")
-    file_bytes = await file.read()
-    record = process_and_store_upload(
-        filename=file.filename or "upload",
-        file_bytes=file_bytes,
-        name=name,
-        description=description,
-        source=source,
-        contributor=contributor,
-        category=category,
-    )
+
+    import tempfile as _tmpmod
+    filename = file.filename or "upload"
+
+    # Stream upload to temp file on disk to avoid OOM on constrained memory (Render free: 512 MB)
+    tmp = _tmpmod.NamedTemporaryFile(delete=False, suffix=os.path.splitext(filename)[1] or ".bin")
+    tmp_path = tmp.name
+    total_bytes = 0
+    try:
+        chunk_size = 1024 * 1024  # 1 MB chunks
+        while True:
+            chunk = await file.read(chunk_size)
+            if not chunk:
+                break
+            tmp.write(chunk)
+            total_bytes += len(chunk)
+        tmp.close()
+
+        # For small files (< 50 MB), read into memory so bbox extraction works
+        # For large files, pass file_path to avoid memory pressure
+        if total_bytes < 50 * 1024 * 1024:
+            with open(tmp_path, "rb") as f:
+                file_bytes = f.read()
+            record = process_and_store_upload(
+                filename=filename,
+                file_bytes=file_bytes,
+                name=name,
+                description=description,
+                source=source,
+                contributor=contributor,
+                category=category,
+            )
+        else:
+            record = process_and_store_upload(
+                filename=filename,
+                file_bytes=None,
+                file_path=tmp_path,
+                name=name,
+                description=description,
+                source=source,
+                contributor=contributor,
+                category=category,
+            )
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+
     return record.to_dict()
 
 
@@ -2460,6 +2501,47 @@ def add_dataset_link(req: DatasetLinkRequest):
         category=req.category,
     )
     return record.to_dict()
+
+
+@app.get("/api/datasets/{dataset_id}/presign", tags=["rare-data"])
+def presign_dataset_download(
+    dataset_id: str,
+    source: Optional[str] = Query(None),
+):
+    """Return a presigned R2 URL for direct browser download (bypasses Worker + backend memory).
+    Called by the Cloudflare Worker before proxying the full download."""
+    record = None
+    if source in ("admin", "community"):
+        records = load_metadata(source=source)
+        record = next((r for r in records if r["id"] == dataset_id), None)
+    if record is None:
+        for s in ("admin", "community"):
+            records = load_metadata(source=s)
+            record = next((r for r in records if r["id"] == dataset_id), None)
+            if record:
+                break
+    if record is None:
+        raise HTTPException(404, "Dataset not found")
+
+    storage_key = record.get("storage_key", "")
+    # Only generate presigned URLs for R2-stored files (not link-based datasets)
+    from storage.dataset_storage import _get_client, LINK_KEY_PREFIX
+    client = _get_client()
+    if (
+        storage_key
+        and not storage_key.startswith(LINK_KEY_PREFIX)
+        and hasattr(client, "get_presigned_url")
+    ):
+        presigned_url = client.get_presigned_url(storage_key, expires_in=3600)
+        if presigned_url:
+            return {
+                "presigned_url": presigned_url,
+                "filename": record.get("original_filename", "dataset"),
+                "content_type": "image/tiff" if record.get("original_filename", "").endswith((".tif", ".tiff")) else "application/octet-stream",
+            }
+
+    # No presigned URL available — Worker will fall through to standard proxy
+    return {"presigned_url": None}
 
 
 @app.get("/api/datasets/{dataset_id}/download", tags=["rare-data"])
@@ -2492,7 +2574,7 @@ def download_dataset(
     safe_filename = _sanitize_download_filename(record["original_filename"])
 
     # 1. Fast zero-copy streaming via FileResponse if file exists locally on disk
-    from storage.dataset_storage import get_dataset_local_path
+    from storage.dataset_storage import get_dataset_local_path, _get_client, LINK_KEY_PREFIX
     local_path = get_dataset_local_path(record["storage_key"], fallback_url=record.get("source_url"))
     if local_path and os.path.exists(local_path):
         from fastapi.responses import FileResponse
@@ -2508,7 +2590,25 @@ def download_dataset(
             },
         )
 
-    # 2. Remote download or dynamic link fallback
+    # 2. R2 presigned URL redirect (direct CDN download, zero backend memory)
+    storage_key = record.get("storage_key", "")
+    client = _get_client()
+    if storage_key and not storage_key.startswith(LINK_KEY_PREFIX) and hasattr(client, "get_presigned_url"):
+        from fastapi.responses import RedirectResponse
+        presigned_url = client.get_presigned_url(storage_key, expires_in=3600)
+        if presigned_url:
+            return RedirectResponse(
+                url=presigned_url,
+                status_code=302,
+                headers={
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Expose-Headers": "Location",
+                },
+            )
+
+    # 3. Remote download — stream to temp file on disk to avoid OOM, then serve via FileResponse
+    import tempfile
+    from starlette.background import BackgroundTask
     try:
         file_bytes = download_dataset_bytes(record["storage_key"], fallback_url=record.get("source_url"))
     except Exception as exc:
@@ -2523,23 +2623,32 @@ def download_dataset(
             logger.error(f"Download error for {dataset_id}: {exc}")
             raise HTTPException(500, f"Could not fetch dataset file: {exc}") from exc
 
-    # Stream via chunked iterator to avoid holding the full file in the response buffer
-    def iter_bytes():
-        chunk_size = 4 * 1024 * 1024  # 4 MB chunks
-        for i in range(0, len(file_bytes), chunk_size):
-            yield file_bytes[i:i + chunk_size]
-
-    return StreamingResponse(
-        iter_bytes(),
-        media_type=content_type,
-        headers={
-            "Content-Disposition": f'{disposition}; filename="{safe_filename}"',
-            "Content-Length": str(len(file_bytes)),
-            "Accept-Ranges": "bytes",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Expose-Headers": "Content-Disposition, Content-Length",
-        },
-    )
+    # Write to temp file and serve (avoids holding bytes in response buffer)
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(safe_filename)[1] or ".bin")
+    tmp_path = tmp.name
+    try:
+        tmp.write(file_bytes)
+        tmp.close()
+        del file_bytes  # Release memory immediately
+        from fastapi.responses import FileResponse
+        return FileResponse(
+            path=tmp_path,
+            media_type=content_type,
+            filename=safe_filename,
+            content_disposition_type=disposition,
+            background=BackgroundTask(os.unlink, tmp_path),
+            headers={
+                "Accept-Ranges": "bytes",
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Expose-Headers": "Content-Disposition, Content-Length",
+            },
+        )
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+        raise
 
 
 class DatasetClipRequest(BaseModel):

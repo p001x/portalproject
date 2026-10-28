@@ -729,6 +729,43 @@ export default {
         });
       }
 
+      // --- 4a. DATASET DOWNLOAD FAST-PATH: Presigned R2 URL redirect ---
+      // Matches /api/datasets/{id}/download and /api/datasets/{id}/raw
+      const isDatasetDownload = request.method === "GET" && /^\/api\/datasets\/[^/]+\/(download|raw)/.test(path);
+      const isDownloadAll = request.method === "GET" && path === "/api/datasets/download-all";
+
+      if (isDatasetDownload) {
+        try {
+          // Ask backend for a presigned direct URL (lightweight JSON, no file bytes)
+          const presignUrl = new URL(url.pathname.replace(/\/(download|raw)$/, "/presign") + url.search, backendOrigin);
+          const presignResp = await fetch(presignUrl.toString(), {
+            method: "GET",
+            headers: {
+              "Host": new URL(backendOrigin).host,
+              "X-Forwarded-Host": url.host,
+              "Accept": "application/json",
+            },
+          });
+          if (presignResp.ok) {
+            const presignData = await presignResp.json();
+            if (presignData.presigned_url) {
+              // 302 redirect — browser downloads directly from R2 CDN, zero Worker/backend memory
+              return new Response(null, {
+                status: 302,
+                headers: {
+                  "Location": presignData.presigned_url,
+                  "Cache-Control": "no-cache",
+                  "Access-Control-Allow-Origin": "*",
+                  "Access-Control-Expose-Headers": "Location",
+                },
+              });
+            }
+          }
+        } catch (_) {
+          // Presign failed — fall through to standard streaming proxy below
+        }
+      }
+
       // Check if this is a raster map tile (GEE or Native COG)
       const isTileRequest = path.includes("/gee/tile/") || path.includes("/native/imagery/tiles/");
 
@@ -756,13 +793,42 @@ export default {
         headers.set("X-Resend-Key", env.RESEND_API_KEY);
       }
 
-      // Forward request to backend
-      const response = await fetch(targetUrl.toString(), {
-        method: request.method,
-        headers: headers,
-        body: (request.method !== "GET" && request.method !== "HEAD") ? request.body : undefined,
-        redirect: "follow",
-      });
+      // Forward request to backend (streaming passthrough for large downloads)
+      let response;
+      try {
+        response = await fetch(targetUrl.toString(), {
+          method: request.method,
+          headers: headers,
+          body: (request.method !== "GET" && request.method !== "HEAD") ? request.body : undefined,
+          redirect: "follow",
+        });
+      } catch (backendErr) {
+        return new Response(JSON.stringify({
+          detail: "Backend service is currently starting up or temporarily unreachable. Please retry shortly.",
+          error: String(backendErr),
+        }), {
+          status: 503,
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Retry-After": "10",
+          },
+        });
+      }
+
+      // --- 4b. STREAMING PASSTHROUGH for dataset file downloads ---
+      // Forward the response body as a stream (no buffering) with proper CORS & download headers
+      if ((isDatasetDownload || isDownloadAll) && response.status === 200) {
+        const streamHeaders = new Headers(response.headers);
+        streamHeaders.set("Access-Control-Allow-Origin", "*");
+        streamHeaders.set("Access-Control-Expose-Headers", "Content-Disposition, Content-Length, Content-Type");
+        // Pass the body stream directly — DO NOT clone (avoids Worker memory buffering)
+        return new Response(response.body, {
+          status: 200,
+          statusText: response.statusText,
+          headers: streamHeaders,
+        });
+      }
 
       // Cache map tiles at Cloudflare Edge for 7 days (604,800s)
       if (isTileRequest && response.status === 200) {

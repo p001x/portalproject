@@ -234,18 +234,60 @@ function DatasetList({
     return list;
   }, [records, search, filterType, filterCategory, onlySpatial, sortBy]);
 
-  const handleDirectDownload = (r: DatasetRecord) => {
+  const handleDirectDownload = async (r: DatasetRecord) => {
     const url = `${BASE}/datasets/${r.id}/download?source=${r.source ?? source}`;
+    const presignUrl = `${BASE}/datasets/${r.id}/presign?source=${r.source ?? source}`;
+    const filename = r.original_filename || `${r.name}.tif`;
+
     toast({
-      title: "Download Started",
-      description: `Downloading "${r.name}" (${(r.file_type || "RAW").toUpperCase()})...`,
+      title: "Download Initiated",
+      description: `Preparing "${r.name}" (${(r.file_type || "RAW").toUpperCase()})...`,
     });
-    const a = document.createElement("a");
-    a.href = url;
-    a.setAttribute("download", r.original_filename || `${r.name}.tif`);
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+
+    try {
+      // 1. Try presigned R2 CDN direct download first (zero proxy overhead, fastest)
+      try {
+        const presignResp = await fetch(presignUrl, { method: "GET" });
+        if (presignResp.ok) {
+          const presignData = await presignResp.json();
+          if (presignData && presignData.presigned_url) {
+            const a = document.createElement("a");
+            a.href = presignData.presigned_url;
+            a.setAttribute("download", filename);
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            toast({
+              title: "CDN Download Started",
+              description: `"${r.name}" is downloading directly from Cloudflare R2 storage.`,
+            });
+            return;
+          }
+        }
+      } catch (_) {
+        // Presign failed or not configured — fall through to streaming link
+      }
+
+      // 2. Direct browser streaming download (streams directly to Downloads folder, no JS heap memory)
+      const a = document.createElement("a");
+      a.href = url;
+      a.setAttribute("download", filename);
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      toast({
+        title: "Download Started",
+        description: `"${r.name}" stream started. Check your browser downloads.`,
+      });
+    } catch (err: any) {
+      console.error("Direct download failed:", err);
+      toast({
+        variant: "destructive",
+        title: "Download Failed",
+        description: `Could not start download for "${r.name}". Try copying the link or refreshing.`,
+      });
+    }
   };
 
   const copyDownloadLink = (r: DatasetRecord) => {

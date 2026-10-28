@@ -84,6 +84,11 @@ class LocalClient:
 
         return os.path.join(self.storage_dir, cleaned)
 
+    def upload_from_file(self, key: str, file_path: str) -> None:
+        import shutil
+        path = os.path.join(self.storage_dir, key.replace('/', '_'))
+        shutil.copyfile(file_path, path)
+
     def upload_from_bytes(self, key: str, data: bytes) -> None:
         path = os.path.join(self.storage_dir, key.replace('/', '_'))
         with open(path, 'wb') as f:
@@ -150,79 +155,111 @@ class S3Client:
     def storage_dir(self) -> str:
         return self.local_client.storage_dir
 
-    def _resolve_path(self, key: str) -> str:
-        return self.local_client._resolve_path(key)
+    def _clean_key(self, key: str) -> str:
+        clean = key
+        if clean.startswith("r2://"):
+            parts = clean.replace("r2://", "").split("/", 1)
+            if len(parts) > 1:
+                clean = parts[1]
+        elif clean.startswith("local://"):
+            clean = clean[8:]
+        elif clean.startswith("local::"):
+            clean = clean[7:]
+        return clean
 
-    def upload_from_bytes(self, key: str, data: bytes) -> None:
+    def _resolve_path(self, key: str) -> str:
+        return self.local_client._resolve_path(self._clean_key(key))
+
+    def upload_from_file(self, key: str, file_path: str) -> None:
+        clean = self._clean_key(key)
         try:
-            self.local_client.upload_from_bytes(key, data)
+            self.local_client.upload_from_file(clean, file_path)
         except Exception:
             pass
         if self.s3:
             try:
-                self.s3.put_object(Bucket=self.bucket_name, Key=key, Body=data)
+                self.s3.upload_file(file_path, self.bucket_name, clean)
+            except Exception as e:
+                import logging
+                logging.error(f"S3 upload error: {e}")
+
+    def upload_from_bytes(self, key: str, data: bytes) -> None:
+        clean = self._clean_key(key)
+        try:
+            self.local_client.upload_from_bytes(clean, data)
+        except Exception:
+            pass
+        if self.s3:
+            try:
+                self.s3.put_object(Bucket=self.bucket_name, Key=clean, Body=data)
             except Exception as e:
                 import logging
                 logging.error(f"S3 upload error: {e}")
 
     def upload_from_text(self, key: str, text: str) -> None:
+        clean = self._clean_key(key)
         try:
-            self.local_client.upload_from_text(key, text)
+            self.local_client.upload_from_text(clean, text)
         except Exception:
             pass
         if self.s3:
             try:
-                self.s3.put_object(Bucket=self.bucket_name, Key=key, Body=text.encode('utf-8'))
+                self.s3.put_object(Bucket=self.bucket_name, Key=clean, Body=text.encode('utf-8'))
             except Exception as e:
                 import logging
                 logging.error(f"S3 upload error: {e}")
 
     def download_as_bytes(self, key: str) -> bytes:
+        clean = self._clean_key(key)
         if self.s3:
             try:
-                response = self.s3.get_object(Bucket=self.bucket_name, Key=key)
+                response = self.s3.get_object(Bucket=self.bucket_name, Key=clean)
                 return response['Body'].read()
             except Exception:
                 pass
-        return self.local_client.download_as_bytes(key)
+        return self.local_client.download_as_bytes(clean)
 
     def download_as_text(self, key: str) -> str:
+        clean = self._clean_key(key)
         if self.s3:
             try:
-                response = self.s3.get_object(Bucket=self.bucket_name, Key=key)
+                response = self.s3.get_object(Bucket=self.bucket_name, Key=clean)
                 return response['Body'].read().decode('utf-8')
             except Exception:
                 pass
-        return self.local_client.download_as_text(key)
+        return self.local_client.download_as_text(clean)
 
     def exists(self, key: str) -> bool:
+        clean = self._clean_key(key)
         if self.s3:
             try:
-                self.s3.head_object(Bucket=self.bucket_name, Key=key)
+                self.s3.head_object(Bucket=self.bucket_name, Key=clean)
                 return True
             except Exception:
                 pass
-        return self.local_client.exists(key)
+        return self.local_client.exists(clean)
 
     def get_presigned_url(self, key: str, expires_in: int = 3600) -> str:
         if self.s3 is None: return ""
+        clean = self._clean_key(key)
         try:
             return self.s3.generate_presigned_url(
                 ClientMethod='get_object',
-                Params={'Bucket': self.bucket_name, 'Key': key},
+                Params={'Bucket': self.bucket_name, 'Key': clean},
                 ExpiresIn=expires_in
             )
         except Exception:
             return ""
 
     def delete(self, key: str) -> None:
+        clean = self._clean_key(key)
         try:
-            self.local_client.delete(key)
+            self.local_client.delete(clean)
         except Exception:
             pass
         if self.s3:
             try:
-                self.s3.delete_object(Bucket=self.bucket_name, Key=key)
+                self.s3.delete_object(Bucket=self.bucket_name, Key=clean)
             except Exception:
                 pass
 
@@ -243,7 +280,6 @@ def _get_client():
     return _client
 
 
-
 def push_to_storage(key: str, data: Optional[bytes], name: str, progress_callback=None, file_path: Optional[str] = None) -> str:
     client = _get_client()
     
@@ -252,12 +288,15 @@ def push_to_storage(key: str, data: Optional[bytes], name: str, progress_callbac
     
     # 1. If Cloudflare R2 is configured, skip HF entirely!
     if client.__class__.__name__ == "S3Client":
-        if data is not None:
-            client.upload_from_bytes(key, data)
+        clean_k = client._clean_key(key) if hasattr(client, "_clean_key") else key
+        if file_path is not None and hasattr(client, "upload_from_file"):
+            client.upload_from_file(clean_k, file_path)
+        elif data is not None:
+            client.upload_from_bytes(clean_k, data)
         else:
             with open(file_path, "rb") as f:
-                client.upload_from_bytes(key, f.read())
-        return f"r2://{client.bucket_name}/{key}"
+                client.upload_from_bytes(clean_k, f.read())
+        return f"r2://{client.bucket_name}/{clean_k}"
 
     import os
     import tempfile
@@ -266,7 +305,10 @@ def push_to_storage(key: str, data: Optional[bytes], name: str, progress_callbac
     
     if not hf_token:
         # Fallback to local
-        client.upload_from_bytes(key, data)
+        if file_path is not None and hasattr(client, "upload_from_file"):
+            client.upload_from_file(key, file_path)
+        elif data is not None:
+            client.upload_from_bytes(key, data)
         return f"local://{key}"
         
     try:
