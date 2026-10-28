@@ -830,6 +830,35 @@ export default {
         });
       }
 
+      // Edge Fallback for dataset downloads if backend returns error (e.g. cold start / 500)
+      if (isDatasetDownload && response.status >= 400) {
+        try {
+          const datasetIdMatch = path.match(/\/api\/datasets\/([^\/]+)\/(download|raw)/);
+          const datasetId = datasetIdMatch ? datasetIdMatch[1] : null;
+          const KNOWN_DATASETS = {
+            "6943d7ef-4a08-4afb-a485-c98ba8efe6f4": { filename: "TreeLossYear.tif", remote: "6943d7ef-4a08-4afb-a485-c98ba8efe6f4_TreeLossYear.tif" },
+            "4fedd6f7-19c1-4bbe-8283-a78c205f0998": { filename: "TreeCover2000.tif", remote: "4fedd6f7-19c1-4bbe-8283-a78c205f0998_TreeCover2000.tif" },
+            "aa8596b0-9f5f-4e98-bb98-e7c0abb1daed": { filename: "DEM_Nyagisozi_for HEC-HMS.tif", remote: "aa8596b0-9f5f-4e98-bb98-e7c0abb1daed_DEM_Nyagisozi_for HEC-HMS.tif" },
+          };
+          const match = datasetId && KNOWN_DATASETS[datasetId];
+          if (match) {
+            const hfUrl = `https://huggingface.co/datasets/petersstore/blacportal-datasets/resolve/main/${encodeURIComponent(match.remote)}`;
+            const hfResp = await fetch(hfUrl, { redirect: "follow" });
+            if (hfResp.ok) {
+              const streamHeaders = new Headers(hfResp.headers);
+              streamHeaders.set("Content-Disposition", `attachment; filename="${match.filename}"`);
+              streamHeaders.set("Content-Type", "image/tiff");
+              streamHeaders.set("Access-Control-Allow-Origin", "*");
+              streamHeaders.set("Access-Control-Expose-Headers", "Content-Disposition, Content-Length, Content-Type");
+              return new Response(hfResp.body, {
+                status: 200,
+                headers: streamHeaders,
+              });
+            }
+          }
+        } catch (_) {}
+      }
+
       // Cache map tiles at Cloudflare Edge for 7 days (604,800s)
       if (isTileRequest && response.status === 200) {
         const responseHeaders = new Headers(response.headers);
