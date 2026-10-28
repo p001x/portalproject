@@ -281,12 +281,78 @@ def _get_client():
 
 
 def push_to_storage(key: str, data: Optional[bytes], name: str, progress_callback=None, file_path: Optional[str] = None) -> str:
-    client = _get_client()
-    
+    from dotenv import load_dotenv
+    load_dotenv()
+
     if data is None and file_path is None:
         raise ValueError("Must provide either data or file_path")
-    
-    # 1. If Cloudflare R2 is configured, skip HF entirely!
+
+    import os
+    import tempfile
+    import logging
+
+    client = _get_client()
+    hf_token = os.environ.get("HF_TOKEN", "").strip()
+    repo_id = os.environ.get("HF_REPO_ID", "petersstore/blacportal-datasets").strip()
+
+    # 1. Direct Hugging Face Storage (Primary Target for all uploads)
+    if hf_token:
+        try:
+            from huggingface_hub import HfApi, create_repo
+            api = HfApi(token=hf_token)
+            try:
+                create_repo(repo_id, repo_type="dataset", exist_ok=True, token=hf_token)
+            except Exception as e:
+                logging.info(f"HF repository check: {e}")
+
+            filename = key.split("/")[-1]
+            tmp_path = file_path
+            cleanup_tmp = False
+
+            if tmp_path is None:
+                with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                    tmp.write(data)
+                    tmp.flush()
+                    tmp_path = tmp.name
+                    cleanup_tmp = True
+
+            try:
+                # Use file path directly — HfApi natively handles all file sizes (up to 50 GB)
+                # with multipart chunking, stream resumption, and zero RAM spikes.
+                api.upload_file(
+                    path_or_fileobj=tmp_path,
+                    path_in_repo=filename,
+                    repo_id=repo_id,
+                    repo_type="dataset",
+                    commit_message=f"Added dataset: {name} ({filename})"
+                )
+                logging.info(f"Direct HF upload successful: {filename} -> {repo_id}")
+
+                # Secondary backup to R2 or local if available
+                if client.__class__.__name__ == "S3Client":
+                    try:
+                        clean_k = client._clean_key(key) if hasattr(client, "_clean_key") else key
+                        client.upload_from_file(clean_k, tmp_path)
+                    except Exception as s3_err:
+                        logging.warning(f"R2 secondary sync warning: {s3_err}")
+                elif hasattr(client, "upload_from_file"):
+                    try:
+                        client.upload_from_file(key, tmp_path)
+                    except Exception:
+                        pass
+
+                return f"hf://{repo_id}/{filename}"
+            finally:
+                if cleanup_tmp and os.path.exists(tmp_path):
+                    try:
+                        os.unlink(tmp_path)
+                    except Exception:
+                        pass
+        except Exception as e:
+            logging.error(f"Hugging Face direct upload error: {e}")
+            raise ValueError(f"Failed to push to Hugging Face ({repo_id}): {e}")
+
+    # 2. Fallback to Cloudflare R2 if configured and no HF_TOKEN
     if client.__class__.__name__ == "S3Client":
         clean_k = client._clean_key(key) if hasattr(client, "_clean_key") else key
         if file_path is not None and hasattr(client, "upload_from_file"):
@@ -298,95 +364,12 @@ def push_to_storage(key: str, data: Optional[bytes], name: str, progress_callbac
                 client.upload_from_bytes(clean_k, f.read())
         return f"r2://{client.bucket_name}/{clean_k}"
 
-    import os
-    import tempfile
-    hf_token = os.environ.get("HF_TOKEN")
-    repo_id = os.environ.get("HF_REPO_ID", "petersstore/blacportal-datasets")
-    
-    if not hf_token:
-        # Fallback to local
-        if file_path is not None and hasattr(client, "upload_from_file"):
-            client.upload_from_file(key, file_path)
-        elif data is not None:
-            client.upload_from_bytes(key, data)
-        return f"local://{key}"
-        
-    try:
-        from huggingface_hub import HfApi, create_repo
-        api = HfApi(token=hf_token)
-        try:
-            create_repo(repo_id, repo_type="dataset", exist_ok=True, token=hf_token)
-        except Exception:
-            pass
-            
-        filename = key.split("/")[-1]
-        
-        tmp_path = file_path
-        cleanup_tmp = False
-        
-        if data is not None:
-            with tempfile.NamedTemporaryFile(delete=False) as tmp:
-                tmp.write(data)
-                tmp_path = tmp.name
-                cleanup_tmp = True
-                
-        file_size = os.path.getsize(tmp_path)
-            
-        class ProgressFileWrapper:
-            def __init__(self, filepath, cb):
-                self.file = open(filepath, "rb")
-                self.cb = cb
-                self.total = file_size
-                self.read_bytes = 0
-
-            def read(self, size=-1):
-                chunk = self.file.read(size)
-                if chunk:
-                    self.read_bytes += len(chunk)
-                    if self.cb:
-                        try:
-                            self.cb(self.read_bytes, self.total)
-                        except Exception:
-                            pass
-                return chunk
-
-            def __getattr__(self, attr):
-                return getattr(self.file, attr)
-                
-            def __len__(self):
-                return self.total
-
-            def close(self):
-                self.file.close()
-                
-        try:
-            wrapped_file = ProgressFileWrapper(tmp_path, progress_callback)
-            try:
-                api.upload_file(
-                    path_or_fileobj=wrapped_file,
-                    path_in_repo=filename,
-                    repo_id=repo_id,
-                    repo_type="dataset",
-                    commit_message=f"Added dataset: {name}"
-                )
-            finally:
-                wrapped_file.close()
-        finally:
-            if cleanup_tmp:
-                os.unlink(tmp_path)
-            
-        return f"hf://{repo_id}/{filename}"
-        
-    except ImportError:
-        # Fallback to local
-        if data is not None:
-            client.upload_from_bytes(key, data)
-        else:
-            with open(file_path, "rb") as f:
-                client.upload_from_bytes(key, f.read())
-        return f"local://{key}"
-    except Exception as e:
-        raise ValueError(f"Failed to push to Hugging Face: {e}")
+    # 3. Fallback to local filesystem
+    if file_path is not None and hasattr(client, "upload_from_file"):
+        client.upload_from_file(key, file_path)
+    elif data is not None:
+        client.upload_from_bytes(key, data)
+    return f"local://{key}"
 
 
 
@@ -835,11 +818,12 @@ def delete_record(dataset_id: str, source: str = "admin") -> bool:
 def extract_tiff_bbox(file_bytes: Optional[bytes] = None, file_path: Optional[str] = None) -> list[float]:
     import rasterio
     from rasterio.warp import transform_bounds
+    import os
     
     tmp_name = file_path
     cleanup = False
     
-    if file_bytes is not None:
+    if tmp_name is None and file_bytes is not None:
         with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
             tmp.write(file_bytes)
             tmp.flush()
@@ -854,8 +838,7 @@ def extract_tiff_bbox(file_bytes: Optional[bytes] = None, file_path: Optional[st
             minx, miny, maxx, maxy = transform_bounds(src.crs, "EPSG:4326", b.left, b.bottom, b.right, b.top)
             return [minx, miny, maxx, maxy]
     finally:
-        if cleanup:
-            import os
+        if cleanup and tmp_name and os.path.exists(tmp_name):
             try:
                 os.unlink(tmp_name)
             except Exception:
@@ -1012,26 +995,40 @@ def process_and_store_upload(filename: str, file_bytes: Optional[bytes], name: s
         if file_type == "shapefile":
             storage_key = f"{data_prefix}{dataset_id}.zip"
             
-        if file_type == "tiff" and file_bytes is not None:
+        if file_type == "tiff":
             try:
-                bbox = extract_tiff_bbox(file_bytes)
+                bbox = extract_tiff_bbox(file_bytes=bytes_to_store, file_path=file_path)
             except Exception:
                 pass
-        elif file_type == "shapefile" and file_bytes is not None:
+        elif file_type == "shapefile":
             try:
-                bbox, new_bytes = extract_shapefile_bbox(file_bytes)
-                bytes_to_store = new_bytes
-                size_mb = len(bytes_to_store) / (1024 * 1024)
+                if bytes_to_store is not None:
+                    bbox, new_bytes = extract_shapefile_bbox(bytes_to_store)
+                    bytes_to_store = new_bytes
+                    size_mb = len(bytes_to_store) / (1024 * 1024)
+                elif file_path is not None:
+                    with open(file_path, "rb") as zf:
+                        bbox, new_bytes = extract_shapefile_bbox(zf.read())
+                        bytes_to_store = new_bytes
+                        size_mb = len(bytes_to_store) / (1024 * 1024)
             except Exception:
                 pass
-        elif file_type == "csv" and file_bytes is not None:
+        elif file_type == "csv":
             try:
-                bbox = extract_csv_bbox(file_bytes)
+                if bytes_to_store is not None:
+                    bbox = extract_csv_bbox(bytes_to_store)
+                elif file_path is not None:
+                    with open(file_path, "rb") as cf:
+                        bbox = extract_csv_bbox(cf.read(5 * 1024 * 1024))
             except Exception:
                 pass
-        elif file_type == "geojson" and file_bytes is not None:
+        elif file_type == "geojson":
             try:
-                bbox = extract_geojson_bbox(file_bytes)
+                if bytes_to_store is not None:
+                    bbox = extract_geojson_bbox(bytes_to_store)
+                elif file_path is not None:
+                    with open(file_path, "rb") as gf:
+                        bbox = extract_geojson_bbox(gf.read())
             except Exception:
                 pass
     except Exception as e:

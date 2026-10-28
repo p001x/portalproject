@@ -2524,7 +2524,30 @@ def presign_dataset_download(
         raise HTTPException(404, "Dataset not found")
 
     storage_key = record.get("storage_key", "")
-    # Only generate presigned URLs for R2-stored files (not link-based datasets)
+    filename = record.get("original_filename", "dataset")
+    content_type = "image/tiff" if filename.endswith((".tif", ".tiff")) else "application/octet-stream"
+
+    # 1. Hugging Face direct CDN download (Fast-path for Cloudflare Worker & browser)
+    if storage_key.startswith("hf://"):
+        import urllib.parse
+        parts = storage_key.replace("hf://", "").split("/", 2)
+        if len(parts) == 3:
+            r_id = f"{parts[0]}/{parts[1]}"
+            fname = parts[2]
+        elif len(parts) == 2:
+            r_id = f"{parts[0]}/{parts[1]}"
+            fname = parts[1]
+        else:
+            r_id = os.environ.get("HF_REPO_ID", "petersstore/blacportal-datasets")
+            fname = storage_key.replace("hf://", "")
+        hf_url = f"https://huggingface.co/datasets/{r_id}/resolve/main/{urllib.parse.quote(fname)}?download=true"
+        return {
+            "presigned_url": hf_url,
+            "filename": filename,
+            "content_type": content_type,
+        }
+
+    # 2. Cloudflare R2 presigned URL
     from storage.dataset_storage import _get_client, LINK_KEY_PREFIX
     client = _get_client()
     if (
@@ -2536,11 +2559,10 @@ def presign_dataset_download(
         if presigned_url:
             return {
                 "presigned_url": presigned_url,
-                "filename": record.get("original_filename", "dataset"),
-                "content_type": "image/tiff" if record.get("original_filename", "").endswith((".tif", ".tiff")) else "application/octet-stream",
+                "filename": filename,
+                "content_type": content_type,
             }
 
-    # No presigned URL available — Worker will fall through to standard proxy
     return {"presigned_url": None}
 
 
@@ -2590,8 +2612,32 @@ def download_dataset(
             },
         )
 
-    # 2. R2 presigned URL redirect (direct CDN download, zero backend memory)
+    # 2. Hugging Face CDN redirect (direct HF CDN download, zero backend memory, handles any file size)
     storage_key = record.get("storage_key", "")
+    if storage_key.startswith("hf://"):
+        import urllib.parse
+        from fastapi.responses import RedirectResponse
+        parts = storage_key.replace("hf://", "").split("/", 2)
+        if len(parts) == 3:
+            r_id = f"{parts[0]}/{parts[1]}"
+            fname = parts[2]
+        elif len(parts) == 2:
+            r_id = f"{parts[0]}/{parts[1]}"
+            fname = parts[1]
+        else:
+            r_id = os.environ.get("HF_REPO_ID", "petersstore/blacportal-datasets")
+            fname = storage_key.replace("hf://", "")
+        hf_url = f"https://huggingface.co/datasets/{r_id}/resolve/main/{urllib.parse.quote(fname)}?download=true"
+        return RedirectResponse(
+            url=hf_url,
+            status_code=302,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Expose-Headers": "Location",
+            },
+        )
+
+    # 3. R2 presigned URL redirect (direct CDN download, zero backend memory)
     client = _get_client()
     if storage_key and not storage_key.startswith(LINK_KEY_PREFIX) and hasattr(client, "get_presigned_url"):
         from fastapi.responses import RedirectResponse
