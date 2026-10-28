@@ -524,11 +524,36 @@ def download_from_kaggle(kaggle_uri: str, fallback_url: Optional[str] = None) ->
         except Exception:
             pass
 
-    # 3. Direct HTTP download from Kaggle public API endpoint
+    # 3. Check Hugging Face public mirror first (fastest, reliable CDN, public)
+    hf_repo = os.environ.get("HF_REPO_ID", "petersstore/blacportal-datasets")
+    hf_token = os.environ.get("HF_TOKEN")
     candidates = [clean_filename]
     if clean_filename != filename:
         candidates.append(filename)
+    base_name = clean_filename.split("_", 1)[1] if "_" in clean_filename else clean_filename
+    if base_name and base_name not in candidates:
+        candidates.append(base_name)
 
+    for cand in candidates:
+        hf_url = f"https://huggingface.co/datasets/{hf_repo}/resolve/main/{urllib.parse.quote(cand)}?download=true"
+        hf_headers = {"User-Agent": "SPETRO-GeoPortal/2.0"}
+        if hf_token:
+            hf_headers["Authorization"] = f"Bearer {hf_token}"
+        try:
+            hf_resp = requests.get(hf_url, headers=hf_headers, timeout=60, stream=True)
+            if hf_resp.status_code == 200:
+                raw_bytes = hf_resp.content
+                if raw_bytes and len(raw_bytes) > 1000:
+                    try:
+                        with open(cached_path, "wb") as f:
+                            f.write(raw_bytes)
+                    except Exception:
+                        pass
+                    return raw_bytes
+        except Exception as e:
+            logging.warning(f"HF mirror check for {cand} failed: {e}")
+
+    # 4. Direct HTTP download from Kaggle public API endpoint
     for cand in candidates:
         quoted = urllib.parse.quote(cand)
         url = f"https://www.kaggle.com/api/v1/datasets/download/{dataset}/{quoted}"

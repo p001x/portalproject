@@ -18,7 +18,7 @@
     "error_message": null,
     "source": "admin",
     "contributor": null,
-    "source_url": null
+    "source_url": "https://huggingface.co/datasets/petersstore/blacportal-datasets/resolve/main/aa8596b0-9f5f-4e98-bb98-e7c0abb1daed_DEM_Nyagisozi_for%20HEC-HMS.tif"
   },
   {
     "id": "4fedd6f7-19c1-4bbe-8283-a78c205f0998",
@@ -39,7 +39,7 @@
     "error_message": null,
     "source": "admin",
     "contributor": null,
-    "source_url": null
+    "source_url": "https://huggingface.co/datasets/petersstore/blacportal-datasets/resolve/main/4fedd6f7-19c1-4bbe-8283-a78c205f0998_TreeCover2000.tif"
   },
   {
     "id": "6943d7ef-4a08-4afb-a485-c98ba8efe6f4",
@@ -60,6 +60,6 @@
     "error_message": null,
     "source": "admin",
     "contributor": null,
-    "source_url": null
+    "source_url": "https://huggingface.co/datasets/petersstore/blacportal-datasets/resolve/main/6943d7ef-4a08-4afb-a485-c98ba8efe6f4_TreeLossYear.tif"
   }
 ]
