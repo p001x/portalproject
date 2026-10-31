@@ -433,6 +433,8 @@ def forgot_password(req: ForgotPasswordRequest, request: Request):
 
         token = generate_reset_token(email)
         allowed_hosts = [
+            "geoportal.spetro.workers.dev",
+            "geoportal.spetro-geoportal.workers.dev",
             "portalproject.spetro-geoportal.workers.dev",
             "localhost:5000",
             "localhost:8001",

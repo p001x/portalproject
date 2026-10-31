@@ -1,5 +1,5 @@
 {
-  "name": "portalproject",
+  "name": "geoportal",
   "compatibility_date": "2024-09-23",
   "assets": {
     "directory": "dist/public",
