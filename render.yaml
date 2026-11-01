@@ -10,9 +10,15 @@ services:
       - key: PORT
         value: 8000
       - key: GEE_PROJECT_ID
-        sync: false # You will need to add this in the Render Dashboard
+        value: ee-petersonyang87
       - key: GEE_SERVICE_ACCOUNT_KEY
-        sync: false # You will need to add this in the Render Dashboard
+        sync: false
+      - key: GEE_SERVICE_ACCOUNT_KEY_PRIMARY
+        sync: false
+      - key: GEE_SERVICE_ACCOUNT_KEY_BACKUP
+        sync: false
+      - key: GEE_SERVICE_ACCOUNT_KEYS
+        sync: false
       - key: HF_REPO_ID
         value: petersstore/blacportal-datasets
       - key: HF_TOKEN

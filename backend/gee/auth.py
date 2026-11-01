@@ -163,11 +163,19 @@ def _activate_credential_unlocked(idx: int, project_id: str | None = None):
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"Credential {idx} is not valid JSON: {exc}") from exc
         
-    target_project = project_id or os.environ.get("GEE_PROJECT_ID")
-    if not target_project:
-        pk = key_data.get("project_id", "")
-        if pk and not pk.startswith("project-"):
-            target_project = pk
+    sa_email = key_data.get("client_email", "").lower()
+    sa_project = key_data.get("project_id", "")
+    
+    # Intelligently bind each service account to its optimal GEE project
+    if project_id:
+        target_project = project_id
+    elif "ee-petersonyang87" in sa_email or "geoportalservices" in sa_email or "ee-petersonyang87" in sa_project.lower():
+        target_project = "ee-petersonyang87"
+    elif "peteryanservice" in sa_email or "project-93a68124" in sa_email:
+        # Default initialization allows peteryanservice to run on consumer quota without project permission collisions
+        target_project = None
+    else:
+        target_project = os.environ.get("GEE_PROJECT_ID") or (sa_project if sa_project and not sa_project.startswith("project-") else None)
 
     credentials = ee.ServiceAccountCredentials(
         email=key_data["client_email"],
@@ -246,10 +254,21 @@ def ensure_primary_credential():
 
 def get_gee_status() -> dict:
     """Return status of current GEE initialization and active project."""
+    emails = []
+    for k in _credentials_list:
+        try:
+            em = json.loads(k).get("client_email")
+            if em:
+                emails.append(em)
+        except Exception:
+            pass
     return {
         "initialized": _initialized,
         "project_id": _active_project_id or "ee-petersonyang87",
         "service_account": _active_sa_email or "",
+        "pool_size": len(_credentials_list),
+        "accounts_in_pool": emails,
+        "dual_account_mode": len(_credentials_list) >= 2,
     }
 
 
@@ -274,12 +293,20 @@ from datetime import datetime, timezone
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 
-from storage.db import (
-    get_all_gee_sessions, 
-    add_gee_session, 
-    get_gee_session, 
-    delete_gee_session
-)
+try:
+    from storage.db import (
+        get_all_gee_sessions, 
+        add_gee_session, 
+        get_gee_session, 
+        delete_gee_session
+    )
+except ImportError:
+    from backend.storage.db import (
+        get_all_gee_sessions, 
+        add_gee_session, 
+        get_gee_session, 
+        delete_gee_session
+    )
 
 _EMAIL_RE = re.compile(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$")
 
@@ -383,7 +410,10 @@ def _is_rotatable_error(e: Exception) -> bool:
         "timeout", "timed out", "service unavailable", "503",
         "restricted mode", "permission to use project", "serviceusage",
         "internal error", "backend error", "connection reset",
-        "refresherror", "oauth2", "policy", "token", "unauthorized", "invalid_grant"
+        "refresherror", "oauth2", "policy", "token", "unauthorized", "invalid_grant",
+        "resource exhausted", "computation timed out", "user memory limit",
+        "quota exceeded", "concurrent requests", "exceeded", "memory limit",
+        "caller does not have required permission"
     ]
     return any(trigger in err_str for trigger in retry_triggers)
 
