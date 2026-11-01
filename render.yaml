@@ -13,6 +13,10 @@ services:
         sync: false # You will need to add this in the Render Dashboard
       - key: GEE_SERVICE_ACCOUNT_KEY
         sync: false # You will need to add this in the Render Dashboard
+      - key: HF_REPO_ID
+        value: petersstore/blacportal-datasets
+      - key: HF_TOKEN
+        sync: false
 
   # Frontend React App (Static Site)
   - type: web

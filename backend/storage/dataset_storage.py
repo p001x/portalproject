@@ -16,6 +16,31 @@ MAX_UPLOAD_MB = 50000
 MAX_LINK_MB = 50000
 LINK_KEY_PREFIX = "url::"
 
+
+DEFAULT_HF_REPO_ID = "petersstore/blacportal-datasets"
+
+def get_hf_token() -> str:
+    """Retrieve Hugging Face authentication token from environment or local .env."""
+    tok = (os.environ.get("HF_TOKEN") or "").strip()
+    if not tok:
+        for p in (".env", "backend/.env", "../.env"):
+            if os.path.exists(p):
+                try:
+                    with open(p, "r", encoding="utf-8") as env_f:
+                        for line in env_f:
+                            if line.strip().startswith("HF_TOKEN="):
+                                val = line.strip().split("=", 1)[1].strip().strip('"').strip("'")
+                                if val:
+                                    os.environ["HF_TOKEN"] = val
+                                    return val
+                except Exception:
+                    pass
+    return tok
+
+def get_hf_repo_id() -> str:
+    """Retrieve target Hugging Face dataset repository ID."""
+    return (os.environ.get("HF_REPO_ID") or "").strip() or DEFAULT_HF_REPO_ID
+
 METADATA_KEYS = {"admin": "datasets_metadata.json", "community": "community_datasets_metadata.json"}
 DATA_PREFIXES  = {"admin": "rare_data/files/",       "community": "rare_data/community_files/"}
 
@@ -292,8 +317,8 @@ def push_to_storage(key: str, data: Optional[bytes], name: str, progress_callbac
     import logging
 
     client = _get_client()
-    hf_token = os.environ.get("HF_TOKEN", "").strip()
-    repo_id = os.environ.get("HF_REPO_ID", "petersstore/blacportal-datasets").strip()
+    hf_token = get_hf_token()
+    repo_id = get_hf_repo_id()
 
     # 1. Direct Hugging Face Storage (Primary Target for all uploads)
     if hf_token:
@@ -377,7 +402,7 @@ def push_to_storage(key: str, data: Optional[bytes], name: str, progress_callbac
 def _delete_from_huggingface(filename: str) -> None:
     import os
     import logging
-    hf_token = os.environ.get("HF_TOKEN")
+    hf_token = get_hf_token()
     repo_id = os.environ.get("HF_REPO_ID", "petersstore/blacportal-datasets")
     if not hf_token:
         return
@@ -508,8 +533,8 @@ def download_from_kaggle(kaggle_uri: str, fallback_url: Optional[str] = None) ->
             pass
 
     # 3. Check Hugging Face public mirror first (fastest, reliable CDN, public)
-    hf_repo = os.environ.get("HF_REPO_ID", "petersstore/blacportal-datasets")
-    hf_token = os.environ.get("HF_TOKEN")
+    hf_repo = get_hf_repo_id()
+    hf_token = get_hf_token()
     candidates = [clean_filename]
     if clean_filename != filename:
         candidates.append(filename)
@@ -592,8 +617,8 @@ def download_from_kaggle(kaggle_uri: str, fallback_url: Optional[str] = None) ->
             logging.warning(f"Kaggle API dataset_download_file failed: {e}")
 
     # 5. Check Hugging Face mirror
-    hf_repo = os.environ.get("HF_REPO_ID", "petersstore/blacportal-datasets")
-    hf_token = os.environ.get("HF_TOKEN")
+    hf_repo = get_hf_repo_id()
+    hf_token = get_hf_token()
     for cand in candidates:
         hf_url = f"https://huggingface.co/datasets/{hf_repo}/resolve/main/{urllib.parse.quote(cand)}?download=true"
         hf_headers = {"Authorization": f"Bearer {hf_token}"} if hf_token else {}
@@ -637,7 +662,7 @@ def download_from_hf(storage_key: str, fallback_url: Optional[str] = None) -> by
     import requests
     import logging
 
-    hf_token = os.environ.get("HF_TOKEN")
+    hf_token = get_hf_token()
     parts = storage_key.replace("hf://", "").split("/", 2)
     if len(parts) == 3:
         r_id = f"{parts[0]}/{parts[1]}"
@@ -1264,7 +1289,7 @@ def get_dataset_local_path(storage_key: str, fallback_url: Optional[str] = None)
 
     if storage_key.startswith("hf://"):
         import os
-        hf_token = os.environ.get("HF_TOKEN")
+        hf_token = get_hf_token()
         parts = storage_key.replace("hf://", "").split("/", 2)
         if len(parts) == 3:
             r_id = f"{parts[0]}/{parts[1]}"

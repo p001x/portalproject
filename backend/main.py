@@ -20,6 +20,8 @@ import zipfile
 
 from dotenv import load_dotenv
 load_dotenv()
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 import requests
 import urllib3
@@ -2503,6 +2505,33 @@ def add_dataset_link(req: DatasetLinkRequest):
         category=req.category,
     )
     return record.to_dict()
+
+
+
+@app.get("/api/datasets/hf-status", tags=["rare-data"])
+def get_hf_status():
+    """Status of Hugging Face repository and token integration."""
+    from storage.dataset_storage import get_hf_token, get_hf_repo_id
+    token = get_hf_token()
+    repo_id = get_hf_repo_id()
+    try:
+        from huggingface_hub import HfApi, whoami
+        user_info = whoami(token=token)
+        api = HfApi(token=token)
+        files = api.list_repo_files(repo_id=repo_id, repo_type="dataset")
+        return {
+            "status": "connected",
+            "authenticated_as": user_info.get("name"),
+            "repo_id": repo_id,
+            "files_count": len(files),
+            "sample_files": files[:15],
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "repo_id": repo_id,
+            "detail": str(e),
+        }
 
 
 @app.get("/api/datasets/{dataset_id}/presign", tags=["rare-data"])
