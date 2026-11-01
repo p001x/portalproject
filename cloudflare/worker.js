@@ -766,16 +766,17 @@ export default {
         }
       }
 
-      // Check if this is a raster map tile (GEE or Native COG)
+      // Check if this is a raster map tile (GEE or Native COG) or static media (video / image)
       const isTileRequest = path.includes("/gee/tile/") || path.includes("/native/imagery/tiles/");
+      const isMediaRequest = path.startsWith("/api/static/uploads/") || path.startsWith("/avatars/");
 
-      // Check Cloudflare Edge Cache for tiles
+      // Check Cloudflare Edge Cache for tiles & media
       const cache = caches.default;
-      if (isTileRequest && request.method === "GET") {
+      if ((isTileRequest || isMediaRequest) && request.method === "GET") {
         const cachedResponse = await cache.match(request);
         if (cachedResponse) {
           const respHeaders = new Headers(cachedResponse.headers);
-          respHeaders.set("X-CF-Tile-Cache", "HIT");
+          respHeaders.set(isTileRequest ? "X-CF-Tile-Cache" : "X-CF-Media-Cache", "HIT");
           return new Response(cachedResponse.body, {
             status: cachedResponse.status,
             statusText: cachedResponse.statusText,
@@ -859,10 +860,61 @@ export default {
         } catch (_) {}
       }
 
+      // Edge Fallback for uploaded media / videos if backend returns 404 (e.g. Render restarted)
+      if (isMediaRequest && response.status >= 400) {
+        try {
+          const filename = path.split("/").pop();
+          if (filename) {
+            const hfRepo = "petersstore/blacportal-datasets";
+            const folders = ["videos", "media", "avatars", ""];
+            for (const folder of folders) {
+              const remotePath = folder ? `${folder}/${filename}` : filename;
+              const hfUrl = `https://huggingface.co/datasets/${hfRepo}/resolve/main/${encodeURIComponent(remotePath)}?download=true`;
+              const hfResp = await fetch(hfUrl, { redirect: "follow" });
+              if (hfResp.ok) {
+                const mediaHeaders = new Headers(hfResp.headers);
+                mediaHeaders.set("Access-Control-Allow-Origin", "*");
+                mediaHeaders.set("Cache-Control", "public, max-age=86400, s-maxage=2592000, stale-while-revalidate=86400");
+                mediaHeaders.set("X-CF-Media-Cache", "HF-RESOLVE");
+                const cachedCopy = new Response(hfResp.clone().body, {
+                  status: 200,
+                  headers: mediaHeaders,
+                });
+                ctx.waitUntil(cache.put(request, cachedCopy));
+                return new Response(hfResp.body, {
+                  status: 200,
+                  headers: mediaHeaders,
+                });
+              }
+            }
+          }
+        } catch (_) {}
+      }
+
+      // Cache media & videos at Cloudflare Edge for 30 days
+      if (isMediaRequest && response.status === 200) {
+        const responseHeaders = new Headers(response.headers);
+        responseHeaders.set("Cache-Control", "public, max-age=86400, s-maxage=2592000, stale-while-revalidate=86400");
+        responseHeaders.set("X-CF-Media-Cache", "MISS");
+
+        const cachedCopy = new Response(response.clone().body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers: responseHeaders,
+        });
+        ctx.waitUntil(cache.put(request, cachedCopy));
+
+        return new Response(response.body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers: responseHeaders,
+        });
+      }
+
       // Cache map tiles at Cloudflare Edge for 7 days (604,800s)
       if (isTileRequest && response.status === 200) {
         const responseHeaders = new Headers(response.headers);
-        responseHeaders.set("Cache-Control", "public, max-age=86400, s-maxage=604800");
+        responseHeaders.set("Cache-Control", "public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400");
         responseHeaders.set("X-CF-Tile-Cache", "MISS");
 
         const cachedCopy = new Response(response.clone().body, {
@@ -884,7 +936,20 @@ export default {
 
     // --- 5. Serve Static Frontend Assets from Cloudflare CDN Edge ---
     if (env.ASSETS) {
-      return env.ASSETS.fetch(request);
+      const assetResponse = await env.ASSETS.fetch(request);
+      if (assetResponse.ok) {
+        const urlObj = new URL(request.url);
+        if (urlObj.pathname.startsWith("/assets/") || urlObj.pathname.match(/\.(js|css|woff2|png|jpg|jpeg|svg|ico)$/)) {
+          const assetHeaders = new Headers(assetResponse.headers);
+          assetHeaders.set("Cache-Control", "public, max-age=31536000, immutable");
+          return new Response(assetResponse.body, {
+            status: assetResponse.status,
+            statusText: assetResponse.statusText,
+            headers: assetHeaders,
+          });
+        }
+      }
+      return assetResponse;
     }
 
     return new Response("Not Found", { status: 404 });

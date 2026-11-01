@@ -41,6 +41,58 @@ def get_hf_repo_id() -> str:
     """Retrieve target Hugging Face dataset repository ID."""
     return (os.environ.get("HF_REPO_ID") or "").strip() or DEFAULT_HF_REPO_ID
 
+
+def push_media_to_hf(filename: str, file_bytes: Optional[bytes] = None, file_path: Optional[str] = None, folder: str = "media") -> str:
+    """
+    Push any media file (video, image, document) to Hugging Face dataset repository.
+    Returns the permanent direct Hugging Face resolve/CDN URL.
+    """
+    import os, tempfile, logging, urllib.parse
+    hf_token = get_hf_token()
+    repo_id = get_hf_repo_id()
+    clean_filename = os.path.basename(filename)
+    path_in_repo = f"{folder}/{clean_filename}" if folder else clean_filename
+
+    if hf_token:
+        try:
+            from huggingface_hub import HfApi, create_repo
+            api = HfApi(token=hf_token)
+            try:
+                create_repo(repo_id, repo_type="dataset", exist_ok=True, token=hf_token)
+            except Exception as e:
+                logging.info(f"HF repository check for media: {e}")
+
+            tmp_path = file_path
+            cleanup_tmp = False
+            if tmp_path is None and file_bytes is not None:
+                ext = os.path.splitext(clean_filename)[1] or ".bin"
+                with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
+                    tmp.write(file_bytes)
+                    tmp.flush()
+                    tmp_path = tmp.name
+                    cleanup_tmp = True
+
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    api.upload_file(
+                        path_or_fileobj=tmp_path,
+                        path_in_repo=path_in_repo,
+                        repo_id=repo_id,
+                        repo_type="dataset",
+                        commit_message=f"Upload media: {clean_filename}",
+                    )
+                    logging.info(f"Uploaded media to Hugging Face: {path_in_repo} ({repo_id})")
+                finally:
+                    if cleanup_tmp and os.path.exists(tmp_path):
+                        try:
+                            os.unlink(tmp_path)
+                        except Exception:
+                            pass
+        except Exception as e:
+            logging.error(f"Failed to push media to Hugging Face ({repo_id}): {e}")
+
+    return f"https://huggingface.co/datasets/{repo_id}/resolve/main/{urllib.parse.quote(path_in_repo)}?download=true"
+
 METADATA_KEYS = {"admin": "datasets_metadata.json", "community": "community_datasets_metadata.json"}
 DATA_PREFIXES  = {"admin": "rare_data/files/",       "community": "rare_data/community_files/"}
 

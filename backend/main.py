@@ -739,6 +739,40 @@ class CreateCourseRequest(BaseModel):
     duration: Optional[str] = "New"
     level: Optional[str] = "Beginner"
 
+
+@app.post("/api/academy/courses/video/upload", tags=["academy"])
+async def api_upload_course_video(
+    file: UploadFile = File(...),
+    title: Optional[str] = Form(None),
+    user: dict = Depends(get_current_user)
+):
+    """Upload video files for Academy courses directly to Hugging Face."""
+    if user.get("role") != "admin":
+        raise HTTPException(403, "Not authorized to upload course videos")
+        
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    filename = f"course_{uuid.uuid4().hex[:10]}{ext or '.mp4'}"
+    
+    upload_dir = os.path.join(os.path.dirname(__file__), "static", "uploads", "videos")
+    os.makedirs(upload_dir, exist_ok=True)
+    filepath = os.path.join(upload_dir, filename)
+    
+    file_bytes = await file.read()
+    with open(filepath, "wb") as f:
+        f.write(file_bytes)
+        
+    from storage.dataset_storage import push_media_to_hf
+    hf_url = push_media_to_hf(filename=filename, file_bytes=file_bytes, folder="videos")
+    
+    return {
+        "ok": True,
+        "url": f"/api/static/uploads/videos/{filename}",
+        "hf_url": hf_url,
+        "filename": filename,
+        "title": title or file.filename
+    }
+
+
 @app.post("/api/academy/courses", tags=["academy"])
 def api_create_course(req: CreateCourseRequest, user: dict = Depends(get_current_user)):
     if user.get("role") != "admin":
@@ -4230,29 +4264,113 @@ def api_unblock_user(req: BlockUserRequest, user: dict = Depends(get_current_use
 @app.post("/api/community/upload", tags=["community"])
 async def api_upload_community_image(file: UploadFile = File(...)):
     file_bytes = await file.read()
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    is_video = ext in {".mp4", ".webm", ".mov", ".mkv"}
     
-    try:
-        safe_jpg_bytes = security_middleware.validate_and_reencode_image(file_bytes)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-        
     import uuid
-    filename = f"{uuid.uuid4().hex}.jpg"
-    
+    if is_video:
+        safe_bytes = file_bytes
+        filename = f"{uuid.uuid4().hex}{ext}"
+        folder = "videos"
+    else:
+        try:
+            safe_bytes = security_middleware.validate_and_reencode_image(file_bytes)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        filename = f"{uuid.uuid4().hex}.jpg"
+        folder = "media"
+        
     upload_dir = os.path.join(os.path.dirname(__file__), "static", "uploads")
     os.makedirs(upload_dir, exist_ok=True)
     
     file_path = os.path.join(upload_dir, filename)
     with open(file_path, "wb") as f:
-        f.write(safe_jpg_bytes)
+        f.write(safe_bytes)
         
-    return {"url": f"/api/static/uploads/{filename}"}
+    from storage.dataset_storage import push_media_to_hf
+    hf_url = push_media_to_hf(filename=filename, file_bytes=safe_bytes, folder=folder)
+        
+    return {"url": f"/api/static/uploads/{filename}", "hf_url": hf_url, "is_video": is_video}
 
 # Mount static files for community images
 static_upload_dir = os.path.join(os.path.dirname(__file__), "static", "uploads")
 os.makedirs(static_upload_dir, exist_ok=True)
 try:
-    app.mount("/api/static/uploads", StaticFiles(directory=static_upload_dir), name="uploads")
+    
+@app.get("/api/static/uploads/{file_path:path}", tags=["media"])
+async def serve_static_upload_with_hf_fallback(file_path: str):
+    """
+    Serve static uploaded media (images, videos) from local disk or transparently
+    stream/redirect from Hugging Face if container restarted.
+    """
+    from fastapi.responses import FileResponse, RedirectResponse
+    upload_root = os.path.join(os.path.dirname(__file__), "static", "uploads")
+    local_p = os.path.join(upload_root, file_path)
+    if os.path.exists(local_p) and os.path.isfile(local_p):
+        return FileResponse(local_p)
+        
+    # Hugging Face fallback
+    import urllib.parse
+    from storage.dataset_storage import get_hf_repo_id
+    repo_id = get_hf_repo_id()
+    clean = os.path.basename(file_path)
+    for folder in ("media", "videos", "avatars", ""):
+        remote_k = f"{folder}/{clean}" if folder else clean
+        hf_url = f"https://huggingface.co/datasets/{repo_id}/resolve/main/{urllib.parse.quote(remote_k)}?download=true"
+        try:
+            head_resp = requests.head(hf_url, timeout=4, allow_redirects=True)
+            if head_resp.status_code == 200:
+                return RedirectResponse(url=hf_url, status_code=302)
+        except Exception:
+            pass
+            
+    raise HTTPException(404, "Uploaded file not found")
+
+
+@app.get("/api/cache/status", tags=["meta"])
+def get_cache_status():
+    """Retrieve cache metrics and disk utilization across all GEE and application corridors."""
+    cache_dir = os.path.join(os.path.dirname(__file__), ".gee_cache")
+    stats = {"namespaces": {}, "total_files": 0, "total_size_mb": 0.0}
+    if os.path.exists(cache_dir):
+        for root, dirs, files in os.walk(cache_dir):
+            ns = os.path.relpath(root, cache_dir)
+            if ns != ".":
+                ns_size = sum(os.path.getsize(os.path.join(root, f)) for f in files)
+                stats["namespaces"][ns] = {
+                    "count": len(files),
+                    "size_mb": round(ns_size / (1024 * 1024), 2)
+                }
+                stats["total_files"] += len(files)
+                stats["total_size_mb"] += ns_size / (1024 * 1024)
+    stats["total_size_mb"] = round(stats["total_size_mb"], 2)
+    stats["status"] = "optimal"
+    return stats
+
+
+@app.post("/api/cache/clear", tags=["meta"])
+def clear_cache_corridors(user: dict = Depends(get_current_user)):
+    """Admin endpoint to clear stale GEE cache corridors."""
+    if user.get("role") != "admin":
+        raise HTTPException(403, "Admin authorization required to clear cache.")
+    import shutil
+    cache_dir = os.path.join(os.path.dirname(__file__), ".gee_cache")
+    cleared = 0
+    if os.path.exists(cache_dir):
+        for item in os.listdir(cache_dir):
+            item_path = os.path.join(cache_dir, item)
+            try:
+                if os.path.isdir(item_path):
+                    shutil.rmtree(item_path)
+                    cleared += 1
+                else:
+                    os.unlink(item_path)
+                    cleared += 1
+            except Exception:
+                pass
+    return {"ok": True, "cleared_corridors": cleared}
+
+app.mount("/api/static/uploads", StaticFiles(directory=static_upload_dir), name="uploads")
 except Exception as e:
     import logging
     logging.getLogger(__name__).warning(f"Failed to mount static uploads (aiofiles missing?): {e}")
@@ -4468,19 +4586,30 @@ def delete_blog_post(post_id: int, user: dict = Depends(get_current_user)):
         raise HTTPException(500, str(e))
 
 @app.post("/api/blog/upload", tags=["blog"])
-def upload_blog_media(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
+async def upload_blog_media(file: UploadFile = File(...), user: dict = Depends(get_current_user)):
     try:
         upload_dir = os.path.join(os.path.dirname(__file__), "static", "uploads")
         os.makedirs(upload_dir, exist_ok=True)
         
-        ext = os.path.splitext(file.filename)[1]
+        ext = os.path.splitext(file.filename or "")[1].lower()
+        is_video = ext in {".mp4", ".webm", ".mov", ".mkv", ".avi", ".m4v"}
+        folder = "videos" if is_video else "media"
         filename = f"{uuid.uuid4().hex}{ext}"
         filepath = os.path.join(upload_dir, filename)
         
+        file_bytes = await file.read()
         with open(filepath, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
+            buffer.write(file_bytes)
             
-        return {"url": f"/api/static/uploads/{filename}"}
+        from storage.dataset_storage import push_media_to_hf
+        hf_url = push_media_to_hf(filename=filename, file_bytes=file_bytes, folder=folder)
+            
+        return {
+            "url": f"/api/static/uploads/{filename}",
+            "hf_url": hf_url,
+            "filename": filename,
+            "is_video": is_video
+        }
     except Exception as e:
         raise HTTPException(500, f"Upload failed: {str(e)}")
 
