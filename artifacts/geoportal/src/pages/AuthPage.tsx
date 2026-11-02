@@ -13,8 +13,13 @@ import {
   CheckCircle2, 
   AlertCircle,
   KeyRound,
-  ShieldCheck
+  ShieldCheck,
+  Smartphone,
+  Monitor,
+  LogIn,
+  UserPlus
 } from "lucide-react";
+import { BASE } from "@/lib/api";
 import { Link, useLocation } from "wouter";
 import { SiteBrand, SiteLogoOnly } from "@/components/SiteBrand";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -43,7 +48,44 @@ export function AuthPage() {
   const [success, setSuccess] = useState<string | null>(null);
   const [resendCooldown, setResendCooldown] = useState(0);
   const [isResending, setIsResending] = useState(false);
+  const [accountRecognized, setAccountRecognized] = useState(false);
+  const [isCheckingEmail, setIsCheckingEmail] = useState(false);
   const [, setLocation] = useLocation();
+
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const urlMode = params.get("mode");
+      if (urlMode === "register" || urlMode === "login" || urlMode === "forgot") {
+        setMode(urlMode);
+      }
+      const urlEmail = params.get("email");
+      if (urlEmail) {
+        setEmail(urlEmail);
+      }
+    } catch (_) {}
+  }, []);
+
+  const handleCheckEmail = async (targetEmail: string) => {
+    const cleanEmail = (targetEmail || "").trim().toLowerCase();
+    if (!cleanEmail || !cleanEmail.includes("@") || mode !== "register") return;
+    setIsCheckingEmail(true);
+    try {
+      const res = await fetch(`${BASE}/auth/check-email?email=${encodeURIComponent(cleanEmail)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.exists) {
+          setMode("login");
+          setAccountRecognized(true);
+          setError(null);
+          setSuccess(`✨ Welcome back! Your account (${cleanEmail}) is already recognized from your PC. Please enter your password to Sign In.`);
+        }
+      }
+    } catch (_) {
+    } finally {
+      setIsCheckingEmail(false);
+    }
+  };
 
   useEffect(() => {
     if (resendCooldown <= 0) return;
@@ -89,7 +131,16 @@ export function AuthPage() {
           }
         } catch (_) {}
       } catch (err: any) {
-        setError(err.message || "Invalid or expired verification code. Please check your email.");
+        const errMsg = err?.message || "Invalid or expired verification code. Please check your email.";
+        if (/already exists|already registered|recognized|please log in/i.test(errMsg)) {
+          setStep("details");
+          setMode("login");
+          setAccountRecognized(true);
+          setError(null);
+          setSuccess(`✨ Welcome back! Your account (${email}) is already registered from your PC. Please enter your password to Sign In.`);
+          return;
+        }
+        setError(errMsg);
       }
       return;
     }
@@ -118,11 +169,23 @@ export function AuthPage() {
           setError("Passwords do not match.");
           return;
         }
-        await requestOtp(email);
-        setCode("");
-        setSuccess(`A 6-digit verification code has been sent to ${email}. Please check your email inbox.`);
-        setResendCooldown(30);
-        setStep("otp");
+        try {
+          await requestOtp(email);
+          setCode("");
+          setSuccess(`A 6-digit verification code has been sent to ${email}. Please check your email inbox.`);
+          setResendCooldown(30);
+          setStep("otp");
+        } catch (err: any) {
+          const errMsg = err?.message || "Failed to request OTP.";
+          if (/already exists|already registered|recognized|please log in/i.test(errMsg)) {
+            setMode("login");
+            setAccountRecognized(true);
+            setError(null);
+            setSuccess(`✨ Welcome back! Your account (${email}) is already registered from your PC. Please enter your password to Sign In.`);
+            return;
+          }
+          throw err;
+        }
       } else if (mode === "forgot") {
         const forgotRes = await forgotPassword(email);
         setSuccess(forgotRes?.message || "Password reset instructions have been sent to your email. Check your inbox or spam folder.");
@@ -137,7 +200,15 @@ export function AuthPage() {
         } catch (_) {}
       }
     } catch (err: any) {
-      setError(err.message || "Authentication failed. Please check your credentials.");
+      const errMsg = err?.message || "Authentication failed. Please check your credentials.";
+      if (mode === "register" && /already exists|already registered|recognized|please log in/i.test(errMsg)) {
+        setMode("login");
+        setAccountRecognized(true);
+        setError(null);
+        setSuccess(`✨ Welcome back! Your account (${email}) is already registered from your PC. Please enter your password to Sign In.`);
+        return;
+      }
+      setError(errMsg);
     }
   };
 
@@ -210,7 +281,7 @@ export function AuthPage() {
           </Link>
 
           {/* Card Header & Brand Badge */}
-          <div className="text-center mb-6">
+          <div className="text-center mb-5">
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-medium tracking-wide uppercase bg-muted/60 text-muted-foreground border border-border/50 mb-3">
               SPETRO Account
             </div>
@@ -219,7 +290,7 @@ export function AuthPage() {
               {step === "otp"
                 ? "Verify Your Email"
                 : mode === "login"
-                ? "Welcome Back"
+                ? (accountRecognized ? "Welcome Back!" : "Welcome Back")
                 : mode === "forgot"
                 ? "Reset Password"
                 : "Create Account"}
@@ -229,38 +300,70 @@ export function AuthPage() {
               {step === "otp"
                 ? `Enter the 6-digit code sent to ${email}`
                 : mode === "login"
-                ? "Sign in to access satellite analysis and spatial modules"
+                ? (accountRecognized 
+                    ? "Your account from your PC is active. Sign in with your password below."
+                    : "Sign in to access satellite analysis and spatial modules")
                 : mode === "forgot"
                 ? "Enter your registered email to receive password recovery instructions"
                 : "Join SPETRO to explore planetary datasets and remote sensing models"}
             </p>
           </div>
 
+          {/* Universal Cross-Device Sync Indicator */}
+          {step !== "otp" && mode !== "forgot" && (
+            <div className="flex items-center justify-center gap-2 py-1 px-3 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[11px] font-medium text-emerald-600 dark:text-emerald-400 mb-4 max-w-fit mx-auto select-none">
+              <Monitor className="w-3.5 h-3.5 shrink-0" />
+              <span>One account works across PC & Mobile</span>
+              <Smartphone className="w-3.5 h-3.5 shrink-0" />
+            </div>
+          )}
+
           {/* Mode Switcher Tabs (Only when in Login/Register modes) */}
           {step !== "otp" && mode !== "forgot" && (
-            <div className="grid grid-cols-2 p-1 bg-muted/60 dark:bg-muted/40 rounded-xl mb-6 border border-border/50">
+            <div className="grid grid-cols-2 p-1.5 bg-muted/60 dark:bg-muted/40 rounded-xl mb-5 border border-border/50 gap-1.5">
               <button
                 type="button"
-                onClick={() => { setMode("login"); setError(null); setSuccess(null); }}
-                className={`py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                onClick={() => { setMode("login"); setError(null); setSuccess(null); setAccountRecognized(false); }}
+                className={`py-2 px-2 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                   mode === "login"
-                    ? "bg-background text-foreground shadow-sm"
+                    ? "bg-background text-foreground shadow-sm ring-1 ring-border/40"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                Sign In
+                <LogIn className="w-3.5 h-3.5" />
+                <span>Sign In</span>
+                <span className="text-[10px] font-normal opacity-70 hidden sm:inline">(Existing)</span>
               </button>
               <button
                 type="button"
-                onClick={() => { setMode("register"); setError(null); setSuccess(null); }}
-                className={`py-2 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                onClick={() => { setMode("register"); setError(null); setSuccess(null); setAccountRecognized(false); }}
+                className={`py-2 px-2 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                   mode === "register"
-                    ? "bg-background text-foreground shadow-sm"
+                    ? "bg-background text-foreground shadow-sm ring-1 ring-border/40"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                Register
+                <UserPlus className="w-3.5 h-3.5" />
+                <span>Register</span>
+                <span className="text-[10px] font-normal opacity-70 hidden sm:inline">(New User)</span>
               </button>
+            </div>
+          )}
+
+          {/* Account Recognized Banner */}
+          {accountRecognized && mode === "login" && (
+            <div className="bg-emerald-500/10 dark:bg-emerald-500/15 border border-emerald-500/30 rounded-xl p-3.5 mb-5 flex items-start gap-3 shadow-sm animate-in fade-in duration-200">
+              <div className="w-7 h-7 rounded-full bg-emerald-500/20 text-emerald-500 flex items-center justify-center shrink-0 mt-0.5">
+                <ShieldCheck className="w-4 h-4" />
+              </div>
+              <div className="text-xs space-y-1 flex-1">
+                <p className="font-bold text-emerald-600 dark:text-emerald-400">
+                  Account Recognized from your PC!
+                </p>
+                <p className="text-muted-foreground leading-relaxed">
+                  Your email <strong className="text-foreground">{email}</strong> already has an active account. You do not need to register again on mobile—simply enter your password below to Sign In.
+                </p>
+              </div>
             </div>
           )}
 
@@ -374,9 +477,16 @@ export function AuthPage() {
 
                 {/* Email Address */}
                 <div className="space-y-1.5">
-                  <label htmlFor="email" className="block text-xs font-semibold text-foreground">
-                    Email Address
-                  </label>
+                  <div className="flex items-center justify-between">
+                    <label htmlFor="email" className="block text-xs font-semibold text-foreground">
+                      Email Address
+                    </label>
+                    {mode === "register" && (
+                      <span className="text-[11px] text-muted-foreground">
+                        Same email used on your PC?
+                      </span>
+                    )}
+                  </div>
                   <div className="relative flex items-center bg-muted/40 dark:bg-slate-950/40 border border-border/80 dark:border-white/10 rounded-xl px-3.5 py-2.5 transition-all focus-within:border-emerald-500 focus-within:ring-2 focus-within:ring-emerald-500/20">
                     <Mail className="w-4 h-4 text-muted-foreground shrink-0" />
                     <input
@@ -385,10 +495,17 @@ export function AuthPage() {
                       required
                       autoComplete="username email"
                       value={email}
-                      onChange={(e) => setEmail(e.target.value)}
+                      onChange={(e) => {
+                        setEmail(e.target.value);
+                        if (accountRecognized) setAccountRecognized(false);
+                      }}
+                      onBlur={() => handleCheckEmail(email)}
                       placeholder="name@example.com"
                       className="w-full bg-transparent border-0 text-foreground text-sm font-medium pl-3 pr-1 outline-none placeholder:text-muted-foreground/60"
                     />
+                    {isCheckingEmail && (
+                      <Loader2 className="w-3.5 h-3.5 text-muted-foreground animate-spin shrink-0 mr-1" />
+                    )}
                   </div>
                 </div>
 
@@ -540,16 +657,29 @@ export function AuthPage() {
                 </button>
               </>
             ) : (
-              <>
-                Already have an account?{" "}
-                <button 
-                  type="button" 
-                  onClick={() => { setMode("login"); setError(null); setSuccess(null); }} 
-                  className="text-emerald-600 dark:text-emerald-400 hover:underline transition-colors font-semibold cursor-pointer"
-                >
-                  Sign in
-                </button>
-              </>
+              <div className="space-y-3">
+                <p>
+                  Already have an account?{" "}
+                  <button 
+                    type="button" 
+                    onClick={() => { setMode("login"); setError(null); setSuccess(null); }} 
+                    className="text-emerald-600 dark:text-emerald-400 hover:underline transition-colors font-semibold cursor-pointer"
+                  >
+                    Sign in here
+                  </button>
+                </p>
+                <div className="p-2.5 rounded-xl bg-muted/50 border border-border/60 text-[11px] text-muted-foreground">
+                  <span>Registered on your PC earlier? </span>
+                  <button
+                    type="button"
+                    onClick={() => { setMode("login"); setError(null); setSuccess(null); setAccountRecognized(true); }}
+                    className="text-emerald-600 dark:text-emerald-400 font-bold hover:underline cursor-pointer inline-flex items-center gap-1"
+                  >
+                    <span>Tap to Sign In directly</span>
+                    <ArrowRight className="w-3 h-3" />
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         </div>

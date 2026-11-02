@@ -386,6 +386,38 @@ export default {
       });
     }
 
+    // --- 0.5. EDGE HANDLER: Check if Email Already Exists ---
+    if (path === "/api/auth/check-email" && request.method === "GET") {
+      const email = (url.searchParams.get("email") || "").trim().toLowerCase();
+      if (!email) {
+        return new Response(JSON.stringify({ exists: false }), {
+          status: 200,
+          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+        });
+      }
+      if (REGISTERED_USERS.has(email)) {
+        return new Response(JSON.stringify({ exists: true, name: REGISTERED_USERS.get(email).name, email }), {
+          status: 200,
+          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+        });
+      }
+      try {
+        const backendOrigin = (env.BACKEND_ORIGIN || env.CLOUD_RUN_ORIGIN || DEFAULT_BACKEND_ORIGIN).replace(/\/$/, "");
+        const resp = await fetch(`${backendOrigin}/api/auth/check-email?email=${encodeURIComponent(email)}`);
+        if (resp.ok) {
+          const data = await resp.json();
+          return new Response(JSON.stringify(data), {
+            status: 200,
+            headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+          });
+        }
+      } catch (_) {}
+      return new Response(JSON.stringify({ exists: false, email }), {
+        status: 200,
+        headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+      });
+    }
+
     // --- 1. EDGE HANDLER: Request OTP ---
     if (path === "/api/auth/otp/request" && request.method === "POST") {
       try {

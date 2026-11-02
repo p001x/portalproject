@@ -4869,6 +4869,17 @@ def diag_email(to: str = "petersonyang8@gmail.com"):
         results["smtp_ssl_465_error"] = str(e)
     return results
 
+@app.get("/api/auth/check-email", tags=["auth"])
+def check_email_exists(email: str = ""):
+    email_clean = (email or "").strip().lower()
+    if not email_clean:
+        return {"exists": False}
+    from auth_db import get_user_by_email
+    existing = get_user_by_email(email_clean)
+    if existing and existing.get("password_hash"):
+        return {"exists": True, "name": existing.get("name") or "", "email": email_clean}
+    return {"exists": False, "email": email_clean}
+
 @app.post("/api/auth/otp/request", tags=["auth"])
 def request_otp(req: OTPRequest, request: Request):
     email = req.email.strip().lower()
