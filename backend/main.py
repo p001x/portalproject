@@ -219,10 +219,12 @@ import asyncio
 
 @app.middleware("http")
 async def track_analytics(request: Request, call_next):
-    # Log analytics asynchronously, ignore admin and health checks
-    if not request.url.path.startswith("/api/admin") and not request.url.path.startswith("/api/health") and not request.url.path.startswith("/assets"):
-        ip = request.client.host if request.client else "unknown"
-        asyncio.create_task(log_visit(ip, request.url.path))
+    # Log analytics asynchronously, ignore admin, health checks, and static files
+    path = request.url.path
+    if not path.startswith("/api/admin") and not path.startswith("/api/health") and not path.startswith("/assets") and not path.startswith("/static"):
+        ip = request.headers.get("CF-Connecting-IP") or request.headers.get("X-Forwarded-For", "").split(",")[0].strip() or (request.client.host if request.client else "unknown")
+        country = request.headers.get("CF-IPCountry")
+        asyncio.create_task(log_visit(ip, path, country))
     response = await call_next(request)
     return response
 
@@ -278,7 +280,8 @@ async def add_cache_control_header(request: Request, call_next):
     response = await call_next(request)
     if request.method == "GET" and response.status_code == 200:
         path = request.url.path
-        if path.startswith("/api/"):
+        # Only set no-cache for endpoints that did not declare their own edge caching policy
+        if path.startswith("/api/") and "Cache-Control" not in response.headers:
             response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
             response.headers["Pragma"] = "no-cache"
             response.headers["Expires"] = "0"
@@ -3101,6 +3104,7 @@ async def push_to_gee(
 
 class SupervisedClassifyRequest(BaseModel):
     aoi: Optional[dict] = None
+    study_area: Optional[dict] = None
     data_source: str = "sentinel2"
     custom_asset_id: Optional[str] = None
     samples: Optional[list] = None
@@ -3385,10 +3389,11 @@ def supervised_classify_endpoint(request: Request, req: SupervisedClassifyReques
     if not samples:
         raise HTTPException(400, "No training samples found. Please digitize or import samples first.")
     sample_dicts = [s.to_dict() if hasattr(s, "to_dict") else s for s in samples]
+    target_aoi = req.study_area or req.aoi
     try:
         result = train_and_classify(
             sample_dicts, 
-            aoi=req.aoi, 
+            aoi=target_aoi, 
             data_source=req.data_source, 
             custom_asset_id=req.custom_asset_id,
             ml_model=req.ml_model,
@@ -3909,51 +3914,7 @@ def ingest_url_endpoint(req: IngestUrlRequest, background_tasks: BackgroundTasks
 
     return {"imported_count": imported_count, "info": info}
 
-class ClassifySupervisedRequest(BaseModel):
-    data_source: str = "sentinel2"
-    custom_asset_id: Optional[str] = None
-    samples: list = []
-    study_area: Optional[dict] = None
-    aoi: Optional[dict] = None
-    ml_model: str = "random_forest"
-    train_split: int = 70
-    use_indices: bool = True
-    hyperparam_trees: int = 50
-    apply_sieve: bool = False
-
-
-@app.post("/api/classify/supervised", tags=["samples"])
-def classify_supervised(req: ClassifySupervisedRequest, request: Request):
-    _require_individual_gee(request)
-    if not req.samples:
-        raise HTTPException(status_code=400, detail="No samples provided for classification.")
-    
-    import sys, os as _os
-    gee_path = _os.path.join(_os.path.dirname(__file__), '..', 'rwanda-geoportal')
-    if gee_path not in sys.path:
-        sys.path.insert(0, gee_path)
-        
-    from gee.supervised_classify import train_and_classify
-    
-    try:
-        aoi_target = req.study_area or req.aoi
-        result = train_and_classify(
-            samples=req.samples,
-            data_source=req.data_source,
-            custom_asset_id=req.custom_asset_id,
-            aoi=aoi_target,
-            ml_model=req.ml_model,
-            train_split=req.train_split,
-            use_indices=req.use_indices,
-            hyperparam_trees=req.hyperparam_trees,
-            apply_sieve=req.apply_sieve
-        )
-        return result
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error("Classification failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+# (duplicate ClassifySupervisedRequest and classify_supervised removed - canonical is supervised_classify_endpoint)
 
 
 class SpectralProfilesRequest(BaseModel):
@@ -4124,7 +4085,7 @@ from fastapi import Request
 _COMMUNITY_RATE_LIMITS = {}
 
 @app.post("/api/community/comments", tags=["community"])
-async def api_post_comment(req: CommentCreateRequest, request: Request):
+def api_post_comment(req: CommentCreateRequest, request: Request):
     if community_db.is_forum_frozen():
         raise HTTPException(403, "The community forum is currently frozen. No new comments can be posted.")
         
@@ -4180,7 +4141,7 @@ class ToggleUpvoteRequest(BaseModel):
     author: str
 
 @app.post("/api/community/comments/{comment_id}/toggle-upvote", tags=["community"])
-async def api_toggle_upvote(comment_id: int, req: ToggleUpvoteRequest):
+def api_toggle_upvote(comment_id: int, req: ToggleUpvoteRequest):
     if community_db.is_forum_frozen():
         raise HTTPException(403, "The community forum is currently frozen.")
     if community_db.is_user_blocked(req.author):
@@ -4312,7 +4273,7 @@ static_upload_dir = os.path.join(os.path.dirname(__file__), "static", "uploads")
 os.makedirs(static_upload_dir, exist_ok=True)
 
 @app.get("/api/static/uploads/{file_path:path}", tags=["media"])
-async def serve_static_upload_with_hf_fallback(file_path: str):
+def serve_static_upload_with_hf_fallback(file_path: str):
     """
     Serve static uploaded media (images, videos) from local disk or transparently
     stream/redirect from Hugging Face if container restarted.
@@ -4832,63 +4793,7 @@ def api_harvester_delete_task(task_id: str):
         raise HTTPException(404, "Task not found")
     return {"ok": True, "message": "Task removed."}
 
-class WellscopeRequest(BaseModel):
-    aoi: dict
-    custom_weights: Optional[dict] = None
-    n_classes: Optional[int] = 5
-    method: Optional[str] = "natural_breaks"
-    custom_labels: Optional[list] = None
-
-class WellscopeFactorExportRequest(BaseModel):
-    aoi: dict
-    factor_key: str
-    palette: Optional[list] = None
-
-@app.post("/api/wellscope/map", tags=["analysis"])
-def api_wellscope_map(req: WellscopeRequest):
-    _require_gee()
-    try:
-        return compute_wellscope_map(req.aoi, req.custom_weights)
-    except Exception as e:
-        logger.exception("wellscope map failed")
-        raise HTTPException(500, str(e))
-
-@app.post("/api/wellscope/stats", tags=["analysis"])
-def api_wellscope_stats(req: WellscopeRequest):
-    _require_gee()
-    try:
-        return compute_wellscope_stats(req.aoi, req.custom_weights)
-    except Exception as e:
-        logger.exception("wellscope stats failed")
-        raise HTTPException(500, str(e))
-
-@app.post("/api/wellscope/classify", tags=["analysis"])
-def api_wellscope_classify(req: WellscopeRequest):
-    _require_gee()
-    try:
-        return compute_wellscope_classify(req.aoi, req.custom_weights, req.n_classes, req.method, req.custom_labels)
-    except Exception as e:
-        logger.exception("wellscope classify failed")
-        raise HTTPException(500, str(e))
-
-@app.post("/api/wellscope/export", tags=["analysis"])
-def api_wellscope_export(req: WellscopeRequest):
-    _require_gee()
-    try:
-        return compute_wellscope_export(req.aoi, req.custom_weights)
-    except Exception as e:
-        logger.exception("wellscope export failed")
-        raise HTTPException(500, str(e))
-
-@app.post("/api/wellscope/factor-export", tags=["analysis"])
-def api_wellscope_factor_export(req: WellscopeFactorExportRequest):
-    _require_gee()
-    try:
-        from gee.wellscope import export_factor_map
-        return export_factor_map(req.aoi, req.factor_key, req.palette)
-    except Exception as e:
-        logger.exception("wellscope factor export failed")
-        raise HTTPException(500, str(e))
+# (duplicate wellscope routes removed - canonical routes defined on lines 1503-1618)
 
 @app.get("/api/debug/datasets", tags=["debug"])
 def debug_datasets():

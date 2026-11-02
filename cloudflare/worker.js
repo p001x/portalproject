@@ -805,31 +805,53 @@ export default {
       headers.set("Host", new URL(backendOrigin).host);
       headers.set("X-Forwarded-Host", url.host);
       headers.set("X-Forwarded-Proto", url.protocol.replace(":", ""));
+      const clientIp = request.headers.get("CF-Connecting-IP") || request.headers.get("X-Forwarded-For") || "";
+      if (clientIp) {
+        headers.set("CF-Connecting-IP", clientIp);
+      }
+      const clientCountry = request.headers.get("CF-IPCountry") || "";
+      if (clientCountry) {
+        headers.set("CF-IPCountry", clientCountry);
+      }
       if (env.RESEND_API_KEY) {
         headers.set("X-Resend-Key", env.RESEND_API_KEY);
       }
 
-      // Forward request to backend (streaming passthrough for large downloads)
+      // Forward request to backend (with automatic 1-time retry for transient cold-starts)
       let response;
-      try {
-        response = await fetch(targetUrl.toString(), {
-          method: request.method,
-          headers: headers,
-          body: (request.method !== "GET" && request.method !== "HEAD") ? request.body : undefined,
-          redirect: "follow",
-        });
-      } catch (backendErr) {
-        return new Response(JSON.stringify({
-          detail: "Backend service is currently starting up or temporarily unreachable. Please retry shortly.",
-          error: String(backendErr),
-        }), {
-          status: 503,
-          headers: {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
-            "Retry-After": "10",
-          },
-        });
+      let attempt = 0;
+      while (attempt < 2) {
+        attempt++;
+        try {
+          response = await fetch(targetUrl.toString(), {
+            method: request.method,
+            headers: headers,
+            body: (request.method !== "GET" && request.method !== "HEAD") ? request.body : undefined,
+            redirect: "follow",
+          });
+          // If GET returned 502/503/504 on first attempt (transient Render container spin-up), retry once
+          if (attempt === 1 && (request.method === "GET" || request.method === "HEAD") && [502, 503, 504].includes(response.status)) {
+            await new Promise(r => setTimeout(r, 600));
+            continue;
+          }
+          break;
+        } catch (backendErr) {
+          if (attempt === 1 && (request.method === "GET" || request.method === "HEAD")) {
+            await new Promise(r => setTimeout(r, 600));
+            continue;
+          }
+          return new Response(JSON.stringify({
+            detail: "Backend service is currently starting up or temporarily unreachable. Please retry shortly.",
+            error: String(backendErr),
+          }), {
+            status: 503,
+            headers: {
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": "*",
+              "Retry-After": "10",
+            },
+          });
+        }
       }
 
       // --- 4b. STREAMING PASSTHROUGH for dataset file downloads ---
