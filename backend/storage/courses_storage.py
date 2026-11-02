@@ -46,6 +46,33 @@ def load_courses(force_refresh: bool = False) -> list[dict[str, Any]]:
                 raw = client.download_as_text(COURSES_METADATA_KEY)
                 data = json.loads(raw)
                 if isinstance(data, list) and len(data) > 0:
+                    # Validate and self-heal any obsolete or duplicate video records in cloud storage
+                    needs_update = False
+                    if os.path.exists(LOCAL_FALLBACK_FILE):
+                        try:
+                            with open(LOCAL_FALLBACK_FILE, 'r', encoding='utf-8') as lf:
+                                fallback_data = json.load(lf)
+                                fallback_map = {c["id"]: c for c in fallback_data if "id" in c}
+                                for idx, course in enumerate(data):
+                                    cid = course.get("id")
+                                    if cid in fallback_map:
+                                        fb = fallback_map[cid]
+                                        curr_vids = course.get("videos", [])
+                                        fb_vids = fb.get("videos", [])
+                                        has_obsolete = any(v.get("youtubeId") in ("wVnimcQsuwk", "W2XUxxu-D-c", "zXk-lD5L0s0", "s_J-k9Tq9qA") for v in curr_vids)
+                                        if has_obsolete or len(curr_vids) < len(fb_vids):
+                                            data[idx] = fb
+                                            needs_update = True
+                        except Exception as val_err:
+                            logger.debug("Validation check error: %s", val_err)
+
+                    if needs_update:
+                        try:
+                            client.upload_from_text(COURSES_METADATA_KEY, json.dumps(data, indent=2))
+                            logger.info("Self-healed & synced verified course videos to cloud storage")
+                        except Exception as up_err:
+                            logger.warning("Failed to auto-update cloud courses: %s", up_err)
+
                     _courses_cache = data
                     _courses_cache_time = now
                     # Sync local file

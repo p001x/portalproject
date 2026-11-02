@@ -2495,7 +2495,7 @@ async def upload_dataset(
     tmp_path = tmp.name
     total_bytes = 0
     try:
-        chunk_size = 1024 * 1024  # 1 MB chunks
+        chunk_size = 2 * 1024 * 1024  # 2 MB chunks for high-speed streaming
         while True:
             chunk = await file.read(chunk_size)
             if not chunk:
@@ -2504,34 +2504,21 @@ async def upload_dataset(
             total_bytes += len(chunk)
         tmp.close()
 
-        # For small files (< 50 MB), read into memory so bbox extraction works
-        # For large files, pass file_path to avoid memory pressure
-        if total_bytes < 50 * 1024 * 1024:
-            with open(tmp_path, "rb") as f:
-                file_bytes = f.read()
-            record = process_and_store_upload(
-                filename=filename,
-                file_bytes=file_bytes,
-                name=name,
-                description=description,
-                source=source,
-                contributor=contributor,
-                category=category,
-            )
-        else:
-            record = process_and_store_upload(
-                filename=filename,
-                file_bytes=None,
-                file_path=tmp_path,
-                name=name,
-                description=description,
-                source=source,
-                contributor=contributor,
-                category=category,
-            )
+        # Stream directly from tmp_path into Cloudflare R2 (zero RAM spikes & zero duplicate disk writes)
+        record = process_and_store_upload(
+            filename=filename,
+            file_bytes=None,
+            file_path=tmp_path,
+            name=name,
+            description=description,
+            source=source,
+            contributor=contributor,
+            category=category,
+        )
     finally:
         try:
-            os.unlink(tmp_path)
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
         except Exception:
             pass
 

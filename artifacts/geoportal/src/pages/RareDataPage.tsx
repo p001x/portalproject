@@ -881,26 +881,29 @@ function ContributePanel({
             </Button>
 
             {uploadProgress !== null && (
-              <div className="w-full mt-2 space-y-1.5">
+              <div className="w-full mt-2 space-y-1.5 animate-in fade-in duration-200">
                 <div className="flex justify-between text-xs">
-                  <span className="text-muted-foreground flex items-center gap-1.5">
+                  <span className="text-muted-foreground flex items-center gap-1.5 font-medium">
                     {uploadProgress < 100 ? (
-                      <>Uploading dataset bytes…</>
+                      <>
+                        <Upload className="w-3.5 h-3.5 animate-pulse text-primary" />
+                        Uploading to High-Speed Vault ({uploadProgress}%)…
+                      </>
                     ) : (
                       <>
-                        <Loader2 className="w-3 h-3 animate-spin text-amber-500" />
-                        Processing & extracting metadata on server…
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-500" />
+                        Finalizing spatial metadata & publishing to vault…
                       </>
                     )}
                   </span>
-                  <span className="font-semibold text-primary">
-                    {uploadProgress < 100 ? `${uploadProgress}%` : "Processing"}
+                  <span className="font-bold text-primary">
+                    {uploadProgress < 100 ? `${uploadProgress}%` : "Finalizing"}
                   </span>
                 </div>
-                <div className="w-full bg-secondary h-2 rounded-full overflow-hidden">
+                <div className="w-full bg-secondary h-2.5 rounded-full overflow-hidden p-0.5">
                   <div
-                    className={`h-full transition-all duration-300 ease-out ${
-                      uploadProgress >= 100 ? "bg-amber-500 animate-pulse w-full" : "bg-primary"
+                    className={`h-full rounded-full transition-all duration-300 ease-out ${
+                      uploadProgress >= 100 ? "bg-gradient-to-r from-emerald-500 to-teal-500 animate-pulse w-full" : "bg-gradient-to-r from-primary to-emerald-500"
                     }`}
                     style={{ width: uploadProgress >= 100 ? "100%" : `${uploadProgress}%` }}
                   />

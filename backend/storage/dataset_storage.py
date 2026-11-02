@@ -1,3 +1,4 @@
+_HF_REPO_CHECKED = set()
 """
 RARE DATA — Dataset Repository storage layer (FastAPI backend version).
 Adapted from rwanda-geoportal/utils/dataset_storage.py — Streamlit-free.
@@ -249,42 +250,52 @@ class S3Client:
 
     def upload_from_file(self, key: str, file_path: str) -> None:
         clean = self._clean_key(key)
+        if self.s3:
+            try:
+                from boto3.s3.transfer import TransferConfig
+                config = TransferConfig(
+                    multipart_threshold=8 * 1024 * 1024,
+                    max_concurrency=10,
+                    multipart_chunksize=8 * 1024 * 1024,
+                    use_threads=True
+                )
+                self.s3.upload_file(file_path, self.bucket_name, clean, Config=config)
+                return
+            except Exception as e:
+                import logging
+                logging.error(f"S3 upload error: {e}")
         try:
             self.local_client.upload_from_file(clean, file_path)
         except Exception:
             pass
-        if self.s3:
-            try:
-                self.s3.upload_file(file_path, self.bucket_name, clean)
-            except Exception as e:
-                import logging
-                logging.error(f"S3 upload error: {e}")
 
     def upload_from_bytes(self, key: str, data: bytes) -> None:
         clean = self._clean_key(key)
+        if self.s3:
+            try:
+                self.s3.put_object(Bucket=self.bucket_name, Key=clean, Body=data)
+                return
+            except Exception as e:
+                import logging
+                logging.error(f"S3 upload error: {e}")
         try:
             self.local_client.upload_from_bytes(clean, data)
         except Exception:
             pass
-        if self.s3:
-            try:
-                self.s3.put_object(Bucket=self.bucket_name, Key=clean, Body=data)
-            except Exception as e:
-                import logging
-                logging.error(f"S3 upload error: {e}")
 
     def upload_from_text(self, key: str, text: str) -> None:
         clean = self._clean_key(key)
+        if self.s3:
+            try:
+                self.s3.put_object(Bucket=self.bucket_name, Key=clean, Body=text.encode('utf-8'))
+                return
+            except Exception as e:
+                import logging
+                logging.error(f"S3 upload error: {e}")
         try:
             self.local_client.upload_from_text(clean, text)
         except Exception:
             pass
-        if self.s3:
-            try:
-                self.s3.put_object(Bucket=self.bucket_name, Key=clean, Body=text.encode('utf-8'))
-            except Exception as e:
-                import logging
-                logging.error(f"S3 upload error: {e}")
 
     def download_as_bytes(self, key: str) -> bytes:
         clean = self._clean_key(key)
@@ -367,20 +378,90 @@ def push_to_storage(key: str, data: Optional[bytes], name: str, progress_callbac
     import os
     import tempfile
     import logging
+    import shutil
+    import threading
 
     client = _get_client()
     hf_token = get_hf_token()
     repo_id = get_hf_repo_id()
 
-    # 1. Direct Hugging Face Storage (Primary Target for all uploads)
+    # 1. High-Speed Primary Target: Cloudflare R2 (ultra-low latency parallel S3 upload, instant response)
+    if client.__class__.__name__ == "S3Client":
+        clean_k = client._clean_key(key) if hasattr(client, "_clean_key") else key
+        if file_path is not None and hasattr(client, "upload_from_file"):
+            client.upload_from_file(clean_k, file_path)
+        elif data is not None:
+            client.upload_from_bytes(clean_k, data)
+        else:
+            with open(file_path, "rb") as f:
+                client.upload_from_bytes(clean_k, f.read())
+
+        logging.info(f"High-speed R2 upload successful: {clean_k} -> {client.bucket_name}")
+        r2_key = f"r2://{client.bucket_name}/{clean_k}"
+
+        # Asynchronous background mirror to Hugging Face (non-blocking, zero user wait time)
+        if hf_token:
+            filename = key.split("/")[-1]
+            try:
+                bg_file_path = None
+                if file_path and os.path.exists(file_path):
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(filename)[1]) as bg_tmp:
+                        shutil.copyfile(file_path, bg_tmp.name)
+                        bg_file_path = bg_tmp.name
+                elif data is not None:
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(filename)[1]) as bg_tmp:
+                        bg_tmp.write(data)
+                        bg_file_path = bg_tmp.name
+
+                def _bg_hf_sync(source_file, target_name, r_id, tok, ds_name):
+                    try:
+                        from huggingface_hub import HfApi, create_repo
+                        if r_id not in _HF_REPO_CHECKED:
+                            try:
+                                create_repo(r_id, repo_type="dataset", exist_ok=True, token=tok)
+                                _HF_REPO_CHECKED.add(r_id)
+                            except Exception:
+                                pass
+                        api = HfApi(token=tok)
+                        api.upload_file(
+                            path_or_fileobj=source_file,
+                            path_in_repo=target_name,
+                            repo_id=r_id,
+                            repo_type="dataset",
+                            commit_message=f"Mirror dataset: {ds_name} ({target_name})"
+                        )
+                        logging.info(f"Background HF mirror sync complete: {target_name} -> {r_id}")
+                    except Exception as err:
+                        logging.warning(f"Background HF mirror sync warning: {err}")
+                    finally:
+                        if source_file and os.path.exists(source_file):
+                            try:
+                                os.unlink(source_file)
+                            except Exception:
+                                pass
+
+                if bg_file_path:
+                    threading.Thread(
+                        target=_bg_hf_sync,
+                        args=(bg_file_path, filename, repo_id, hf_token, name),
+                        daemon=True
+                    ).start()
+            except Exception as bg_err:
+                logging.warning(f"Failed to queue background HF sync: {bg_err}")
+
+        return r2_key
+
+    # 2. Fallback to Direct Hugging Face if R2 is not configured
     if hf_token:
         try:
             from huggingface_hub import HfApi, create_repo
             api = HfApi(token=hf_token)
-            try:
-                create_repo(repo_id, repo_type="dataset", exist_ok=True, token=hf_token)
-            except Exception as e:
-                logging.info(f"HF repository check: {e}")
+            if repo_id not in _HF_REPO_CHECKED:
+                try:
+                    create_repo(repo_id, repo_type="dataset", exist_ok=True, token=hf_token)
+                    _HF_REPO_CHECKED.add(repo_id)
+                except Exception as e:
+                    logging.info(f"HF repository check: {e}")
 
             filename = key.split("/")[-1]
             tmp_path = file_path
@@ -394,8 +475,6 @@ def push_to_storage(key: str, data: Optional[bytes], name: str, progress_callbac
                     cleanup_tmp = True
 
             try:
-                # Use file path directly — HfApi natively handles all file sizes (up to 50 GB)
-                # with multipart chunking, stream resumption, and zero RAM spikes.
                 api.upload_file(
                     path_or_fileobj=tmp_path,
                     path_in_repo=filename,
@@ -404,20 +483,6 @@ def push_to_storage(key: str, data: Optional[bytes], name: str, progress_callbac
                     commit_message=f"Added dataset: {name} ({filename})"
                 )
                 logging.info(f"Direct HF upload successful: {filename} -> {repo_id}")
-
-                # Secondary backup to R2 or local if available
-                if client.__class__.__name__ == "S3Client":
-                    try:
-                        clean_k = client._clean_key(key) if hasattr(client, "_clean_key") else key
-                        client.upload_from_file(clean_k, tmp_path)
-                    except Exception as s3_err:
-                        logging.warning(f"R2 secondary sync warning: {s3_err}")
-                elif hasattr(client, "upload_from_file"):
-                    try:
-                        client.upload_from_file(key, tmp_path)
-                    except Exception:
-                        pass
-
                 return f"hf://{repo_id}/{filename}"
             finally:
                 if cleanup_tmp and os.path.exists(tmp_path):
@@ -428,18 +493,6 @@ def push_to_storage(key: str, data: Optional[bytes], name: str, progress_callbac
         except Exception as e:
             logging.error(f"Hugging Face direct upload error: {e}")
             raise ValueError(f"Failed to push to Hugging Face ({repo_id}): {e}")
-
-    # 2. Fallback to Cloudflare R2 if configured and no HF_TOKEN
-    if client.__class__.__name__ == "S3Client":
-        clean_k = client._clean_key(key) if hasattr(client, "_clean_key") else key
-        if file_path is not None and hasattr(client, "upload_from_file"):
-            client.upload_from_file(clean_k, file_path)
-        elif data is not None:
-            client.upload_from_bytes(clean_k, data)
-        else:
-            with open(file_path, "rb") as f:
-                client.upload_from_bytes(clean_k, f.read())
-        return f"r2://{client.bucket_name}/{clean_k}"
 
     # 3. Fallback to local filesystem
     if file_path is not None and hasattr(client, "upload_from_file"):
@@ -935,13 +988,19 @@ def safe_extractall(zf: zipfile.ZipFile, dest_dir: str) -> None:
     zf.extractall(dest_dir)
 
 
-def extract_shapefile_bbox(zip_bytes: bytes) -> tuple[list[float], bytes]:
+def extract_shapefile_bbox(zip_bytes: Optional[bytes] = None, file_path: Optional[str] = None) -> tuple[Optional[list[float]], Optional[bytes]]:
     import geopandas as gpd
     with tempfile.TemporaryDirectory() as tmpdir:
-        tmp_zip = Path(tmpdir) / "upload.zip"
-        tmp_zip.write_bytes(zip_bytes)
-        with zipfile.ZipFile(tmp_zip) as zf:
-            safe_extractall(zf, tmpdir)
+        if file_path and os.path.exists(file_path):
+            with zipfile.ZipFile(file_path) as zf:
+                safe_extractall(zf, tmpdir)
+        elif zip_bytes:
+            tmp_zip = Path(tmpdir) / "upload.zip"
+            tmp_zip.write_bytes(zip_bytes)
+            with zipfile.ZipFile(tmp_zip) as zf:
+                safe_extractall(zf, tmpdir)
+        else:
+            return None, None
         shp_files = list(Path(tmpdir).glob("**/*.shp"))
         if not shp_files:
             raise ValueError("No .shp file found inside the uploaded zip.")
@@ -949,12 +1008,7 @@ def extract_shapefile_bbox(zip_bytes: bytes) -> tuple[list[float], bytes]:
         if gdf.crs is not None and str(gdf.crs) != "EPSG:4326":
             gdf = gdf.to_crs("EPSG:4326")
         minx, miny, maxx, maxy = gdf.total_bounds.tolist()
-        out_buf = io.BytesIO()
-        with zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED) as out_zf:
-            for f in Path(tmpdir).rglob("*"):
-                if f.is_file() and f.name != "upload.zip":
-                    out_zf.write(f, arcname=f.name)
-        return [minx, miny, maxx, maxy], out_buf.getvalue()
+        return [float(minx), float(miny), float(maxx), float(maxy)], zip_bytes
 
 
 _LAT_NAMES = {"lat", "latitude", "y"}
@@ -997,12 +1051,13 @@ def extract_geojson_bbox(file_bytes: bytes) -> Optional[list[float]]:
             features = data.get("features", [])
             if not features:
                 return None
-            from shapely.ops import unary_union
-            geoms = [shapely_shape(f["geometry"]) for f in features if f.get("geometry")]
-            if not geoms:
+            bounds_list = [shapely_shape(f["geometry"]).bounds for f in features if f.get("geometry")]
+            if not bounds_list:
                 return None
-            u = unary_union(geoms)
-            minx, miny, maxx, maxy = u.bounds
+            minx = min(b[0] for b in bounds_list)
+            miny = min(b[1] for b in bounds_list)
+            maxx = max(b[2] for b in bounds_list)
+            maxy = max(b[3] for b in bounds_list)
             return [float(minx), float(miny), float(maxx), float(maxy)]
         elif "geometry" in data:
             minx, miny, maxx, maxy = shapely_shape(data["geometry"]).bounds
@@ -1079,15 +1134,10 @@ def process_and_store_upload(filename: str, file_bytes: Optional[bytes], name: s
                 pass
         elif file_type == "shapefile":
             try:
-                if bytes_to_store is not None:
-                    bbox, new_bytes = extract_shapefile_bbox(bytes_to_store)
-                    bytes_to_store = new_bytes
-                    size_mb = len(bytes_to_store) / (1024 * 1024)
-                elif file_path is not None:
-                    with open(file_path, "rb") as zf:
-                        bbox, new_bytes = extract_shapefile_bbox(zf.read())
-                        bytes_to_store = new_bytes
-                        size_mb = len(bytes_to_store) / (1024 * 1024)
+                if file_path is not None:
+                    bbox, _ = extract_shapefile_bbox(file_path=file_path)
+                elif bytes_to_store is not None:
+                    bbox, _ = extract_shapefile_bbox(zip_bytes=bytes_to_store)
             except Exception:
                 pass
         elif file_type == "csv":

@@ -1266,14 +1266,16 @@ export const api = {
         xhr.onload = () => {
           if (xhr.status >= 200 && xhr.status < 300) {
             try { resolve(JSON.parse(xhr.responseText)); } 
-            catch { reject(new Error("Invalid response")); }
+            catch { reject(new Error("Invalid response from server")); }
           } else {
             let msg = xhr.statusText;
             try { msg = JSON.parse(xhr.responseText).detail || msg; } catch {}
-            reject(new Error(msg));
+            reject(new Error(msg || `Upload failed (Status ${xhr.status})`));
           }
         };
-        xhr.onerror = () => reject(new Error("Network error"));
+        xhr.onerror = () => reject(new Error("Network connection error during dataset upload"));
+        xhr.ontimeout = () => reject(new Error("Dataset upload timed out. Please check your network connection."));
+        xhr.timeout = 15 * 60 * 1000; // 15-minute safety timeout for large geospatial files
         xhr.send(fd);
       });
     },

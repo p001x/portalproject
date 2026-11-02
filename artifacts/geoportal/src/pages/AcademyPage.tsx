@@ -742,7 +742,7 @@ export function AcademyPage() {
                           <iframe
                             key={activeVideo.youtubeId}
                             className="absolute top-0 left-0 w-full h-full border-0"
-                            src={`https://www.youtube-nocookie.com/embed/${activeVideo.youtubeId}?autoplay=1&rel=0&modestbranding=1`}
+                            src={`https://www.youtube-nocookie.com/embed/${activeVideo.youtubeId}?rel=0&modestbranding=1&playsinline=1&enablejsapi=1`}
                             title={activeVideo.title || selectedCourse.title}
                             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
                             referrerPolicy="strict-origin-when-cross-origin"
@@ -772,9 +772,9 @@ export function AcademyPage() {
                     <div className="flex items-center gap-2 shrink-0">
                       {activeVideo?.youtubeId && (
                         <Button
-                          variant="ghost"
+                          variant="secondary"
                           size="sm"
-                          className="h-8 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+                          className="h-8 gap-1.5 text-xs font-semibold bg-red-600/10 text-red-500 hover:bg-red-600 hover:text-white border border-red-500/20 transition-all"
                           asChild
                         >
                           <a
@@ -784,7 +784,7 @@ export function AcademyPage() {
                             title="Open lesson directly on YouTube"
                           >
                             <ExternalLink className="h-3.5 w-3.5" />
-                            <span className="hidden sm:inline">Open in YouTube</span>
+                            <span>Watch on YouTube</span>
                           </a>
                         </Button>
                       )}

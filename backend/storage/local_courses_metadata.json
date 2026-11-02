@@ -77,17 +77,17 @@
       {
         "id": "v4_1",
         "title": "Part 1: Leaflet Basics & Map Markers",
-        "youtubeId": "wVnimcQsuwk",
-        "duration": "15m"
+        "youtubeId": "ls_Eue1xUtY",
+        "duration": "25m"
       },
       {
         "id": "v4_2",
         "title": "Part 2: Circles, Polygons & Popups",
         "youtubeId": "OYjFR_CGV8o",
-        "duration": "15m"
+        "duration": "20m"
       }
     ],
-    "duration": "30m",
+    "duration": "45m",
     "level": "Beginner",
     "completed": false
   }
