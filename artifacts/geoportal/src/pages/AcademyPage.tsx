@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { PlayCircle, BookOpen, Clock, CheckCircle2, GraduationCap, Video, FileText, Plus, Trash2, Headphones, Sparkles, Search, Shield, User, Pencil, ZoomIn, ZoomOut, Moon, Sun, ChevronLeft, ChevronRight, Maximize, Minimize, ListTree, X, Bot, HelpCircle, Loader2, MessageCircle } from "lucide-react";
+import { PlayCircle, BookOpen, Clock, CheckCircle2, GraduationCap, Video, FileText, Plus, Trash2, Headphones, Sparkles, Search, Shield, User, Pencil, ZoomIn, ZoomOut, Moon, Sun, ChevronLeft, ChevronRight, Maximize, Minimize, ListTree, X, Bot, HelpCircle, Loader2, MessageCircle, ExternalLink } from "lucide-react";
 import { pdfjs, Document, Page, Outline } from 'react-pdf';
 import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
 import 'react-pdf/dist/esm/Page/TextLayer.css';
@@ -741,10 +741,11 @@ export function AcademyPage() {
                         return (
                           <iframe
                             key={activeVideo.youtubeId}
-                            className="absolute top-0 left-0 w-full h-full"
-                            src={`https://www.youtube.com/embed/${activeVideo.youtubeId}?autoplay=1`}
+                            className="absolute top-0 left-0 w-full h-full border-0"
+                            src={`https://www.youtube-nocookie.com/embed/${activeVideo.youtubeId}?autoplay=1&rel=0&modestbranding=1`}
                             title={activeVideo.title || selectedCourse.title}
-                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                            referrerPolicy="strict-origin-when-cross-origin"
                             allowFullScreen
                           />
                         );
@@ -769,6 +770,24 @@ export function AcademyPage() {
                       </span>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
+                      {activeVideo?.youtubeId && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+                          asChild
+                        >
+                          <a
+                            href={`https://www.youtube.com/watch?v=${activeVideo.youtubeId}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Open lesson directly on YouTube"
+                          >
+                            <ExternalLink className="h-3.5 w-3.5" />
+                            <span className="hidden sm:inline">Open in YouTube</span>
+                          </a>
+                        </Button>
+                      )}
                       <Button
                         variant="outline"
                         size="sm"
