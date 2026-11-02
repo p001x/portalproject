@@ -88,17 +88,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           let res = await fetch(`${BASE}/auth/me`, {
             headers: {
               "Authorization": `Bearer ${token}`
-            }
+            },
+            signal: AbortSignal.timeout(3000)
           });
 
           // Handle server cold start (Render free tier wake-up) by retrying
           if (res.status === 502 || res.status === 503 || res.status === 504) {
-            await new Promise((r) => setTimeout(r, 2500));
+            await new Promise((r) => setTimeout(r, 2000));
             try {
               res = await fetch(`${BASE}/auth/me`, {
                 headers: {
                   "Authorization": `Bearer ${token}`
-                }
+                },
+                signal: AbortSignal.timeout(3000)
               });
             } catch (_) {}
           }

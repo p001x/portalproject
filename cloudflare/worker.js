@@ -403,7 +403,7 @@ export default {
       }
       try {
         const backendOrigin = (env.BACKEND_ORIGIN || env.CLOUD_RUN_ORIGIN || DEFAULT_BACKEND_ORIGIN).replace(/\/$/, "");
-        const resp = await fetch(`${backendOrigin}/api/auth/check-email?email=${encodeURIComponent(email)}`);
+        const resp = await fetch(`${backendOrigin}/api/auth/check-email?email=${encodeURIComponent(email)}`, { signal: AbortSignal.timeout(1500) });
         if (resp.ok) {
           const data = await resp.json();
           return new Response(JSON.stringify(data), {
@@ -540,35 +540,72 @@ export default {
         let backendToken = null;
         let backendErrorMsg = null;
 
-        // Synchronously forward to backend to ensure user is permanently written to the SQL database
-        for (let attempt = 0; attempt < 3; attempt++) {
-          try {
-            const resp = await fetch(`${backendOrigin}/api/auth/register`, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "X-Worker-Verified": "true",
-                "X-Worker-Secret": JWT_SECRET
-              },
-              body: JSON.stringify({ name, email, password, code })
-            });
+        // Fast non-blocking sync to backend (max 2 seconds) so registration responds instantly
 
-            const respData = await resp.json().catch(() => null);
-            if (resp.ok && respData && respData.user) {
-              backendUser = respData.user;
-              backendToken = respData.token;
-              break;
-            } else if (resp.status === 400 || resp.status === 409) {
-              // Informative validation error (e.g. Email already registered)
-              backendErrorMsg = (respData && (respData.detail || respData.message)) || "Registration failed.";
-              break;
-            }
-          } catch (e) {
-            console.error(`Attempt ${attempt + 1} forwarding register to backend error:`, e);
+
+        try {
+
+
+          const resp = await fetch(`${backendOrigin}/api/auth/register`, {
+
+
+            method: "POST",
+
+
+            headers: {
+
+
+              "Content-Type": "application/json",
+
+
+              "X-Worker-Verified": "true",
+
+
+              "X-Worker-Secret": JWT_SECRET
+
+
+            },
+
+
+            body: JSON.stringify({ name, email, password, code }),
+
+
+            signal: AbortSignal.timeout(2000)
+
+
+          });
+
+
+        
+
+
+          const respData = await resp.json().catch(() => null);
+
+
+          if (resp.ok && respData && respData.user) {
+
+
+            backendUser = respData.user;
+
+
+            backendToken = respData.token;
+
+
+          } else if (resp.status === 400 || resp.status === 409) {
+
+
+            backendErrorMsg = (respData && (respData.detail || respData.message)) || "Registration failed.";
+
+
           }
-          if (attempt < 2) {
-            await new Promise((r) => setTimeout(r, 1200));
-          }
+
+
+        } catch (e) {
+
+
+          console.warn("[Register Sync]: Backend unreachable or hibernating, immediately using edge registration and queuing background sync");
+
+
         }
 
         if (backendErrorMsg) {
@@ -633,7 +670,8 @@ export default {
         const resp = await fetch(targetUrl.toString(), {
           method: "POST",
           headers: headers,
-          body: request.clone().body
+          body: request.clone().body,
+          signal: AbortSignal.timeout(2500)
         });
 
         if (resp.ok) {

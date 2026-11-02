@@ -71,14 +71,15 @@ export function AuthPage() {
     if (!cleanEmail || !cleanEmail.includes("@") || mode !== "register") return;
     setIsCheckingEmail(true);
     try {
-      const res = await fetch(`${BASE}/auth/check-email?email=${encodeURIComponent(cleanEmail)}`);
+      const res = await fetch(`${BASE}/auth/check-email?email=${encodeURIComponent(cleanEmail)}`, {
+        signal: AbortSignal.timeout(2000)
+      });
       if (res.ok) {
         const data = await res.json();
         if (data && data.exists) {
-          setMode("login");
           setAccountRecognized(true);
-          setError(null);
-          setSuccess(`✨ Welcome back! Your account (${cleanEmail}) is already recognized from your PC. Please enter your password to Sign In.`);
+        } else {
+          setAccountRecognized(false);
         }
       }
     } catch (_) {
@@ -137,7 +138,7 @@ export function AuthPage() {
           setMode("login");
           setAccountRecognized(true);
           setError(null);
-          setSuccess(`✨ Welcome back! Your account (${email}) is already registered from your PC. Please enter your password to Sign In.`);
+          setSuccess(`✨ Welcome back! Your account (${email}) is already registered. Please enter your password to Sign In.`);
           return;
         }
         setError(errMsg);
@@ -181,7 +182,7 @@ export function AuthPage() {
             setMode("login");
             setAccountRecognized(true);
             setError(null);
-            setSuccess(`✨ Welcome back! Your account (${email}) is already registered from your PC. Please enter your password to Sign In.`);
+            setSuccess(`✨ Welcome back! Your account (${email}) is already registered. Please enter your password to Sign In.`);
             return;
           }
           throw err;
@@ -205,7 +206,7 @@ export function AuthPage() {
         setMode("login");
         setAccountRecognized(true);
         setError(null);
-        setSuccess(`✨ Welcome back! Your account (${email}) is already registered from your PC. Please enter your password to Sign In.`);
+        setSuccess(`✨ Welcome back! Your account (${email}) is already registered. Please enter your password to Sign In.`);
         return;
       }
       setError(errMsg);
@@ -483,7 +484,7 @@ export function AuthPage() {
                     </label>
                     {mode === "register" && (
                       <span className="text-[11px] text-muted-foreground">
-                        Same email used on your PC?
+                        We'll send a 6-digit verification code
                       </span>
                     )}
                   </div>
@@ -507,6 +508,24 @@ export function AuthPage() {
                       <Loader2 className="w-3.5 h-3.5 text-muted-foreground animate-spin shrink-0 mr-1" />
                     )}
                   </div>
+                  {accountRecognized && mode === "register" && (
+                    <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-300 flex items-center justify-between gap-2 mt-2 animate-in fade-in">
+                      <div>
+                        <span>Account already exists for <b>{email}</b>.</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMode("login");
+                          setError(null);
+                          setSuccess(`✨ Welcome back! Please enter your password to Sign In.`);
+                        }}
+                        className="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-xs transition-colors shrink-0 cursor-pointer"
+                      >
+                        Sign In &rarr;
+                      </button>
+                    </div>
+                  )}
                 </div>
 
                 {/* Password Field */}
@@ -669,7 +688,7 @@ export function AuthPage() {
                   </button>
                 </p>
                 <div className="p-2.5 rounded-xl bg-muted/50 border border-border/60 text-[11px] text-muted-foreground">
-                  <span>Registered on your PC earlier? </span>
+                  <span>Already created an account? </span>
                   <button
                     type="button"
                     onClick={() => { setMode("login"); setError(null); setSuccess(null); setAccountRecognized(true); }}
