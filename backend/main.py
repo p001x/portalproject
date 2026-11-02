@@ -2418,10 +2418,10 @@ def _sanitize_download_filename(name: str) -> str:
     return name.replace('"', '').replace('\n', '').replace('\r', '').strip() or "dataset"
 
 @app.get("/api/datasets", tags=["rare-data"])
-def list_datasets(source: str = Query("admin", pattern="^(admin|community|all)$")):
+def list_datasets(source: str = Query("admin", pattern="^(admin|community|all)$"), refresh: bool = Query(False)):
     if source == "all":
-        return {"records": load_metadata("admin") + load_metadata("community")}
-    return {"records": load_metadata(source=source)}
+        return {"records": load_metadata("admin", force_refresh=refresh) + load_metadata("community", force_refresh=refresh)}
+    return {"records": load_metadata(source=source, force_refresh=refresh)}
 
 
 # NOTE: download-all MUST be defined BEFORE {dataset_id} routes to avoid

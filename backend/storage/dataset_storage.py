@@ -1,9 +1,9 @@
+from __future__ import annotations
 _HF_REPO_CHECKED = set()
 """
 RARE DATA — Dataset Repository storage layer (FastAPI backend version).
 Adapted from rwanda-geoportal/utils/dataset_storage.py — Streamlit-free.
 """
-from __future__ import annotations
 import io, json, os, tempfile, uuid, zipfile
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
@@ -101,6 +101,9 @@ _client: Optional[Any] = None
 
 import threading
 _metadata_lock = threading.Lock()
+_metadata_cache: dict[str, list[dict[str, Any]]] = {}
+_metadata_cache_time: dict[str, float] = {}
+METADATA_CACHE_TTL = 30.0  # 30 seconds in-memory cache for high-throughput reads
 
 class LocalClient:
     def __init__(self, storage_dir: str):
@@ -387,69 +390,72 @@ def push_to_storage(key: str, data: Optional[bytes], name: str, progress_callbac
 
     # 1. High-Speed Primary Target: Cloudflare R2 (ultra-low latency parallel S3 upload, instant response)
     if client.__class__.__name__ == "S3Client":
-        clean_k = client._clean_key(key) if hasattr(client, "_clean_key") else key
-        if file_path is not None and hasattr(client, "upload_from_file"):
-            client.upload_from_file(clean_k, file_path)
-        elif data is not None:
-            client.upload_from_bytes(clean_k, data)
-        else:
-            with open(file_path, "rb") as f:
-                client.upload_from_bytes(clean_k, f.read())
+        try:
+            clean_k = client._clean_key(key) if hasattr(client, "_clean_key") else key
+            if file_path is not None and hasattr(client, "upload_from_file"):
+                client.upload_from_file(clean_k, file_path)
+            elif data is not None:
+                client.upload_from_bytes(clean_k, data)
+            else:
+                with open(file_path, "rb") as f:
+                    client.upload_from_bytes(clean_k, f.read())
 
-        logging.info(f"High-speed R2 upload successful: {clean_k} -> {client.bucket_name}")
-        r2_key = f"r2://{client.bucket_name}/{clean_k}"
+            logging.info(f"High-speed R2 upload successful: {clean_k} -> {client.bucket_name}")
+            r2_key = f"r2://{client.bucket_name}/{clean_k}"
 
-        # Asynchronous background mirror to Hugging Face (non-blocking, zero user wait time)
-        if hf_token:
-            filename = key.split("/")[-1]
-            try:
-                bg_file_path = None
-                if file_path and os.path.exists(file_path):
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(filename)[1]) as bg_tmp:
-                        shutil.copyfile(file_path, bg_tmp.name)
-                        bg_file_path = bg_tmp.name
-                elif data is not None:
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(filename)[1]) as bg_tmp:
-                        bg_tmp.write(data)
-                        bg_file_path = bg_tmp.name
+            # Asynchronous background mirror to Hugging Face (non-blocking, zero user wait time)
+            if hf_token:
+                filename = key.split("/")[-1]
+                try:
+                    bg_file_path = None
+                    if file_path and os.path.exists(file_path):
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(filename)[1]) as bg_tmp:
+                            shutil.copyfile(file_path, bg_tmp.name)
+                            bg_file_path = bg_tmp.name
+                    elif data is not None:
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(filename)[1]) as bg_tmp:
+                            bg_tmp.write(data)
+                            bg_file_path = bg_tmp.name
 
-                def _bg_hf_sync(source_file, target_name, r_id, tok, ds_name):
-                    try:
-                        from huggingface_hub import HfApi, create_repo
-                        if r_id not in _HF_REPO_CHECKED:
-                            try:
-                                create_repo(r_id, repo_type="dataset", exist_ok=True, token=tok)
-                                _HF_REPO_CHECKED.add(r_id)
-                            except Exception:
-                                pass
-                        api = HfApi(token=tok)
-                        api.upload_file(
-                            path_or_fileobj=source_file,
-                            path_in_repo=target_name,
-                            repo_id=r_id,
-                            repo_type="dataset",
-                            commit_message=f"Mirror dataset: {ds_name} ({target_name})"
-                        )
-                        logging.info(f"Background HF mirror sync complete: {target_name} -> {r_id}")
-                    except Exception as err:
-                        logging.warning(f"Background HF mirror sync warning: {err}")
-                    finally:
-                        if source_file and os.path.exists(source_file):
-                            try:
-                                os.unlink(source_file)
-                            except Exception:
-                                pass
+                    def _bg_hf_sync(source_file, target_name, r_id, tok, ds_name):
+                        try:
+                            from huggingface_hub import HfApi, create_repo
+                            if r_id not in _HF_REPO_CHECKED:
+                                try:
+                                    create_repo(r_id, repo_type="dataset", exist_ok=True, token=tok)
+                                    _HF_REPO_CHECKED.add(r_id)
+                                except Exception:
+                                    pass
+                            api = HfApi(token=tok)
+                            api.upload_file(
+                                path_or_fileobj=source_file,
+                                path_in_repo=target_name,
+                                repo_id=r_id,
+                                repo_type="dataset",
+                                commit_message=f"Mirror dataset: {ds_name} ({target_name})"
+                            )
+                            logging.info(f"Background HF mirror sync complete: {target_name} -> {r_id}")
+                        except Exception as err:
+                            logging.warning(f"Background HF mirror sync warning: {err}")
+                        finally:
+                            if source_file and os.path.exists(source_file):
+                                try:
+                                    os.unlink(source_file)
+                                except Exception:
+                                    pass
 
-                if bg_file_path:
-                    threading.Thread(
-                        target=_bg_hf_sync,
-                        args=(bg_file_path, filename, repo_id, hf_token, name),
-                        daemon=True
-                    ).start()
-            except Exception as bg_err:
-                logging.warning(f"Failed to queue background HF sync: {bg_err}")
+                    if bg_file_path:
+                        threading.Thread(
+                            target=_bg_hf_sync,
+                            args=(bg_file_path, filename, repo_id, hf_token, name),
+                            daemon=True
+                        ).start()
+                except Exception as bg_err:
+                    logging.warning(f"Failed to queue background HF sync: {bg_err}")
 
-        return r2_key
+            return r2_key
+        except Exception as r2_err:
+            logging.error(f"High-speed R2 upload error ({r2_err}); gracefully failing over to secondary targets.")
 
     # 2. Fallback to Direct Hugging Face if R2 is not configured
     if hf_token:
@@ -851,31 +857,93 @@ class DatasetRecord:
 
 # ── Metadata ────────────────────────────────────────────────────────────────
 
-def load_metadata(source: str = "admin") -> list[dict[str, Any]]:
-    client = _get_client()
-    try:
-        key = METADATA_KEYS[source]
+def load_metadata(source: str = "admin", force_refresh: bool = False) -> list[dict[str, Any]]:
+    import time
+    now = time.time()
+    if not force_refresh:
+        cached = _metadata_cache.get(source)
+        if cached is not None and (now - _metadata_cache_time.get(source, 0)) < METADATA_CACHE_TTL:
+            return [dict(r) for r in cached]
+
+    with _metadata_lock:
+        now = time.time()
+        if not force_refresh:
+            cached = _metadata_cache.get(source)
+            if cached is not None and (now - _metadata_cache_time.get(source, 0)) < METADATA_CACHE_TTL:
+                return [dict(r) for r in cached]
+
+        client = _get_client()
+        key = METADATA_KEYS.get(source, "datasets_metadata.json")
         raw = ""
-        if client.exists(key):
-            raw = client.download_as_text(key)
+        try:
+            if client.exists(key):
+                raw = client.download_as_text(key)
+        except Exception as net_err:
+            import logging
+            logging.warning("Error fetching metadata from remote storage (%s): %s", key, net_err)
+
+        # Tiered local fallbacks: check data/metadata, then check data/files
         if not raw or raw.strip() in ("", "[]"):
-            alt_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "metadata", key))
-            if os.path.exists(alt_path):
-                with open(alt_path, "r", encoding="utf-8") as f:
-                    raw = f.read()
+            alt_paths = [
+                os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "metadata", key)),
+                os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "files", key)),
+            ]
+            for p in alt_paths:
+                if os.path.exists(p):
+                    try:
+                        with open(p, "r", encoding="utf-8") as f:
+                            content = f.read()
+                            if content and content.strip() not in ("", "[]"):
+                                raw = content
+                                break
+                    except Exception:
+                        pass
+
+        records = []
         if raw:
-            data = json.loads(raw)
-            return data if isinstance(data, list) else []
-        return []
-    except Exception as e:
-        import logging
-        logging.error(f"Error loading metadata: {e}")
-        return []
+            try:
+                data = json.loads(raw)
+                if isinstance(data, list):
+                    records = data
+            except Exception as parse_err:
+                import logging
+                logging.error("Failed to parse metadata JSON (%s): %s", key, parse_err)
+
+        _metadata_cache[source] = records
+        _metadata_cache_time[source] = now
+        return [dict(r) for r in records]
 
 
 def save_metadata(records: list[dict[str, Any]], source: str = "admin") -> None:
-    client = _get_client()
-    client.upload_from_text(METADATA_KEYS[source], json.dumps(records, indent=2))
+    import time
+    key = METADATA_KEYS.get(source, "datasets_metadata.json")
+    data_str = json.dumps(records, indent=2)
+
+    with _metadata_lock:
+        _metadata_cache[source] = [dict(r) for r in records]
+        _metadata_cache_time[source] = time.time()
+
+        # 1. Save to local fallback files for instant persistence
+        alt_paths = [
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "metadata", key)),
+            os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "files", key)),
+        ]
+        for p in alt_paths:
+            try:
+                os.makedirs(os.path.dirname(p), exist_ok=True)
+                with open(p, "w", encoding="utf-8") as f:
+                    f.write(data_str)
+            except Exception as e:
+                import logging
+                logging.debug("Could not write local metadata copy to %s: %s", p, e)
+
+        # 2. Upload to remote Cloudflare R2 / S3
+        try:
+            client = _get_client()
+            client.upload_from_text(key, data_str)
+        except Exception as e:
+            import logging
+            logging.error("Failed to upload metadata to remote storage (%s): %s", key, e)
 
 def get_dataset_data(dataset_id: str, source: str = "admin") -> bytes:
     records = load_metadata(source=source)
