@@ -226,6 +226,18 @@ def stream_book_chunks(
                     yield chunk
         return
 
+    # 1b. Check bundled static books directory first (instant streaming with zero RAM spikes)
+    base_name = os.path.basename(storage_key)
+    static_book_path = os.path.join(os.path.dirname(__file__), "..", "static", "books", base_name)
+    if os.path.exists(static_book_path) and os.path.getsize(static_book_path) > 100:
+        with open(static_book_path, "rb") as f:
+            while True:
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                yield chunk
+        return
+
     # 2. Check local disk cache (prevents redundant downloads across readers)
     safe_filename = storage_key.replace("/", "_").replace(":", "_")
     local_cache_dir = os.path.join(tempfile.gettempdir(), "spetro_books")

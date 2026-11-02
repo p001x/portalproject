@@ -5,10 +5,10 @@
     "author": "QGIS Association & Documentation Team",
     "description": "Comprehensive practical guide covering GIS interface, vector and raster layers, advanced cartography, spatial analysis algorithms, and Python console automation.",
     "pages": 384,
-    "original_filename": "QGIS_Training_Manual.pdf",
+    "original_filename": "qgis_training_manual.pdf",
     "storage_key": "academy/books/qgis_training_manual.pdf",
-    "volumeId": "https://docs.qgis.org/3.34/pdf/en/QGIS-334-UserGuide-en.pdf",
-    "file_size_mb": 24.5
+    "volumeId": "",
+    "file_size_mb": 0.01
   },
   {
     "id": "book-gee-handbook",
@@ -16,10 +16,10 @@
     "author": "David Saah, Nicholas Clinton et al.",
     "description": "The fundamental open-access handbook for planetary-scale Earth observation, time-series analysis, land-use classification, and water resources monitoring.",
     "pages": 412,
-    "original_filename": "Earth_Engine_Open_Handbook.pdf",
+    "original_filename": "earth_engine_handbook.pdf",
     "storage_key": "academy/books/earth_engine_handbook.pdf",
-    "volumeId": "https://www.eefabook.org/ee-book-full.pdf",
-    "file_size_mb": 38.2
+    "volumeId": "",
+    "file_size_mb": 0.01
   },
   {
     "id": "book-postgis-cheatsheet",
@@ -27,10 +27,10 @@
     "author": "Regina Obe & Leo Hsu",
     "description": "Practical Spatial SQL handbook covering geometries, spatial indexing (GIST/SP-GIST), ST_Buffer, ST_Intersection, routing, and raster SQL querying.",
     "pages": 180,
-    "original_filename": "PostGIS_Spatial_SQL_Guide.pdf",
+    "original_filename": "postgis_spatial_guide.pdf",
     "storage_key": "academy/books/postgis_spatial_guide.pdf",
-    "volumeId": "https://postgis.net/docs/postgis-3.4.pdf",
-    "file_size_mb": 14.8
+    "volumeId": "",
+    "file_size_mb": 0.01
   },
   {
     "id": "book-spetro-geospatial",
@@ -38,9 +38,9 @@
     "author": "SPETRO Geoportal Engineering Team",
     "description": "Step-by-step guide to using the SPETRO platform for flood risk modeling, habitat suitability, watershed delineation, and satellite index processing.",
     "pages": 128,
-    "original_filename": "SPETRO_Platform_Manual.pdf",
+    "original_filename": "spetro_manual.pdf",
     "storage_key": "academy/books/spetro_manual.pdf",
     "volumeId": "",
-    "file_size_mb": 8.5
+    "file_size_mb": 0.01
   }
 ]

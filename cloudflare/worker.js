@@ -774,22 +774,29 @@ export default {
 
       // Check Cloudflare Edge Cache for tiles, media, academy courses/books, and PDF downloads
       const cache = caches.default;
-      const isCacheableGet = (isTileRequest || isMediaRequest || isAcademyList || isBookDownload) && request.method === "GET";
+      const isCacheBust = url.searchParams.get("bust") === "1" || request.headers.get("Cache-Control") === "no-cache";
+      if (isCacheBust) {
+        ctx.waitUntil(cache.delete(request));
+      }
+      const isCacheableGet = (isTileRequest || isMediaRequest || isAcademyList || isBookDownload) && request.method === "GET" && !isCacheBust;
       if (isCacheableGet) {
         const cachedResponse = await cache.match(request);
         if (cachedResponse) {
-          const respHeaders = new Headers(cachedResponse.headers);
-          let tag = "HIT";
-          if (isTileRequest) tag = "TILE-HIT";
-          else if (isMediaRequest) tag = "MEDIA-HIT";
-          else if (isAcademyList) tag = "ACADEMY-HIT";
-          else if (isBookDownload) tag = "BOOK-HIT";
-          respHeaders.set("X-CF-Cache", tag);
-          return new Response(cachedResponse.body, {
-            status: cachedResponse.status,
-            statusText: cachedResponse.statusText,
-            headers: respHeaders,
-          });
+          const cl = cachedResponse.headers.get("Content-Length");
+          if (cl !== "0") {
+            const respHeaders = new Headers(cachedResponse.headers);
+            let tag = "HIT";
+            if (isTileRequest) tag = "TILE-HIT";
+            else if (isMediaRequest) tag = "MEDIA-HIT";
+            else if (isAcademyList) tag = "ACADEMY-HIT";
+            else if (isBookDownload) tag = "BOOK-HIT";
+            respHeaders.set("X-CF-Cache", tag);
+            return new Response(cachedResponse.body, {
+              status: cachedResponse.status,
+              statusText: cachedResponse.statusText,
+              headers: respHeaders,
+            });
+          }
         }
       }
 
