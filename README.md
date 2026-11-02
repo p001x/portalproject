@@ -53,3 +53,4 @@
 
 Developed by **SPETRO Systems**. All rights reserved.  
 For inquiries, documentation, and spatial data partnerships, visit [geoportal.spetro.workers.dev](https://geoportal.spetro.workers.dev).
+

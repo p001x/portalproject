@@ -13,7 +13,7 @@ import { pdfjs, Document, Page, Outline } from 'react-pdf';
 import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
 import 'react-pdf/dist/esm/Page/TextLayer.css';
 
-pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`;
 import { useAuth } from "@/hooks/use-auth";
 import { useNotifications } from "@/hooks/use-notifications";
 import { api } from "@/lib/api";
@@ -293,8 +293,28 @@ export function AcademyPage() {
 
   React.useEffect(() => {
     Promise.all([
-      api.academy.getCourses().then(data => setVideoCourses(data.courses)).catch(console.error),
-      api.academy.getBooks().then(data => setBooks(data.books)).catch(console.error)
+      api.academy.getCourses().then(data => {
+        if (data && Array.isArray(data.courses) && data.courses.length > 0) {
+          setVideoCourses(data.courses);
+          try { localStorage.setItem("spetro_cached_courses", JSON.stringify(data.courses)); } catch (_) {}
+        }
+      }).catch(() => {
+        try {
+          const cached = localStorage.getItem("spetro_cached_courses");
+          if (cached) setVideoCourses(JSON.parse(cached));
+        } catch (_) {}
+      }),
+      api.academy.getBooks().then(data => {
+        if (data && Array.isArray(data.books) && data.books.length > 0) {
+          setBooks(data.books);
+          try { localStorage.setItem("spetro_cached_books", JSON.stringify(data.books)); } catch (_) {}
+        }
+      }).catch(() => {
+        try {
+          const cached = localStorage.getItem("spetro_cached_books");
+          if (cached) setBooks(JSON.parse(cached));
+        } catch (_) {}
+      })
     ]).finally(() => setIsLoading(false));
   }, []);
 
@@ -541,7 +561,7 @@ export function AcademyPage() {
                       }}
                     >
                       <img 
-                        src={firstVideoId ? `https://img.youtube.com/vi/${firstVideoId}/hqdefault.jpg` : `https://images.unsplash.com/photo-1516321497487-e288fb19713f?w=600&q=80`} 
+                        src={(firstVideoId && firstVideoId.length === 11 && !firstVideoId.includes("/")) ? `https://img.youtube.com/vi/${firstVideoId}/hqdefault.jpg` : `https://images.unsplash.com/photo-1516321497487-e288fb19713f?w=600&q=80`} 
                         alt={course.title}
                         className="absolute inset-0 object-cover w-full h-full opacity-60 group-hover:opacity-40 transition-opacity duration-300"
                       />
@@ -693,22 +713,49 @@ export function AcademyPage() {
               <div className="flex flex-col md:flex-row h-full w-full">
                 {/* Left Column: Video & Info */}
                 <div className="flex-1 flex flex-col overflow-y-auto border-r">
-                  {/* YouTube Embed */}
+                  {/* Video Lesson Player (Supports both YouTube CDN & Native HTML5 video) */}
                   <div className="relative w-full bg-black shrink-0" style={{ paddingTop: '56.25%' /* 16:9 Aspect Ratio */ }}>
-                    {activeVideo?.youtubeId ? (
-                      <iframe
-                        key={activeVideo.youtubeId}
-                        className="absolute top-0 left-0 w-full h-full"
-                        src={`https://www.youtube.com/embed/${activeVideo.youtubeId}?autoplay=1`}
-                        title={activeVideo.title || selectedCourse.title}
-                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                        allowFullScreen
-                      />
-                    ) : (
-                      <div className="flex items-center justify-center w-full h-full text-muted-foreground">
-                        No video available for this lesson
-                      </div>
-                    )}
+                    {(() => {
+                      const vSrc = activeVideo?.videoUrl || activeVideo?.youtubeId || "";
+                      const isDirect = vSrc.startsWith("http") && (vSrc.includes(".mp4") || vSrc.includes(".webm") || vSrc.includes(".mov")) ||
+                                       vSrc.startsWith("/api/static/uploads/") ||
+                                       vSrc.startsWith("/static/uploads/") ||
+                                       vSrc.includes("/resolve/main/videos/");
+
+                      if (isDirect) {
+                        return (
+                          <video
+                            key={vSrc}
+                            className="absolute top-0 left-0 w-full h-full"
+                            controls
+                            autoPlay
+                            playsInline
+                            src={vSrc}
+                          >
+                            Your browser does not support the video tag.
+                          </video>
+                        );
+                      }
+
+                      if (activeVideo?.youtubeId) {
+                        return (
+                          <iframe
+                            key={activeVideo.youtubeId}
+                            className="absolute top-0 left-0 w-full h-full"
+                            src={`https://www.youtube.com/embed/${activeVideo.youtubeId}?autoplay=1`}
+                            title={activeVideo.title || selectedCourse.title}
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                            allowFullScreen
+                          />
+                        );
+                      }
+
+                      return (
+                        <div className="flex items-center justify-center w-full h-full text-muted-foreground">
+                          No video available for this lesson
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   {/* Video Lesson Navigation Bar */}

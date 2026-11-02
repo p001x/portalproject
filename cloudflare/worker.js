@@ -766,17 +766,25 @@ export default {
         }
       }
 
-      // Check if this is a raster map tile (GEE or Native COG) or static media (video / image)
+      // Check resource types for edge caching and proxying
       const isTileRequest = path.includes("/gee/tile/") || path.includes("/native/imagery/tiles/");
       const isMediaRequest = path.startsWith("/api/static/uploads/") || path.startsWith("/avatars/");
+      const isAcademyList = path === "/api/academy/courses" || path === "/api/academy/books";
+      const isBookDownload = path.startsWith("/api/academy/books/") && path.endsWith("/download");
 
-      // Check Cloudflare Edge Cache for tiles & media
+      // Check Cloudflare Edge Cache for tiles, media, academy courses/books, and PDF downloads
       const cache = caches.default;
-      if ((isTileRequest || isMediaRequest) && request.method === "GET") {
+      const isCacheableGet = (isTileRequest || isMediaRequest || isAcademyList || isBookDownload) && request.method === "GET";
+      if (isCacheableGet) {
         const cachedResponse = await cache.match(request);
         if (cachedResponse) {
           const respHeaders = new Headers(cachedResponse.headers);
-          respHeaders.set(isTileRequest ? "X-CF-Tile-Cache" : "X-CF-Media-Cache", "HIT");
+          let tag = "HIT";
+          if (isTileRequest) tag = "TILE-HIT";
+          else if (isMediaRequest) tag = "MEDIA-HIT";
+          else if (isAcademyList) tag = "ACADEMY-HIT";
+          else if (isBookDownload) tag = "BOOK-HIT";
+          respHeaders.set("X-CF-Cache", tag);
           return new Response(cachedResponse.body, {
             status: cachedResponse.status,
             statusText: cachedResponse.statusText,
@@ -929,6 +937,57 @@ export default {
           statusText: response.statusText,
           headers: responseHeaders,
         });
+      }
+
+      // Cache Academy Courses & Books lists at Cloudflare Edge for 5 minutes (stale-while-revalidate 10 min)
+      if (isAcademyList && response.status === 200 && request.method === "GET") {
+        const responseHeaders = new Headers(response.headers);
+        responseHeaders.set("Cache-Control", "public, max-age=60, s-maxage=300, stale-while-revalidate=600");
+        responseHeaders.set("X-CF-Cache", "ACADEMY-MISS");
+
+        const cachedCopy = new Response(response.clone().body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers: responseHeaders,
+        });
+        ctx.waitUntil(cache.put(request, cachedCopy));
+
+        return new Response(response.body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers: responseHeaders,
+        });
+      }
+
+      // Cache Academy Book PDF downloads at Cloudflare Edge for 30 days
+      if (isBookDownload && response.status === 200 && request.method === "GET") {
+        const responseHeaders = new Headers(response.headers);
+        responseHeaders.set("Cache-Control", "public, max-age=86400, s-maxage=2592000, stale-while-revalidate=86400");
+        responseHeaders.set("X-CF-Cache", "BOOK-MISS");
+
+        const cachedCopy = new Response(response.clone().body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers: responseHeaders,
+        });
+        ctx.waitUntil(cache.put(request, cachedCopy));
+
+        return new Response(response.body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers: responseHeaders,
+        });
+      }
+
+      // Invalidate Academy Edge Cache on Course / Book admin mutations
+      const isAcademyMutation = (path.startsWith("/api/academy/courses") || path.startsWith("/api/academy/books")) &&
+                                (request.method === "POST" || request.method === "PUT" || request.method === "DELETE");
+      if (isAcademyMutation && response.status < 400) {
+        try {
+          const coursesReq = new Request(new URL("/api/academy/courses", request.url));
+          const booksReq = new Request(new URL("/api/academy/books", request.url));
+          ctx.waitUntil(Promise.all([cache.delete(coursesReq), cache.delete(booksReq)]));
+        } catch (_) {}
       }
 
       return response;

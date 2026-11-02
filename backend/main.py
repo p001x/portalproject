@@ -608,11 +608,12 @@ def notify_new_course_endpoint(req: NewCourseNotification, background_tasks: Bac
 
 # ── Academy ──────────────────────────────────────────────────────────────────
 
-from storage.books_storage import load_books, process_and_store_book_upload, delete_book, get_book_bytes, update_book
+from storage.books_storage import load_books, process_and_store_book_upload, delete_book, get_book_bytes, update_book, stream_book_chunks
 from storage.courses_storage import load_courses, create_course, update_course, delete_course
 
 @app.get("/api/academy/books", tags=["academy"])
-def api_get_books():
+def api_get_books(response: Response):
+    response.headers["Cache-Control"] = "public, max-age=60, s-maxage=300, stale-while-revalidate=600"
     return {"books": load_books()}
 
 @app.post("/api/academy/books/upload", tags=["academy"])
@@ -673,11 +674,24 @@ def api_download_book(book_id: str):
         raise HTTPException(404, "Book not found")
         
     try:
-        file_bytes = get_book_bytes(target["storage_key"])
-        return Response(
-            file_bytes,
+        from fastapi.responses import StreamingResponse
+        storage_key = target.get("storage_key", "")
+        volume_id = target.get("volumeId", "")
+        filename = target.get("original_filename") or f"{target.get('title', 'document')}.pdf"
+
+        def chunk_generator():
+            for chunk in stream_book_chunks(storage_key=storage_key, fallback_url=volume_id):
+                yield chunk
+
+        return StreamingResponse(
+            chunk_generator(),
             media_type="application/pdf",
-            headers={"Content-Disposition": f'inline; filename="{target["original_filename"]}"'}
+            headers={
+                "Content-Disposition": f'inline; filename="{filename}"',
+                "Cache-Control": "public, max-age=86400, s-maxage=2592000, stale-while-revalidate=86400",
+                "Accept-Ranges": "bytes",
+                "X-Content-Type-Options": "nosniff"
+            }
         )
     except Exception as e:
         raise HTTPException(500, str(e))
@@ -727,7 +741,8 @@ def api_fetch_book_from_url(req: FetchBookRequest, user: dict = Depends(get_curr
         raise HTTPException(500, f"Failed to fetch book from URL: {str(e)}")
 
 @app.get("/api/academy/courses", tags=["academy"])
-def api_get_courses():
+def api_get_courses(response: Response):
+    response.headers["Cache-Control"] = "public, max-age=60, s-maxage=300, stale-while-revalidate=600"
     return {"courses": load_courses()}
 
 class CreateCourseRequest(BaseModel):
@@ -4295,8 +4310,7 @@ async def api_upload_community_image(file: UploadFile = File(...)):
 # Mount static files for community images
 static_upload_dir = os.path.join(os.path.dirname(__file__), "static", "uploads")
 os.makedirs(static_upload_dir, exist_ok=True)
-try:
-    
+
 @app.get("/api/static/uploads/{file_path:path}", tags=["media"])
 async def serve_static_upload_with_hf_fallback(file_path: str):
     """
@@ -4370,7 +4384,8 @@ def clear_cache_corridors(user: dict = Depends(get_current_user)):
                 pass
     return {"ok": True, "cleared_corridors": cleared}
 
-app.mount("/api/static/uploads", StaticFiles(directory=static_upload_dir), name="uploads")
+try:
+    app.mount("/api/static/uploads", StaticFiles(directory=static_upload_dir), name="uploads")
 except Exception as e:
     import logging
     logging.getLogger(__name__).warning(f"Failed to mount static uploads (aiofiles missing?): {e}")
