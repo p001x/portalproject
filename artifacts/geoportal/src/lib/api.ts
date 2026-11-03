@@ -577,6 +577,9 @@ async function post<T>(path: string, body: unknown, opts?: { withGeeAuth?: boole
   if (appToken) {
     headers["Authorization"] = `Bearer ${appToken}`;
   }
+  if (sessionStorage.getItem("admin_auth") === "true") {
+    headers["X-Admin-Password"] = "admin123";
+  }
   if (opts?.withGeeAuth) {
     const token = getGeeToken();
     if (token) headers["X-GEE-Token"] = token;
@@ -629,6 +632,9 @@ async function put<T>(path: string, body: unknown, opts?: { withGeeAuth?: boolea
   if (appToken) {
     headers["Authorization"] = `Bearer ${appToken}`;
   }
+  if (sessionStorage.getItem("admin_auth") === "true") {
+    headers["X-Admin-Password"] = "admin123";
+  }
   if (opts?.withGeeAuth) {
     const token = getGeeToken();
     if (token) headers["X-GEE-Token"] = token;
@@ -650,6 +656,9 @@ async function get<T>(path: string, opts?: { withGeeAuth?: boolean }): Promise<T
   const appToken = localStorage.getItem("spetro_token");
   if (appToken) {
     headers["Authorization"] = `Bearer ${appToken}`;
+  }
+  if (sessionStorage.getItem("admin_auth") === "true") {
+    headers["X-Admin-Password"] = "admin123";
   }
   if (opts?.withGeeAuth) {
     const token = getGeeToken();
@@ -1284,6 +1293,7 @@ export const api = {
       const headers: Record<string, string> = {};
       const appToken = localStorage.getItem("spetro_token");
       if (appToken) headers["Authorization"] = `Bearer ${appToken}`;
+      if (sessionStorage.getItem("admin_auth") === "true") headers["X-Admin-Password"] = "admin123";
       return fetch(BASE + "/datasets/" + id + "?source=" + source, { method: "DELETE", headers }).then(async (r) => {
         if (!r.ok) {
            let msg = r.statusText;

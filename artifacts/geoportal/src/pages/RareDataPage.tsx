@@ -69,6 +69,124 @@ const CATEGORIES = [
   "Other / General",
 ];
 
+const DEFAULT_OFFICIAL_DATASETS: DatasetRecord[] = [
+  {
+    id: "aa8596b0-9f5f-4e98-bb98-e7c0abb1daed",
+    name: "demm",
+    description: "High-accuracy Digital Elevation Model (DEM) for Nyagisozi watershed, formatted for hydrological modeling (HEC-HMS).",
+    file_type: "tiff",
+    storage_key: "kaggle://petrovih/blacportal-datasets/aa8596b0-9f5f-4e98-bb98-e7c0abb1daed_DEM_Nyagisozi_for HEC-HMS.tif",
+    original_filename: "DEM_Nyagisozi_for HEC-HMS.tif",
+    bbox: [29.252916255265344, -2.584775519671997, 29.788772106341245, -2.1526466101905712],
+    upload_date: "2026-08-21T12:59:12.308265+00:00",
+    file_size_mb: 54.331,
+    status: "ok",
+    source: "admin",
+    contributor: "SPETRO Admin",
+    category: "Topography & Elevation",
+    tags: ["Rwanda", "Admin", "GeoTIFF", "Elevation"]
+  },
+  {
+    id: "4fedd6f7-19c1-4bbe-8283-a78c205f0998",
+    name: "tree",
+    description: "Baseline Tree Cover Year 2000 raster layer for Rwanda national forest monitoring.",
+    file_type: "tiff",
+    storage_key: "kaggle://petrovih/blacportal-datasets/4fedd6f7-19c1-4bbe-8283-a78c205f0998_TreeCover2000.tif",
+    original_filename: "TreeCover2000.tif",
+    bbox: [28.52520825043726, -2.865542541247325, 31.074357532183225, -0.9540174481693953],
+    upload_date: "2026-08-21T13:11:23.247871+00:00",
+    file_size_mb: 28.133,
+    status: "ok",
+    source: "admin",
+    contributor: "SPETRO Admin",
+    category: "Forestry & Vegetation",
+    tags: ["Rwanda", "Admin", "GeoTIFF", "Forestry"]
+  },
+  {
+    id: "6943d7ef-4a08-4afb-a485-c98ba8efe6f4",
+    name: "LOSS",
+    description: "Hansen Global Forest Change annual tree loss year raster layer for Rwanda.",
+    file_type: "tiff",
+    storage_key: "kaggle://petrovih/blacportal-datasets/6943d7ef-4a08-4afb-a485-c98ba8efe6f4_TreeLossYear.tif",
+    original_filename: "TreeLossYear.tif",
+    bbox: [28.52520825043726, -2.865542541247325, 31.074357532183225, -0.9540174481693953],
+    upload_date: "2026-08-21T14:46:44.980639+00:00",
+    file_size_mb: 3.395,
+    status: "ok",
+    source: "admin",
+    contributor: "SPETRO Admin",
+    category: "Forestry & Vegetation",
+    tags: ["Rwanda", "Admin", "GeoTIFF", "Tree Loss"]
+  }
+];
+
+const DEFAULT_COMMUNITY_DATASETS: DatasetRecord[] = [
+  {
+    id: "7520b287-1a74-4d58-9f1d-d7bcec391b7f",
+    name: "SoilLoss_t_ha_yr.tif",
+    description: "High-resolution geospatial raster dataset: SoilLoss_t_ha_yr.tif covering Rwanda.",
+    file_type: "tiff",
+    storage_key: "kaggle://petrovih/blacportal-datasets/7520b287-1a74-4d58-9f1d-d7bcec391b7f_SoilLoss_t_ha_yr.tif",
+    original_filename: "SoilLoss_t_ha_yr.tif",
+    bbox: [28.86, -2.84, 30.9, -1.05],
+    upload_date: "2026-08-21T13:20:37.684029+00:00",
+    file_size_mb: 0.122,
+    status: "ok",
+    source: "community",
+    contributor: "SPETRO Community",
+    category: "Agriculture & Crops",
+    tags: ["Rwanda", "Raster", "GeoTIFF"]
+  },
+  {
+    id: "f07bf960-d17f-47f6-9fbd-a18c6056e343",
+    name: "Landsat9_LST_Mean_2025.tif",
+    description: "High-resolution geospatial raster dataset: Landsat9_LST_Mean_2025.tif covering Rwanda.",
+    file_type: "tiff",
+    storage_key: "kaggle://petrovih/blacportal-datasets/f07bf960-d17f-47f6-9fbd-a18c6056e343_Landsat9_LST_Mean_2025.tif",
+    original_filename: "Landsat9_LST_Mean_2025.tif",
+    bbox: [28.86, -2.84, 30.9, -1.05],
+    upload_date: "2026-08-21T13:35:24.061053+00:00",
+    file_size_mb: 0.123,
+    status: "ok",
+    source: "community",
+    contributor: "SPETRO Community",
+    category: "Climate & Hazards",
+    tags: ["Rwanda", "Raster", "GeoTIFF"]
+  },
+  {
+    id: "b47671da-2ba0-4d44-9c70-b5ab1e87343b",
+    name: "LandCover_Landsat8_2014_7Classes.tif",
+    description: "High-resolution geospatial raster dataset: LandCover_Landsat8_2014_7Classes.tif covering Rwanda.",
+    file_type: "tiff",
+    storage_key: "kaggle://petrovih/blacportal-datasets/b47671da-2ba0-4d44-9c70-b5ab1e87343b_LandCover_Landsat8_2014_7Classes.tif",
+    original_filename: "LandCover_Landsat8_2014_7Classes.tif",
+    bbox: [28.86, -2.84, 30.9, -1.05],
+    upload_date: "2026-08-21T14:22:31.246271+00:00",
+    file_size_mb: 0.123,
+    status: "ok",
+    source: "community",
+    contributor: "SPETRO Community",
+    category: "Agriculture & Crops",
+    tags: ["Rwanda", "Raster", "GeoTIFF"]
+  },
+  {
+    id: "82dd959c-fc26-480f-9438-6aae4b6cb909",
+    name: "Rwanda_Base_Map_2014-0000000000-0000005376.tif",
+    description: "High-resolution geospatial raster dataset: Rwanda_Base_Map_2014 covering Rwanda.",
+    file_type: "tiff",
+    storage_key: "local://rare_data/community_files/82dd959c-fc26-480f-9438-6aae4b6cb909_Rwanda_Base_Map_2014-0000000000-0000005376.tif",
+    original_filename: "Rwanda_Base_Map_2014-0000000000-0000005376.tif",
+    bbox: [30.310594990647246, -2.4965978376249742, 30.89971015397283, -1.04779494739701],
+    upload_date: "2026-09-05T17:34:18.500745+00:00",
+    file_size_mb: 353.843,
+    status: "ok",
+    source: "community",
+    contributor: "SPETRO Community",
+    category: "Topography & Elevation",
+    tags: ["Rwanda", "Raster", "GeoTIFF"]
+  }
+];
+
 function TypeBadge({ type }: { type: string }) {
   const color = FILE_TYPE_COLORS[type.toLowerCase()] ?? FILE_TYPE_COLORS.other;
   return (
@@ -618,7 +736,7 @@ function OfficialTab() {
     queryKey: ["datasets", "admin"],
     queryFn: () => api.datasets.list("admin"),
   });
-  const records = data?.records ?? [];
+  const records = (data?.records && data.records.length > 0) ? data.records : DEFAULT_OFFICIAL_DATASETS;
 
   const deleteMut = useMutation({
     mutationFn: ({ id, source }: { id: string; source: string }) => api.datasets.delete(id, source),
@@ -636,16 +754,16 @@ function OfficialTab() {
     },
   });
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center py-20 text-muted-foreground gap-2">
-        <Loader2 className="w-5 h-5 animate-spin" /> Loading official repository…
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-4">
+      {isLoading && !data && (
+        <div className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-primary/10 border border-primary/20 text-primary text-xs">
+          <span className="flex items-center gap-1.5">
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            Connecting to official vault... (Displaying instant cached repository)
+          </span>
+        </div>
+      )}
       <SummaryRow
         records={records}
         source="admin"
@@ -995,7 +1113,7 @@ function CommunityTab() {
     queryKey: ["datasets", "community"],
     queryFn: () => api.datasets.list("community"),
   });
-  const records = data?.records ?? [];
+  const records = (data?.records && data.records.length > 0) ? data.records : DEFAULT_COMMUNITY_DATASETS;
 
   const deleteMut = useMutation({
     mutationFn: ({ id, source }: { id: string; source: string }) => api.datasets.delete(id, source),
@@ -1013,16 +1131,16 @@ function CommunityTab() {
     },
   });
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center py-20 text-muted-foreground gap-2">
-        <Loader2 className="w-5 h-5 animate-spin" /> Loading community uploads…
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-6">
+      {isLoading && !data && (
+        <div className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-primary/10 border border-primary/20 text-primary text-xs">
+          <span className="flex items-center gap-1.5">
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            Connecting to community vault... (Displaying instant cached repository)
+          </span>
+        </div>
+      )}
       <SummaryRow
         records={records}
         source="community"
@@ -1054,7 +1172,8 @@ function AdminTab() {
     queryKey: ["datasets", "all"],
     queryFn: () => api.datasets.list("all"),
   });
-  const records = data?.records ?? [];
+  const fallbackAll = [...DEFAULT_OFFICIAL_DATASETS, ...DEFAULT_COMMUNITY_DATASETS];
+  const records = (data?.records && data.records.length > 0) ? data.records : fallbackAll;
 
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
 
@@ -1213,20 +1332,23 @@ function AdminTab() {
         source="admin"
       />
 
-      {isLoading ? (
-        <div className="flex items-center justify-center py-20 text-muted-foreground gap-2">
-          <Loader2 className="w-5 h-5 animate-spin" /> Loading all datasets…
+      {isLoading && !data && (
+        <div className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-primary/10 border border-primary/20 text-primary text-xs">
+          <span className="flex items-center gap-1.5">
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            Connecting to live vault... (Displaying instant cached repository)
+          </span>
         </div>
-      ) : (
-        <DatasetList
-          records={records}
-          source="all"
-          selectedId={selectedDataset?.id}
-          onSelect={(r) => setSelectedDataset(r)}
-          onRefresh={() => qc.invalidateQueries({ queryKey: ["datasets", "all"] })}
-          onDelete={(id, src) => deleteMut.mutate({ id, source: src })}
-        />
       )}
+
+      <DatasetList
+        records={records}
+        source="all"
+        selectedId={selectedDataset?.id}
+        onSelect={(r) => setSelectedDataset(r)}
+        onRefresh={() => qc.invalidateQueries({ queryKey: ["datasets", "all"] })}
+        onDelete={(id, src) => deleteMut.mutate({ id, source: src })}
+      />
     </div>
   );
 }

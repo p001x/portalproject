@@ -281,7 +281,7 @@ export function DashboardPage() {
     const headers = ["ID", "Name", "Email", "Role", "Joined Date", "Last Active", "Total Actions", "Favorite Tool", "Status"];
     const rows = usersData.map(u => [
       u.id,
-      `"${u.name.replace(/"/g, '""')}"`,
+      `"${(u.name || u.email || 'User').replace(/"/g, '""')}"`,
       u.email,
       u.role,
       u.created_at,
@@ -347,14 +347,17 @@ export function DashboardPage() {
 
   // Filter users list
   const filteredUsers = (usersData || []).filter((u) => {
+    if (!u) return false;
+    const name = u.name || u.email?.split("@")[0] || "User";
+    const email = u.email || "";
     const matchesSearch = 
-      u.name.toLowerCase().includes(userSearch.toLowerCase()) || 
-      u.email.toLowerCase().includes(userSearch.toLowerCase());
+      name.toLowerCase().includes(userSearch.toLowerCase()) || 
+      email.toLowerCase().includes(userSearch.toLowerCase());
     
     if (!matchesSearch) return false;
 
     if (userStatusFilter === "active") return !u.is_blocked;
-    if (userStatusFilter === "blocked") return u.is_blocked;
+    if (userStatusFilter === "blocked") return !!u.is_blocked;
     if (userStatusFilter === "admins") return u.role === "admin";
     return true;
   });
@@ -942,11 +945,11 @@ export function DashboardPage() {
                               <Avatar className="h-8 w-8">
                                 <AvatarImage src={u.profile_picture || undefined} />
                                 <AvatarFallback className="text-xs bg-primary/10 text-primary font-bold">
-                                  {u.name.substring(0, 2).toUpperCase()}
+                                  {(u.name || u.email || "U").substring(0, 2).toUpperCase()}
                                 </AvatarFallback>
                               </Avatar>
                               <div>
-                                <p className="font-semibold text-sm leading-none">{u.name}</p>
+                                <p className="font-semibold text-sm leading-none">{u.name || u.email?.split("@")[0] || "User"}</p>
                                 <p className="text-xs text-muted-foreground mt-1">{u.email}</p>
                               </div>
                             </div>
@@ -1094,7 +1097,7 @@ export function DashboardPage() {
                   <SelectContent>
                     {(usersData || []).map((u) => (
                       <SelectItem key={u.email} value={u.email}>
-                        {u.name} ({u.email})
+                        {u.name || u.email?.split("@")[0] || "User"} ({u.email})
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -1122,12 +1125,12 @@ export function DashboardPage() {
                         <Avatar className="h-14 w-14 border-2 border-primary/20">
                           <AvatarImage src={userDetail.profile_picture || undefined} />
                           <AvatarFallback className="text-lg font-bold bg-primary/10 text-primary">
-                            {userDetail.name.substring(0, 2).toUpperCase()}
+                            {(userDetail.name || userDetail.email || "U").substring(0, 2).toUpperCase()}
                           </AvatarFallback>
                         </Avatar>
                         <div>
                           <div className="flex items-center gap-2">
-                            <h2 className="text-xl font-bold">{userDetail.name}</h2>
+                            <h2 className="text-xl font-bold">{userDetail.name || userDetail.email}</h2>
                             <Badge variant={userDetail.role === "admin" ? "default" : "outline"} className="text-xs">
                               {userDetail.role}
                             </Badge>
@@ -1296,7 +1299,7 @@ export function DashboardPage() {
                         <TableRow key={appeal.id}>
                           <TableCell>
                             <div>
-                              <p className="font-semibold text-xs">{appeal.user_name}</p>
+                              <p className="font-semibold text-xs">{appeal.user_name || appeal.email || "User"}</p>
                               <p className="text-[11px] text-muted-foreground">{appeal.email}</p>
                             </div>
                           </TableCell>
