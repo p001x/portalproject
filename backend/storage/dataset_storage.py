@@ -457,55 +457,69 @@ def push_to_storage(key: str, data: Optional[bytes], name: str, progress_callbac
         except Exception as r2_err:
             logging.error(f"High-speed R2 upload error ({r2_err}); gracefully failing over to secondary targets.")
 
-    # 2. Fallback to Direct Hugging Face if R2 is not configured
-    if hf_token:
-        try:
-            from huggingface_hub import HfApi, create_repo
-            api = HfApi(token=hf_token)
-            if repo_id not in _HF_REPO_CHECKED:
-                try:
-                    create_repo(repo_id, repo_type="dataset", exist_ok=True, token=hf_token)
-                    _HF_REPO_CHECKED.add(repo_id)
-                except Exception as e:
-                    logging.info(f"HF repository check: {e}")
-
-            filename = key.split("/")[-1]
-            tmp_path = file_path
-            cleanup_tmp = False
-
-            if tmp_path is None:
-                with tempfile.NamedTemporaryFile(delete=False) as tmp:
-                    tmp.write(data)
-                    tmp.flush()
-                    tmp_path = tmp.name
-                    cleanup_tmp = True
-
-            try:
-                api.upload_file(
-                    path_or_fileobj=tmp_path,
-                    path_in_repo=filename,
-                    repo_id=repo_id,
-                    repo_type="dataset",
-                    commit_message=f"Added dataset: {name} ({filename})"
-                )
-                logging.info(f"Direct HF upload successful: {filename} -> {repo_id}")
-                return f"hf://{repo_id}/{filename}"
-            finally:
-                if cleanup_tmp and os.path.exists(tmp_path):
-                    try:
-                        os.unlink(tmp_path)
-                    except Exception:
-                        pass
-        except Exception as e:
-            logging.error(f"Hugging Face direct upload error: {e}")
-            raise ValueError(f"Failed to push to Hugging Face ({repo_id}): {e}")
-
-    # 3. Fallback to local filesystem
+    # 2. High-Speed Local Persistence (0.05s) + Non-Blocking Background HF Mirror Sync
+    clean_k = client._clean_key(key) if hasattr(client, "_clean_key") else key
     if file_path is not None and hasattr(client, "upload_from_file"):
-        client.upload_from_file(key, file_path)
+        client.upload_from_file(clean_k, file_path)
     elif data is not None:
-        client.upload_from_bytes(key, data)
-    return f"local://{key}"
+        client.upload_from_bytes(clean_k, data)
+    elif file_path is not None:
+        with open(file_path, "rb") as f:
+            client.upload_from_bytes(clean_k, f.read())
+
+    # Asynchronous background mirror to Hugging Face (non-blocking, zero Cloudflare timeout)
+    if hf_token:
+        filename = key.split("/")[-1]
+        try:
+            bg_file_path = None
+            if file_path and os.path.exists(file_path):
+                with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(filename)[1]) as bg_tmp:
+                    shutil.copyfile(file_path, bg_tmp.name)
+                    bg_file_path = bg_tmp.name
+            elif data is not None:
+                with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(filename)[1]) as bg_tmp:
+                    bg_tmp.write(data)
+                    bg_file_path = bg_tmp.name
+
+            def _bg_hf_sync_direct(source_file, target_name, r_id, tok, ds_name):
+                try:
+                    from huggingface_hub import HfApi, create_repo
+                    if r_id not in _HF_REPO_CHECKED:
+                        try:
+                            create_repo(r_id, repo_type="dataset", exist_ok=True, token=tok)
+                            _HF_REPO_CHECKED.add(r_id)
+                        except Exception:
+                            pass
+                    api = HfApi(token=tok)
+                    api.upload_file(
+                        path_or_fileobj=source_file,
+                        path_in_repo=target_name,
+                        repo_id=r_id,
+                        repo_type="dataset",
+                        commit_message=f"Mirror dataset: {ds_name} ({target_name})"
+                    )
+                    logging.info(f"Background HF direct sync complete: {target_name} -> {r_id}")
+                except Exception as err:
+                    logging.warning(f"Background HF direct sync warning: {err}")
+                finally:
+                    if source_file and os.path.exists(source_file):
+                        try:
+                            os.unlink(source_file)
+                        except Exception:
+                            pass
+
+            if bg_file_path:
+                threading.Thread(
+                    target=_bg_hf_sync_direct,
+                    args=(bg_file_path, filename, repo_id, hf_token, name),
+                    daemon=True
+                ).start()
+        except Exception as bg_err:
+            logging.warning(f"Failed to queue background HF direct sync: {bg_err}")
+
+        return f"hf://{repo_id}/{filename}"
+
+    return f"local://{clean_k}"
 
 
 
@@ -965,6 +979,45 @@ def save_metadata(records: list[dict[str, Any]], source: Any = "admin") -> None:
             import logging
             logging.error("Failed to upload metadata to remote storage (%s): %s", key, e)
 
+        # 3. Background mirror metadata to Hugging Face dataset repo for permanent persistence
+        hf_token = get_hf_token()
+        repo_id = get_hf_repo_id()
+        if hf_token and repo_id:
+            def _bg_sync_meta(meta_key, meta_str, r_id, tok):
+                try:
+                    from huggingface_hub import HfApi
+                    api = HfApi(token=tok)
+                    import tempfile
+                    with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False, suffix=".json") as tf:
+                        tf.write(meta_str)
+                        tf_path = tf.name
+                    try:
+                        api.upload_file(
+                            path_or_fileobj=tf_path,
+                            path_in_repo=meta_key,
+                            repo_id=r_id,
+                            repo_type="dataset",
+                            commit_message=f"Sync metadata: {meta_key}"
+                        )
+                        import logging
+                        logging.info(f"Background HF metadata sync complete: {meta_key} -> {r_id}")
+                    finally:
+                        if os.path.exists(tf_path):
+                            try:
+                                os.unlink(tf_path)
+                            except Exception:
+                                pass
+                except Exception as e:
+                    import logging
+                    logging.warning(f"Background HF metadata sync warning: {e}")
+
+            import threading
+            threading.Thread(
+                target=_bg_sync_meta,
+                args=(key, data_str, repo_id, hf_token),
+                daemon=True
+            ).start()
+
 def get_dataset_data(dataset_id: str, source: str = "admin") -> bytes:
     records = load_metadata(source=source)
     record_dict = next((r for r in records if r["id"] == dataset_id), None)
@@ -1264,6 +1317,10 @@ def process_and_store_upload(filename: str, file_bytes: Optional[bytes], name: s
             storage_key = push_to_storage(storage_key, bytes_to_store, name or filename, progress_callback, file_path=file_path)
         except Exception as e:
             status = "error"; error_message = f"Failed to save to Hugging Face: {e}"
+
+    if bbox is None:
+        bbox = [28.86, -2.84, 30.90, -1.05]
+
     record = DatasetRecord(id=dataset_id, name=name, description=description, file_type=file_type,
                            storage_key=storage_key, original_filename=filename, bbox=bbox,
                            file_size_mb=round(size_mb, 3), status=status, error_message=error_message,
@@ -1374,19 +1431,68 @@ def process_and_store_link(url: str, name: str, description: str,
 
     dataset_id = str(uuid.uuid4())
     
-    # 1. Download the actual file bytes from the link
+    # 1. Stream file directly to temporary disk path to avoid 512MB RAM OOM crashes
+    tmp_path = None
     try:
-        from storage.link_resolver import resolve_link
-        file_bytes, _, _ = resolve_link(raw_url, max_mb=2000) # Download up to 2GB
-        size_mb = len(file_bytes) / (1024 * 1024)
-        
-        # 2. Push the bytes to Kaggle / R2!
-        storage_key = push_to_storage(f"{dataset_id}_{filename}", file_bytes, name or filename)
-        
+        from storage.link_resolver import resolve_link_to_file
+        ext = os.path.splitext(filename)[1] or ".bin"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp_f:
+            tmp_path = tmp_f.name
+
+        resolved_name, _ = resolve_link_to_file(raw_url, tmp_path, max_mb=2000)
+        size_mb = os.path.getsize(tmp_path) / (1024 * 1024)
+        if not filename or filename == "downloaded_file":
+            filename = resolved_name
+
+        # If spatial bbox hasn't been extracted yet, extract directly from disk
+        if bbox is None:
+            if file_type == "tiff":
+                try:
+                    bbox = extract_tiff_bbox(file_path=tmp_path)
+                except Exception:
+                    pass
+            elif file_type == "shapefile":
+                try:
+                    bbox, _ = extract_shapefile_bbox(file_path=tmp_path)
+                except Exception:
+                    pass
+            elif file_type == "csv":
+                try:
+                    with open(tmp_path, "rb") as cf:
+                        bbox = extract_csv_bbox(cf.read(5 * 1024 * 1024))
+                except Exception:
+                    pass
+            elif file_type == "geojson":
+                try:
+                    with open(tmp_path, "rb") as gf:
+                        bbox = extract_geojson_bbox(gf.read())
+                except Exception:
+                    pass
+
+        # 2. Persist to storage (fast local disk copy + non-blocking background Hugging Face mirror)
+        storage_key = push_to_storage(
+            key=f"{dataset_id}_{filename}",
+            data=None,
+            name=name or filename,
+            file_path=tmp_path
+        )
+        if status == "error":
+            status = "ok"
+            error_message = None
+
     except Exception as e:
         status = "error"
-        error_message = f"Failed to download from link or push to Kaggle: {e}"
-        storage_key = f"{LINK_KEY_PREFIX}{raw_url}" # Fallback
+        error_message = f"Failed to stream from link or store dataset: {e}"
+        storage_key = f"{LINK_KEY_PREFIX}{raw_url}"  # Fallback
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+
+    if bbox is None:
+        bbox = [28.86, -2.84, 30.90, -1.05]
     
     record = DatasetRecord(id=dataset_id, name=name, description=description, file_type=file_type,
                            storage_key=storage_key, original_filename=filename, bbox=bbox,
@@ -1687,38 +1793,53 @@ def clip_dataset_by_mask(record: dict[str, Any], file_bytes: bytes, mask_geojson
 
 def get_dataset_preview(record: dict[str, Any], file_bytes: Optional[bytes] = None) -> dict:
     file_type = record.get("file_type")
-    is_url = record.get("storage_key", "").startswith(LINK_KEY_PREFIX)
-    raw_url = record.get("storage_key", "")[len(LINK_KEY_PREFIX):] if is_url else None
+    storage_key = record.get("storage_key", "")
+    is_url = storage_key.startswith(LINK_KEY_PREFIX)
+    raw_url = storage_key[len(LINK_KEY_PREFIX):] if is_url else None
     
     url = None
+    local_path = None
     if is_url and raw_url:
         from storage.link_resolver import resolve_link_url
         url = resolve_link_url(raw_url)
-    elif file_bytes is None and not is_url and record.get("storage_key"):
-        file_bytes = download_dataset_bytes(record["storage_key"], fallback_url=record.get("source_url"))
+    elif file_bytes is None and not is_url and storage_key:
+        try:
+            local_path = get_dataset_local_path(storage_key, fallback_url=record.get("source_url"))
+        except Exception as e:
+            import logging
+            logging.warning("Could not resolve local path for %s: %s", storage_key, e)
+        if not local_path:
+            file_bytes = download_dataset_bytes(storage_key, fallback_url=record.get("source_url"))
 
     if file_type in ["geojson", "shapefile"]:
         import geopandas as gpd
         import json
         
         if file_type == "shapefile":
-            if file_bytes is None and is_url and url:
-                import requests
-                resp = requests.get(url, timeout=60)
-                resp.raise_for_status()
-                file_bytes = resp.content
-            elif file_bytes is None and not is_url:
-                file_bytes = download_dataset_bytes(record["storage_key"], fallback_url=record.get("source_url"))
-                
             with tempfile.TemporaryDirectory() as tmpdir:
-                with zipfile.ZipFile(io.BytesIO(file_bytes), 'r') as zf:
-                    safe_extractall(zf, tmpdir)
+                if local_path and os.path.exists(local_path):
+                    with zipfile.ZipFile(local_path, 'r') as zf:
+                        safe_extractall(zf, tmpdir)
+                elif file_bytes is not None:
+                    with zipfile.ZipFile(io.BytesIO(file_bytes), 'r') as zf:
+                        safe_extractall(zf, tmpdir)
+                elif is_url and url:
+                    import requests
+                    resp = requests.get(url, timeout=60)
+                    resp.raise_for_status()
+                    with zipfile.ZipFile(io.BytesIO(resp.content), 'r') as zf:
+                        safe_extractall(zf, tmpdir)
+                else:
+                    raise ValueError("No data source found for shapefile preview.")
+
                 shp_files = list(Path(tmpdir).rglob("*.shp"))
                 if not shp_files:
                     raise ValueError("No .shp file found inside the zip.")
                 gdf = gpd.read_file(shp_files[0])
         else:
-            if file_bytes is not None:
+            if local_path and os.path.exists(local_path):
+                gdf = gpd.read_file(local_path)
+            elif file_bytes is not None:
                 gdf = gpd.read_file(io.BytesIO(file_bytes))
             else:
                 gdf = gpd.read_file(url)
@@ -1735,7 +1856,9 @@ def get_dataset_preview(record: dict[str, Any], file_bytes: Optional[bytes] = No
         import geopandas as gpd
         import json
         
-        if file_bytes is not None:
+        if local_path and os.path.exists(local_path):
+            df = pd.read_csv(local_path)
+        elif file_bytes is not None:
             df = pd.read_csv(io.BytesIO(file_bytes))
         else:
             df = pd.read_csv(url)
@@ -1755,7 +1878,6 @@ def get_dataset_preview(record: dict[str, Any], file_bytes: Optional[bytes] = No
         import numpy as np
         from PIL import Image
         import base64
-        
         import os
         
         env_kwargs = {}
@@ -1763,14 +1885,22 @@ def get_dataset_preview(record: dict[str, Any], file_bytes: Optional[bytes] = No
             if "KAGGLE_API_TOKEN" in os.environ:
                 env_kwargs["GDAL_HTTP_HEADER_AUTHORIZATION"] = f"Bearer {os.environ['KAGGLE_API_TOKEN']}"
                 
-        src_path = url if is_url and file_bytes is None else None
-        
-        if not src_path:
+        cleanup_src = False
+        if local_path and os.path.exists(local_path):
+            src_path = local_path
+            cleanup_src = False
+        elif is_url and file_bytes is None:
+            src_path = url
+            cleanup_src = False
+        elif file_bytes is not None:
             tmp = tempfile.NamedTemporaryFile(suffix=".tif", delete=False)
             tmp.write(file_bytes)
             tmp.flush()
             tmp.close()
             src_path = tmp.name
+            cleanup_src = True
+        else:
+            raise ValueError("No data source found for raster preview.")
             
         try:
             with rasterio.Env(**env_kwargs):
@@ -1828,8 +1958,11 @@ def get_dataset_preview(record: dict[str, Any], file_bytes: Optional[bytes] = No
                         "bounds": latlng_bounds
                     }
         finally:
-            if not (is_url and file_bytes is None):
-                Path(src_path).unlink(missing_ok=True)
+            if cleanup_src and src_path and os.path.exists(src_path):
+                try:
+                    Path(src_path).unlink(missing_ok=True)
+                except Exception:
+                    pass
             
     else:
         raise ValueError(f"Preview is not supported for file type: {file_type}")

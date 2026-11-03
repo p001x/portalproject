@@ -276,11 +276,12 @@ def _drive_confirm_get(session: requests.Session, url: str, params: dict) -> req
     return resp
 
 
-def _fetch_drive(url: str, max_mb: float, progress_callback=None) -> tuple[bytes, str, str]:
+def _fetch_drive(url: str, max_mb: float, progress_callback=None, output_path: str | None = None) -> tuple[bytes, str, str]:
     """Google Drive file shared as 'Anyone with the link'.
 
     Handles large-file virus-scan interstitials across both modern POST/GET form flows
     on drive.usercontent.google.com and cookie/token confirmations.
+    Streams directly to disk if output_path is provided to avoid memory spikes.
     """
     file_id = _drive_file_id(url)
     if not file_id:
@@ -373,6 +374,10 @@ def _fetch_drive(url: str, max_mb: float, progress_callback=None) -> tuple[bytes
             "Please check the sharing settings on Google Drive and try again."
         )
 
+    if output_path:
+        _stream_to_file(resp, output_path, max_mb, progress_callback=progress_callback)
+        return b"", _filename_from_response(resp, url), resp.url or url
+
     file_bytes = _read_capped(resp, max_mb, progress_callback=progress_callback)
     return file_bytes, _filename_from_response(resp, url), resp.url or url
 
@@ -389,7 +394,7 @@ def _fetch_ftp(url: str, max_mb: float, progress_callback=None) -> tuple[bytes, 
     return data, filename, url
 
 
-def _fetch_generic(url: str, max_mb: float, progress_callback=None) -> tuple[bytes, str, str]:
+def _fetch_generic(url: str, max_mb: float, progress_callback=None, output_path: str | None = None) -> tuple[bytes, str, str]:
     headers = {}
     if "kaggle.com" in url:
         import os
@@ -402,6 +407,10 @@ def _fetch_generic(url: str, max_mb: float, progress_callback=None) -> tuple[byt
         resp.raise_for_status()
     except requests.RequestException as e:
         raise LinkResolutionError(f"Could not reach that link: {e}") from e
+    if output_path:
+        _stream_to_file(resp, output_path, max_mb, progress_callback=progress_callback)
+        return b"", _filename_from_response(resp, url), resp.url or url
+
     file_bytes = _read_capped(resp, max_mb, progress_callback=progress_callback)
     return file_bytes, _filename_from_response(resp, url), resp.url or url
 
@@ -518,9 +527,7 @@ def resolve_link_to_file(url: str, output_path: str, max_mb: float = 50000, prog
     url = _rewrite_known_hosts(url)
 
     if _drive_file_id(url):
-        file_bytes, name, final_url = _fetch_drive(url, max_mb, progress_callback)
-        with open(output_path, "wb") as f:
-            f.write(file_bytes)
+        _, name, final_url = _fetch_drive(url, max_mb, progress_callback, output_path=output_path)
         return name, final_url
         
     if url.lower().startswith("ftp://"):

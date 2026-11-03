@@ -823,6 +823,12 @@ function ContributePanel({
                 }}
                 className="w-full text-xs file:mr-2 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer"
               />
+              {file && file.size > 95 * 1024 * 1024 && (
+                <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-[11px] leading-relaxed">
+                  <strong className="font-semibold block mb-0.5">⚠️ Large file detected ({(file.size / (1024 * 1024)).toFixed(1)} MB)</strong>
+                  Cloudflare edge proxy limits direct browser uploads to 100 MB. To publish files larger than 100 MB without limits, please use <strong>Option 2: Link from GitHub / Remote URL</strong> on the right.
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -873,7 +879,7 @@ function ContributePanel({
 
             <Button
               onClick={() => uploadMut.mutate()}
-              disabled={uploadMut.isPending || !file || !uploadName}
+              disabled={uploadMut.isPending || !file || !uploadName || (file ? file.size > 100 * 1024 * 1024 : false)}
               className="w-full gap-2 text-xs h-8.5 mt-2 cursor-pointer"
             >
               {uploadMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
@@ -1121,6 +1127,11 @@ function AdminTab() {
               }}
               className="w-full text-xs file:mr-2 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer"
             />
+            {file && file.size > 95 * 1024 * 1024 && (
+              <div className="p-2 rounded bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-[10px] mt-1">
+                ⚠️ File is {(file.size / (1024 * 1024)).toFixed(1)} MB (Cloudflare edge limit is 100 MB). Use the remote link option for files &gt; 100 MB.
+              </div>
+            )}
           </div>
 
           <div className="space-y-1">
@@ -1161,7 +1172,7 @@ function AdminTab() {
 
         <Button
           onClick={() => uploadMut.mutate()}
-          disabled={uploadMut.isPending || !file || !uploadName}
+          disabled={uploadMut.isPending || !file || !uploadName || (file ? file.size > 100 * 1024 * 1024 : false)}
           className="gap-2 text-xs h-8 mt-1"
         >
           {uploadMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
