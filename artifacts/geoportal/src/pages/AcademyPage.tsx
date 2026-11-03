@@ -19,6 +19,74 @@ import { useNotifications } from "@/hooks/use-notifications";
 import { api } from "@/lib/api";
 import { BASE, fetchAITakeaways } from "@/lib/api";
 
+export const DEFAULT_ACADEMY_COURSES = [
+  {
+    id: "c1",
+    title: "QGIS Full Course for Beginners",
+    description: "Master GIS Mapping & Analysis for Free! Perfect for complete beginners.",
+    detailedDescription: "This comprehensive tutorial covers the entire GIS workflow, including data installation, vector and raster layers, symbology, spatial analysis, and map layout creation.",
+    videos: [
+      { id: "v1_1", title: "Part 1: Learn GIS - QGIS Full Course", youtubeId: "SovdBaus7pM", duration: "45m" },
+      { id: "v1_2", title: "Part 2: Geoprocessing & Spatial Analysis", youtubeId: "pGm7w-LywO0", duration: "30m" }
+    ],
+    duration: "1h 15m",
+    level: "Beginner",
+    completed: false
+  },
+  {
+    id: "c2",
+    title: "Google Earth Engine Fundamentals",
+    description: "Learn to use Google Earth Engine for planetary-scale geospatial analysis.",
+    detailedDescription: "Official Google Earth Engine training covering authentication, the Code Editor, satellite image collections, spatial reducers, and data visualization.",
+    videos: [
+      { id: "v2_1", title: "Part 1: Earth Engine 101 Basics", youtubeId: "I-wFYm4Hnhg", duration: "35m" },
+      { id: "v2_2", title: "Part 2: Image Collections & Reducers", youtubeId: "_Ff8_dME2Gc", duration: "40m" }
+    ],
+    duration: "1h 15m",
+    level: "Intermediate",
+    completed: false
+  },
+  {
+    id: "c3",
+    title: "PostGIS & Spatial SQL Crash Course",
+    description: "Manage and query spatial databases like a pro using PostGIS.",
+    detailedDescription: "A complete guide to Spatial SQL. Learn how to set up PostgreSQL with PostGIS, query geometries, calculate spatial intersections, buffers, and distances on massive datasets.",
+    videos: [
+      { id: "v3_1", title: "Part 1: PostGIS for Newbies", youtubeId: "vmbNpre02hk", duration: "30m" },
+      { id: "v3_2", title: "Part 2: PostGIS Architecture & Advanced Joins", youtubeId: "FKzw9HJ6XYA", duration: "25m" }
+    ],
+    duration: "55m",
+    level: "Advanced",
+    completed: false
+  },
+  {
+    id: "c4",
+    title: "Web Mapping with Leaflet & GeoJSON",
+    description: "Build interactive web maps from scratch using Leaflet.js.",
+    detailedDescription: "Take your maps to the web! Learn the fundamentals of Leaflet, markers, GeoJSON data loading, circles, polygons, and interactive popups.",
+    videos: [
+      { id: "v4_1", title: "Part 1: Leaflet Basics & Map Markers", youtubeId: "ls_Eue1xUtY", duration: "25m" },
+      { id: "v4_2", title: "Part 2: Circles, Polygons & Popups", youtubeId: "OYjFR_CGV8o", duration: "20m" }
+    ],
+    duration: "45m",
+    level: "Beginner",
+    completed: false
+  }
+];
+
+export const healCourse = (c: any) => {
+  if (!c) return c;
+  const fallback = DEFAULT_ACADEMY_COURSES.find(fc => fc.id === c.id);
+  if (!fallback) return c;
+  const hasObsolete = c.videos?.some((v: any) =>
+    ["wVnimcQsuwk", "W2XUxxu-D-c", "zXk-lD5L0s0", "s_J-k9Tq9qA"].includes(v.youtubeId)
+  );
+  if (hasObsolete || !c.videos || c.videos.length === 0) {
+    return { ...c, videos: fallback.videos };
+  }
+  return c;
+};
+
 export function AcademyPage() {
   const [activeTab, setActiveTab] = useState("videos");
   const [selectedCourse, setSelectedCourse] = useState<any>(null);
@@ -287,7 +355,18 @@ export function AcademyPage() {
     }
   };
 
-  const [videoCourses, setVideoCourses] = useState<any[]>([]);
+  const [videoCourses, setVideoCourses] = useState<any[]>(() => {
+    try {
+      const cached = localStorage.getItem("spetro_cached_courses");
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.map(healCourse);
+        }
+      }
+    } catch (_) {}
+    return DEFAULT_ACADEMY_COURSES;
+  });
   const [books, setBooks] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -295,13 +374,14 @@ export function AcademyPage() {
     Promise.all([
       api.academy.getCourses().then(data => {
         if (data && Array.isArray(data.courses) && data.courses.length > 0) {
-          setVideoCourses(data.courses);
-          try { localStorage.setItem("spetro_cached_courses", JSON.stringify(data.courses)); } catch (_) {}
+          const healed = data.courses.map(healCourse);
+          setVideoCourses(healed);
+          try { localStorage.setItem("spetro_cached_courses", JSON.stringify(healed)); } catch (_) {}
         }
       }).catch(() => {
         try {
           const cached = localStorage.getItem("spetro_cached_courses");
-          if (cached) setVideoCourses(JSON.parse(cached));
+          if (cached) setVideoCourses(JSON.parse(cached).map(healCourse));
         } catch (_) {}
       }),
       api.academy.getBooks().then(data => {
@@ -556,7 +636,7 @@ export function AcademyPage() {
                     <div 
                       className="aspect-video bg-muted relative flex items-center justify-center group cursor-pointer overflow-hidden"
                       onClick={() => {
-                        setSelectedCourse(course);
+                        setSelectedCourse(healCourse(course));
                         setSelectedVideoIndex(0);
                       }}
                     >
@@ -614,7 +694,7 @@ export function AcademyPage() {
                         variant={course.completed ? "secondary" : "default"} 
                         className="w-full gap-2"
                         onClick={() => {
-                          setSelectedCourse(course);
+                          setSelectedCourse(healCourse(course));
                           setSelectedVideoIndex(0);
                         }}
                       >
@@ -737,15 +817,15 @@ export function AcademyPage() {
                         );
                       }
 
-                      if (activeVideo?.youtubeId) {
+                      const cleanYtId = extractYoutubeId(activeVideo?.youtubeId || "");
+                      if (cleanYtId) {
                         return (
                           <iframe
-                            key={activeVideo.youtubeId}
+                            key={cleanYtId}
                             className="absolute top-0 left-0 w-full h-full border-0"
-                            src={`https://www.youtube-nocookie.com/embed/${activeVideo.youtubeId}?rel=0&modestbranding=1&playsinline=1&enablejsapi=1`}
-                            title={activeVideo.title || selectedCourse.title}
+                            src={`https://www.youtube.com/embed/${cleanYtId}?rel=0&modestbranding=1&playsinline=1`}
+                            title={activeVideo?.title || selectedCourse?.title || "Course Video"}
                             allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                            referrerPolicy="strict-origin-when-cross-origin"
                             allowFullScreen
                           />
                         );
@@ -778,7 +858,7 @@ export function AcademyPage() {
                           asChild
                         >
                           <a
-                            href={`https://www.youtube.com/watch?v=${activeVideo.youtubeId}`}
+                            href={`https://www.youtube.com/watch?v=${extractYoutubeId(activeVideo?.youtubeId || "")}`}
                             target="_blank"
                             rel="noopener noreferrer"
                             title="Open lesson directly on YouTube"

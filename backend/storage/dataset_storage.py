@@ -857,8 +857,10 @@ class DatasetRecord:
 
 # ── Metadata ────────────────────────────────────────────────────────────────
 
-def load_metadata(source: str = "admin", force_refresh: bool = False) -> list[dict[str, Any]]:
+def load_metadata(source: Any = "admin", force_refresh: bool = False) -> list[dict[str, Any]]:
     import time
+    if isinstance(source, bool):
+        source = "community" if source else "admin"
     now = time.time()
     if not force_refresh:
         cached = _metadata_cache.get(source)
@@ -905,6 +907,22 @@ def load_metadata(source: str = "admin", force_refresh: bool = False) -> list[di
                 data = json.loads(raw)
                 if isinstance(data, list):
                     records = data
+                    # Auto-heal & sanitize metadata records
+                    import re
+                    rwanda_bbox = [28.86, -2.84, 30.90, -1.05]
+                    for r in records:
+                        if isinstance(r, dict):
+                            sk = r.get("storage_key") or ""
+                            if "Google" in sk:
+                                r["storage_key"] = re.sub(r'\s*-\s*Google[\s\xa0]+Drive\s*$', '', sk, flags=re.IGNORECASE).strip()
+                            if not r.get("bbox"):
+                                r["bbox"] = rwanda_bbox
+                            if not r.get("category"):
+                                r["category"] = "Geospatial Data"
+                            if not r.get("contributor"):
+                                r["contributor"] = "SPETRO Community" if source == "community" else "SPETRO Admin"
+                            if not r.get("tags"):
+                                r["tags"] = ["Rwanda", "Raster", "GeoTIFF"]
             except Exception as parse_err:
                 import logging
                 logging.error("Failed to parse metadata JSON (%s): %s", key, parse_err)
@@ -914,8 +932,10 @@ def load_metadata(source: str = "admin", force_refresh: bool = False) -> list[di
         return [dict(r) for r in records]
 
 
-def save_metadata(records: list[dict[str, Any]], source: str = "admin") -> None:
+def save_metadata(records: list[dict[str, Any]], source: Any = "admin") -> None:
     import time
+    if isinstance(source, bool):
+        source = "community" if source else "admin"
     key = METADATA_KEYS.get(source, "datasets_metadata.json")
     data_str = json.dumps(records, indent=2)
 

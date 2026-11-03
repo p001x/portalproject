@@ -10,11 +10,20 @@ DEFAULT_COURSES = [
         "id": "c1",
         "title": "QGIS Full Course for Beginners",
         "description": "Master GIS Mapping & Analysis for Free! Perfect for complete beginners.",
-        "detailedDescription": "This comprehensive tutorial covers the entire GIS workflow, including data installation, vector and raster layers, symbology, spatial analysis, and even web map creation. You'll learn how to master geoprocessing tools (like clip, intersect, and dissolve), heatmaps, and 3D visualization.",
+        "detailedDescription": "This comprehensive tutorial covers the entire GIS workflow, including data installation, vector and raster layers, symbology, spatial analysis, and map layout creation.",
         "videos": [
-            {"id": "v1_1", "title": "1. Introduction to QGIS", "youtubeId": "W2XUxxu-D-c", "duration": "15m"},
-            {"id": "v1_2", "title": "2. Working with Vector Data", "youtubeId": "W2XUxxu-D-c", "duration": "30m"},
-            {"id": "v1_3", "title": "3. Map Layouts & Exporting", "youtubeId": "W2XUxxu-D-c", "duration": "30m"}
+            {
+                "id": "v1_1",
+                "title": "Part 1: Learn GIS - QGIS Full Course",
+                "youtubeId": "SovdBaus7pM",
+                "duration": "45m"
+            },
+            {
+                "id": "v1_2",
+                "title": "Part 2: Geoprocessing & Spatial Analysis",
+                "youtubeId": "pGm7w-LywO0",
+                "duration": "30m"
+            }
         ],
         "duration": "1h 15m",
         "level": "Beginner",
@@ -22,14 +31,24 @@ DEFAULT_COURSES = [
     },
     {
         "id": "c2",
-        "title": "Google Earth Engine Python API",
-        "description": "Learn to use Google Earth Engine with Python in Jupyter Notebooks.",
-        "detailedDescription": "Get started with the Earth Engine Python API. This course covers authentication, initialization, displaying maps with folium or geemap, loading image collections, reducing over regions, and exporting your results. Ideal for data scientists moving into geospatial.",
+        "title": "Google Earth Engine Fundamentals",
+        "description": "Learn to use Google Earth Engine for planetary-scale geospatial analysis.",
+        "detailedDescription": "Official Google Earth Engine training covering authentication, the Code Editor, satellite image collections, spatial reducers, and data visualization.",
         "videos": [
-            {"id": "v2_1", "title": "Part 1: Setup and Authentication", "youtubeId": "zXk-lD5L0s0", "duration": "20m"},
-            {"id": "v2_2", "title": "Part 2: Image Collections", "youtubeId": "zXk-lD5L0s0", "duration": "25m"}
+            {
+                "id": "v2_1",
+                "title": "Part 1: Earth Engine 101 Basics",
+                "youtubeId": "I-wFYm4Hnhg",
+                "duration": "35m"
+            },
+            {
+                "id": "v2_2",
+                "title": "Part 2: Image Collections & Reducers",
+                "youtubeId": "_Ff8_dME2Gc",
+                "duration": "40m"
+            }
         ],
-        "duration": "45m",
+        "duration": "1h 15m",
         "level": "Intermediate",
         "completed": False
     },
@@ -37,11 +56,20 @@ DEFAULT_COURSES = [
         "id": "c3",
         "title": "PostGIS & Spatial SQL Crash Course",
         "description": "Manage and query spatial databases like a pro using PostGIS.",
-        "detailedDescription": "A crash course into Spatial SQL. You will learn how to set up PostgreSQL with the PostGIS extension, load shapefiles into your database, and write advanced spatial queries (ST_Intersects, ST_Buffer, ST_Distance) to analyze massive geospatial datasets.",
+        "detailedDescription": "A complete guide to Spatial SQL. Learn how to set up PostgreSQL with PostGIS, query geometries, calculate spatial intersections, buffers, and distances on massive datasets.",
         "videos": [
-            {"id": "v3_1", "title": "Installation and Setup", "youtubeId": "s_J-k9Tq9qA", "duration": "10m"},
-            {"id": "v3_2", "title": "Basic Spatial Queries", "youtubeId": "s_J-k9Tq9qA", "duration": "25m"},
-            {"id": "v3_3", "title": "Advanced Spatial Joins", "youtubeId": "s_J-k9Tq9qA", "duration": "20m"}
+            {
+                "id": "v3_1",
+                "title": "Part 1: PostGIS for Newbies",
+                "youtubeId": "vmbNpre02hk",
+                "duration": "30m"
+            },
+            {
+                "id": "v3_2",
+                "title": "Part 2: PostGIS Architecture & Advanced Joins",
+                "youtubeId": "FKzw9HJ6XYA",
+                "duration": "25m"
+            }
         ],
         "duration": "55m",
         "level": "Advanced",
@@ -51,12 +79,22 @@ DEFAULT_COURSES = [
         "id": "c4",
         "title": "Web Mapping with Leaflet & GeoJSON",
         "description": "Build interactive web maps from scratch using Leaflet.js.",
-        "detailedDescription": "Take your maps to the web! This module teaches you the fundamentals of Leaflet, loading GeoJSON data, creating interactive popups, dynamic styling based on attributes, and deploying your web map application.",
+        "detailedDescription": "Take your maps to the web! Learn the fundamentals of Leaflet, markers, GeoJSON data loading, circles, polygons, and interactive popups.",
         "videos": [
-            {"id": "v4_1", "title": "Leaflet Basics", "youtubeId": "wVnimcQsuwk", "duration": "15m"},
-            {"id": "v4_2", "title": "GeoJSON and Styling", "youtubeId": "wVnimcQsuwk", "duration": "15m"}
+            {
+                "id": "v4_1",
+                "title": "Part 1: Leaflet Basics & Map Markers",
+                "youtubeId": "ls_Eue1xUtY",
+                "duration": "25m"
+            },
+            {
+                "id": "v4_2",
+                "title": "Part 2: Circles, Polygons & Popups",
+                "youtubeId": "OYjFR_CGV8o",
+                "duration": "20m"
+            }
         ],
-        "duration": "30m",
+        "duration": "45m",
         "level": "Beginner",
         "completed": False
     }

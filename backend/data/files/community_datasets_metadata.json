@@ -2,55 +2,91 @@
   {
     "id": "7520b287-1a74-4d58-9f1d-d7bcec391b7f",
     "name": "SoilLoss_t_ha_yr.tif",
-    "description": "",
+    "description": "High-resolution geospatial raster dataset: SoilLoss_t_ha_yr.tif covering Rwanda.",
     "file_type": "tiff",
-    "storage_key": "kaggle://petrovih/blacportal-datasets/7520b287-1a74-4d58-9f1d-d7bcec391b7f_SoilLoss_t_ha_yr.tif - Google\u00a0Drive",
+    "storage_key": "kaggle://petrovih/blacportal-datasets/7520b287-1a74-4d58-9f1d-d7bcec391b7f_SoilLoss_t_ha_yr.tif",
     "original_filename": "SoilLoss_t_ha_yr.tif",
-    "bbox": null,
+    "bbox": [
+      28.86,
+      -2.84,
+      30.9,
+      -1.05
+    ],
     "upload_date": "2026-08-21T13:20:37.684029+00:00",
     "file_size_mb": 0.122,
     "status": "ok",
     "error_message": null,
     "source": "community",
-    "contributor": null,
-    "source_url": "https://drive.google.com/file/d/1F-RcPfYC4D_RcvaNAkyeHsgr9xZtUkwn/view?usp=sharing"
+    "contributor": "Community Contributor",
+    "source_url": "https://drive.google.com/file/d/1F-RcPfYC4D_RcvaNAkyeHsgr9xZtUkwn/view?usp=sharing",
+    "category": "Soil & Agriculture",
+    "tags": [
+      "Rwanda",
+      "Raster",
+      "GeoTIFF",
+      "Soil & Agriculture"
+    ]
   },
   {
     "id": "f07bf960-d17f-47f6-9fbd-a18c6056e343",
     "name": "Landsat9_LST_Mean_2025.tif",
-    "description": "",
+    "description": "High-resolution geospatial raster dataset: Landsat9_LST_Mean_2025.tif covering Rwanda.",
     "file_type": "tiff",
-    "storage_key": "kaggle://petrovih/blacportal-datasets/f07bf960-d17f-47f6-9fbd-a18c6056e343_Landsat9_LST_Mean_2025.tif - Google\u00a0Drive",
+    "storage_key": "kaggle://petrovih/blacportal-datasets/f07bf960-d17f-47f6-9fbd-a18c6056e343_Landsat9_LST_Mean_2025.tif",
     "original_filename": "Landsat9_LST_Mean_2025.tif",
-    "bbox": null,
+    "bbox": [
+      28.86,
+      -2.84,
+      30.9,
+      -1.05
+    ],
     "upload_date": "2026-08-21T13:35:24.061053+00:00",
     "file_size_mb": 0.123,
     "status": "ok",
     "error_message": null,
     "source": "community",
-    "contributor": null,
-    "source_url": "https://drive.google.com/file/d/1vncSV9GQyfGErazC5ctKwRUA22AV4WHZ/view?usp=sharing"
+    "contributor": "Community Contributor",
+    "source_url": "https://drive.google.com/file/d/1vncSV9GQyfGErazC5ctKwRUA22AV4WHZ/view?usp=sharing",
+    "category": "Climate & Environment",
+    "tags": [
+      "Rwanda",
+      "Raster",
+      "GeoTIFF",
+      "Climate & Environment"
+    ]
   },
   {
     "id": "b47671da-2ba0-4d44-9c70-b5ab1e87343b",
     "name": "LandCover_Landsat8_2014_7Classes.tif",
-    "description": "",
+    "description": "High-resolution geospatial raster dataset: LandCover_Landsat8_2014_7Classes.tif covering Rwanda.",
     "file_type": "tiff",
-    "storage_key": "kaggle://petrovih/blacportal-datasets/b47671da-2ba0-4d44-9c70-b5ab1e87343b_LandCover_Landsat8_2014_7Classes.tif - Google\u00a0Drive",
+    "storage_key": "kaggle://petrovih/blacportal-datasets/b47671da-2ba0-4d44-9c70-b5ab1e87343b_LandCover_Landsat8_2014_7Classes.tif",
     "original_filename": "LandCover_Landsat8_2014_7Classes.tif",
-    "bbox": null,
+    "bbox": [
+      28.86,
+      -2.84,
+      30.9,
+      -1.05
+    ],
     "upload_date": "2026-08-21T14:22:31.246271+00:00",
     "file_size_mb": 0.123,
     "status": "ok",
     "error_message": null,
     "source": "community",
-    "contributor": null,
-    "source_url": "https://drive.google.com/file/d/1wyzNn87ciwGQvGRra3wxpW_t5KRXumOS/view?usp=sharing"
+    "contributor": "Community Contributor",
+    "source_url": "https://drive.google.com/file/d/1wyzNn87ciwGQvGRra3wxpW_t5KRXumOS/view?usp=sharing",
+    "category": "Land Use & Land Cover",
+    "tags": [
+      "Rwanda",
+      "Raster",
+      "GeoTIFF",
+      "Land Use & Land Cover"
+    ]
   },
   {
     "id": "82dd959c-fc26-480f-9438-6aae4b6cb909",
     "name": "Rwanda_Base_Map_2014-0000000000-0000005376.tif [Portal ID: 82dd959c]",
-    "description": "",
+    "description": "High-resolution geospatial raster dataset: Rwanda_Base_Map_2014-0000000000-0000005376.tif [Portal ID: 82dd959c] covering Rwanda.",
     "file_type": "tiff",
     "storage_key": "local://rare_data/community_files/82dd959c-fc26-480f-9438-6aae4b6cb909_Rwanda_Base_Map_2014-0000000000-0000005376.tif",
     "original_filename": "Rwanda_Base_Map_2014-0000000000-0000005376.tif",
@@ -65,7 +101,14 @@
     "status": "ok",
     "error_message": null,
     "source": "community",
-    "contributor": null,
-    "source_url": "https://drive.google.com/file/d/1-cTjO0WanTIPfTbfppryP-4TO1oU1S8s/view?usp=sharing"
+    "contributor": "Community Contributor",
+    "source_url": "https://drive.google.com/file/d/1-cTjO0WanTIPfTbfppryP-4TO1oU1S8s/view?usp=sharing",
+    "category": "Satellite Imagery",
+    "tags": [
+      "Rwanda",
+      "Raster",
+      "GeoTIFF",
+      "Satellite Imagery"
+    ]
   }
 ]

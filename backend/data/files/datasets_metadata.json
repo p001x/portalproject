@@ -2,7 +2,7 @@
   {
     "id": "aa8596b0-9f5f-4e98-bb98-e7c0abb1daed",
     "name": "demm",
-    "description": "",
+    "description": "High-accuracy Digital Elevation Model (DEM) for Nyagisozi watershed, formatted for hydrological modeling (HEC-HMS).",
     "file_type": "tiff",
     "storage_key": "kaggle://petrovih/blacportal-datasets/aa8596b0-9f5f-4e98-bb98-e7c0abb1daed_DEM_Nyagisozi_for HEC-HMS.tif",
     "original_filename": "DEM_Nyagisozi_for HEC-HMS.tif",
@@ -17,13 +17,20 @@
     "status": "ok",
     "error_message": null,
     "source": "admin",
-    "contributor": null,
-    "source_url": "https://huggingface.co/datasets/petersstore/blacportal-datasets/resolve/main/aa8596b0-9f5f-4e98-bb98-e7c0abb1daed_DEM_Nyagisozi_for%20HEC-HMS.tif"
+    "contributor": "SPETRO Admin",
+    "source_url": "https://huggingface.co/datasets/petersstore/blacportal-datasets/resolve/main/aa8596b0-9f5f-4e98-bb98-e7c0abb1daed_DEM_Nyagisozi_for%20HEC-HMS.tif",
+    "category": "Elevation & Terrain",
+    "tags": [
+      "Rwanda",
+      "Admin",
+      "GeoTIFF",
+      "Elevation & Terrain"
+    ]
   },
   {
     "id": "4fedd6f7-19c1-4bbe-8283-a78c205f0998",
     "name": "tree",
-    "description": "",
+    "description": "Baseline Tree Cover Year 2000 raster layer for Rwanda national forest monitoring.",
     "file_type": "tiff",
     "storage_key": "kaggle://petrovih/blacportal-datasets/4fedd6f7-19c1-4bbe-8283-a78c205f0998_TreeCover2000.tif",
     "original_filename": "TreeCover2000.tif",
@@ -38,13 +45,20 @@
     "status": "ok",
     "error_message": null,
     "source": "admin",
-    "contributor": null,
-    "source_url": "https://huggingface.co/datasets/petersstore/blacportal-datasets/resolve/main/4fedd6f7-19c1-4bbe-8283-a78c205f0998_TreeCover2000.tif"
+    "contributor": "SPETRO Admin",
+    "source_url": "https://huggingface.co/datasets/petersstore/blacportal-datasets/resolve/main/4fedd6f7-19c1-4bbe-8283-a78c205f0998_TreeCover2000.tif",
+    "category": "Forestry & Biomass",
+    "tags": [
+      "Rwanda",
+      "Admin",
+      "GeoTIFF",
+      "Forestry & Biomass"
+    ]
   },
   {
     "id": "6943d7ef-4a08-4afb-a485-c98ba8efe6f4",
     "name": "LOSS",
-    "description": "",
+    "description": "Hansen Global Forest Change annual tree loss year raster layer for Rwanda.",
     "file_type": "tiff",
     "storage_key": "kaggle://petrovih/blacportal-datasets/6943d7ef-4a08-4afb-a485-c98ba8efe6f4_TreeLossYear.tif",
     "original_filename": "TreeLossYear.tif",
@@ -59,7 +73,14 @@
     "status": "ok",
     "error_message": null,
     "source": "admin",
-    "contributor": null,
-    "source_url": "https://huggingface.co/datasets/petersstore/blacportal-datasets/resolve/main/6943d7ef-4a08-4afb-a485-c98ba8efe6f4_TreeLossYear.tif"
+    "contributor": "SPETRO Admin",
+    "source_url": "https://huggingface.co/datasets/petersstore/blacportal-datasets/resolve/main/6943d7ef-4a08-4afb-a485-c98ba8efe6f4_TreeLossYear.tif",
+    "category": "Forestry & Biomass",
+    "tags": [
+      "Rwanda",
+      "Admin",
+      "GeoTIFF",
+      "Forestry & Biomass"
+    ]
   }
 ]
