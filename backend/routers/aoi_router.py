@@ -29,26 +29,37 @@ def get_regions(country: Optional[str] = None, level1: Optional[str] = None):
     If country: returns list of level1 regions for that country.
     If country and level1: returns list of level2 regions for that level1 region.
     """
+    # 1. Countries list does not require GEE (instant precomputed fallback)
+    if not country:
+        if not _gaul_cache["countries"]:
+            json_path = os.path.join(os.path.dirname(__file__), "..", "data", "files", "world_countries.json")
+            if os.path.exists(json_path):
+                try:
+                    with open(json_path, "r", encoding="utf-8") as f:
+                        _gaul_cache["countries"] = json.load(f).get("regions", [])
+                except Exception:
+                    pass
+            if not _gaul_cache["countries"]:
+                try:
+                    from main import _require_gee
+                    _require_gee()
+                    fc = ee.FeatureCollection("FAO/GAUL/2015/level0")
+                    hist = fc.aggregate_histogram("ADM0_NAME")
+                    countries = ee.Dictionary(hist).keys().getInfo()
+                    _gaul_cache["countries"] = sorted(countries)
+                except Exception:
+                    pass
+        return {"regions": _gaul_cache["countries"]}
+
     try:
         from main import _require_gee
         _require_gee()
     except HTTPException:
         raise
     except Exception as e:
-        import traceback
-        with open("import_error.txt", "w") as f:
-            f.write(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Import error: {str(e)}")
     
     try:
-        if not country:
-            if not _gaul_cache["countries"]:
-                fc = ee.FeatureCollection("FAO/GAUL/2015/level0")
-                hist = fc.aggregate_histogram("ADM0_NAME")
-                countries = ee.Dictionary(hist).keys().getInfo()
-                _gaul_cache["countries"] = sorted(countries)
-            return {"regions": _gaul_cache["countries"]}
-            
         if country and not level1:
             if country not in _gaul_cache["level1"]:
                 fc = ee.FeatureCollection("FAO/GAUL/2015/level1").filter(ee.Filter.eq("ADM0_NAME", country))
@@ -195,12 +206,28 @@ async def upload_tiff(file: UploadFile = File(...)):
 @router.get("/rwanda-hierarchy")
 def get_rwanda_hierarchy():
     """
-    Reads the local sectrstu/sector.shp and returns a nested dictionary of:
+    Reads Rwanda hierarchy and returns a nested dictionary of:
     { "ProvinceName": { "DistrictName": ["Sector1", "Sector2"] } }
     """
     global _rwanda_hierarchy
     if _rwanda_hierarchy is not None:
         return _rwanda_hierarchy
+
+    # 1. Fast static precomputed JSON (0ms response, 0MB RAM)
+    json_path = os.path.join(os.path.dirname(__file__), "..", "data", "files", "rwanda_hierarchy.json")
+    if os.path.exists(json_path):
+        try:
+            with open(json_path, "r", encoding="utf-8") as f:
+                full = json.load(f)
+                simplified = {}
+                for prov, dists in full.items():
+                    simplified[prov] = {}
+                    for dist, sects in dists.items():
+                        simplified[prov][dist] = sorted(list(sects.keys())) if isinstance(sects, dict) else sects
+                _rwanda_hierarchy = simplified
+                return _rwanda_hierarchy
+        except Exception:
+            pass
 
     try:
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
@@ -242,12 +269,22 @@ def get_rwanda_hierarchy():
 @router.get("/rwanda-full-hierarchy")
 def get_rwanda_full_hierarchy():
     """
-    Reads the local sectrstu/villages.shp and returns a nested dictionary of:
+    Reads the hierarchy and returns a nested dictionary of:
     { "ProvinceName": { "DistrictName": { "SectorName": { "CellName": ["Village1", "Village2"] } } } }
     """
     global _rwanda_micro_hierarchy
     if _rwanda_micro_hierarchy is not None:
         return _rwanda_micro_hierarchy
+
+    # 1. Fast static precomputed JSON (0ms response, 0MB RAM)
+    json_path = os.path.join(os.path.dirname(__file__), "..", "data", "files", "rwanda_hierarchy.json")
+    if os.path.exists(json_path):
+        try:
+            with open(json_path, "r", encoding="utf-8") as f:
+                _rwanda_micro_hierarchy = json.load(f)
+                return _rwanda_micro_hierarchy
+        except Exception:
+            pass
 
     try:
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))

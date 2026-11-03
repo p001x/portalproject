@@ -19,6 +19,8 @@ import {
   AlertCircle,
   Lock 
 } from "lucide-react";
+import defaultRwandaHierarchy from "@/data/rwanda_hierarchy.json";
+import defaultWorldCountries from "@/data/world_countries.json";
 
 interface StudyAreaSelectorProps {
   value: AOIConfig;
@@ -54,6 +56,8 @@ export function StudyAreaSelector({ value, onChange, restrictToRwanda = false }:
   const { data: countriesData, isLoading: loadingCountries, error: countriesError } = useQuery({
     queryKey: ["regions", "countries"],
     queryFn: () => api.getRegions(),
+    initialData: defaultWorldCountries as { regions: string[] },
+    staleTime: 1000 * 60 * 60, // 1 hour cache
   });
 
   const { data: level1Data, isLoading: loadingLevel1 } = useQuery({
@@ -72,6 +76,8 @@ export function StudyAreaSelector({ value, onChange, restrictToRwanda = false }:
   const { data: rwandaHierarchy, isLoading: loadingRwanda } = useQuery({
     queryKey: ["rwanda", "full-hierarchy"],
     queryFn: () => api.getRwandaFullHierarchy(),
+    initialData: defaultRwandaHierarchy as any,
+    staleTime: 1000 * 60 * 60, // 1 hour cache
   });
 
   const handleGlobalCountryChange = (c: string) => {
@@ -348,7 +354,7 @@ export function StudyAreaSelector({ value, onChange, restrictToRwanda = false }:
         <TabsContent value="rwanda" className="space-y-3 mt-3">
           <div className="space-y-1.5">
             <Label className="text-xs text-muted-foreground">Province (Optional)</Label>
-            <Select value={value.type === "rwanda" ? ((value as any).province || "none") : "none"} onValueChange={handleRwandaProvinceChange} disabled={loadingRwanda}>
+            <Select value={value.type === "rwanda" ? ((value as any).province || "none") : "none"} onValueChange={handleRwandaProvinceChange} disabled={loadingRwanda && !rwandaHierarchy}>
               <SelectTrigger className="w-full h-8 text-xs">
                 <SelectValue placeholder="Select Province..." />
               </SelectTrigger>
@@ -434,7 +440,7 @@ export function StudyAreaSelector({ value, onChange, restrictToRwanda = false }:
         <TabsContent value="global" className="space-y-3 mt-3">
           <div className="space-y-1.5">
             <Label className="text-xs text-muted-foreground">Country</Label>
-            <Select value={value.type.startsWith("gaul") ? value.country || "" : (value.type === "world" ? "World" : "")} onValueChange={handleGlobalCountryChange} disabled={loadingCountries}>
+            <Select value={value.type.startsWith("gaul") ? value.country || "" : (value.type === "world" ? "World" : "")} onValueChange={handleGlobalCountryChange} disabled={loadingCountries && !(countriesData?.regions && countriesData.regions.length > 0)}>
               <SelectTrigger className="w-full h-8 text-xs">
                 <SelectValue placeholder="Select Country..." />
               </SelectTrigger>

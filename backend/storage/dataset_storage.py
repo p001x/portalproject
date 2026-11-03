@@ -1072,11 +1072,22 @@ def extract_shapefile_bbox(zip_bytes: Optional[bytes] = None, file_path: Optiona
         shp_files = list(Path(tmpdir).glob("**/*.shp"))
         if not shp_files:
             raise ValueError("No .shp file found inside the uploaded zip.")
-        gdf = gpd.read_file(shp_files[0])
-        if gdf.crs is not None and str(gdf.crs) != "EPSG:4326":
-            gdf = gdf.to_crs("EPSG:4326")
-        minx, miny, maxx, maxy = gdf.total_bounds.tolist()
-        return [float(minx), float(miny), float(maxx), float(maxy)], zip_bytes
+        try:
+            import fiona
+            from rasterio.warp import transform_bounds
+            with fiona.open(str(shp_files[0])) as src:
+                b = src.bounds
+                if src.crs and str(src.crs) != "EPSG:4326":
+                    minx, miny, maxx, maxy = transform_bounds(src.crs, "EPSG:4326", *b)
+                else:
+                    minx, miny, maxx, maxy = b
+            return [float(minx), float(miny), float(maxx), float(maxy)], zip_bytes
+        except Exception:
+            gdf = gpd.read_file(shp_files[0])
+            if gdf.crs is not None and str(gdf.crs) != "EPSG:4326":
+                gdf = gdf.to_crs("EPSG:4326")
+            minx, miny, maxx, maxy = gdf.total_bounds.tolist()
+            return [float(minx), float(miny), float(maxx), float(maxy)], zip_bytes
 
 
 _LAT_NAMES = {"lat", "latitude", "y"}
