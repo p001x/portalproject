@@ -342,6 +342,23 @@ class S3Client:
         except Exception:
             return ""
 
+    def get_presigned_upload_url(self, key: str, content_type: Optional[str] = None, expires_in: int = 7200) -> str:
+        if self.s3 is None: return ""
+        clean = self._clean_key(key)
+        params: dict[str, Any] = {'Bucket': self.bucket_name, 'Key': clean}
+        if content_type:
+            params['ContentType'] = content_type
+        try:
+            return self.s3.generate_presigned_url(
+                ClientMethod='put_object',
+                Params=params,
+                ExpiresIn=expires_in
+            )
+        except Exception as e:
+            import logging
+            logging.error(f"Error generating presigned upload url: {e}")
+            return ""
+
     def delete(self, key: str) -> None:
         clean = self._clean_key(key)
         try:
@@ -1333,6 +1350,66 @@ def process_and_store_upload(filename: str, file_bytes: Optional[bytes], name: s
 
 # Compatibility alias for harvester & API endpoints
 upload_dataset_file = process_and_store_upload
+
+
+def create_presigned_upload(filename: str, source: str = "admin", content_type: Optional[str] = None) -> dict[str, str]:
+    import uuid
+    client = _get_client()
+    dataset_id = str(uuid.uuid4())
+    data_prefix = DATA_PREFIXES.get(source, "rare_data/files/")
+    file_type = detect_file_type(filename)
+    clean_name = f"{dataset_id}.zip" if (file_type == "shapefile" and not filename.lower().endswith(".zip")) else f"{dataset_id}_{filename}"
+    storage_key = f"{data_prefix}{clean_name}"
+
+    upload_url = ""
+    if hasattr(client, "get_presigned_upload_url"):
+        upload_url = client.get_presigned_upload_url(storage_key, content_type=content_type)
+
+    bucket = getattr(client, "bucket_name", "blacportal-data")
+    return {
+        "dataset_id": dataset_id,
+        "storage_key": f"r2://{bucket}/{storage_key}",
+        "raw_key": storage_key,
+        "upload_url": upload_url,
+        "file_type": file_type,
+    }
+
+
+def confirm_presigned_upload(
+    dataset_id: str,
+    name: str,
+    description: str,
+    storage_key: str,
+    original_filename: str,
+    file_type: str,
+    file_size_mb: float,
+    source: str = "admin",
+    contributor: Optional[str] = None,
+    category: Optional[str] = None,
+    tags: Optional[list[str]] = None,
+    bbox: Optional[list[float]] = None,
+) -> DatasetRecord:
+    if bbox is None:
+        bbox = [28.86, -2.84, 30.90, -1.05]
+
+    record = DatasetRecord(
+        id=dataset_id,
+        name=name,
+        description=description,
+        file_type=file_type,
+        storage_key=storage_key,
+        original_filename=original_filename,
+        bbox=bbox,
+        file_size_mb=round(file_size_mb, 3),
+        status="ok",
+        error_message=None,
+        source=source,
+        contributor=contributor,
+        category=category,
+        tags=tags or ["Rwanda", "Raster", "GeoTIFF"],
+    )
+    add_record(record, source=source)
+    return record
 
 
 def process_and_store_link(url: str, name: str, description: str,

@@ -2534,6 +2534,61 @@ async def upload_dataset(
     return record.to_dict()
 
 
+class PresignedUploadRequest(BaseModel):
+    filename: str
+    source: str = "admin"
+    content_type: Optional[str] = None
+
+
+class ConfirmUploadRequest(BaseModel):
+    dataset_id: str
+    name: str
+    description: str = ""
+    storage_key: str
+    original_filename: str
+    file_type: str
+    file_size_mb: float
+    source: str = "admin"
+    contributor: Optional[str] = None
+    category: Optional[str] = None
+    tags: Optional[list[str]] = None
+    bbox: Optional[list[float]] = None
+
+
+@app.post("/api/datasets/presigned-upload", tags=["rare-data"])
+def request_presigned_upload(req: PresignedUploadRequest):
+    if req.source not in ("admin", "community"):
+        raise HTTPException(400, "source must be 'admin' or 'community'")
+    from storage.dataset_storage import create_presigned_upload
+    return create_presigned_upload(
+        filename=req.filename,
+        source=req.source,
+        content_type=req.content_type,
+    )
+
+
+@app.post("/api/datasets/confirm-upload", tags=["rare-data"])
+def confirm_dataset_upload(req: ConfirmUploadRequest):
+    if req.source not in ("admin", "community"):
+        raise HTTPException(400, "source must be 'admin' or 'community'")
+    from storage.dataset_storage import confirm_presigned_upload
+    record = confirm_presigned_upload(
+        dataset_id=req.dataset_id,
+        name=req.name,
+        description=req.description,
+        storage_key=req.storage_key,
+        original_filename=req.original_filename,
+        file_type=req.file_type,
+        file_size_mb=req.file_size_mb,
+        source=req.source,
+        contributor=req.contributor,
+        category=req.category,
+        tags=req.tags,
+        bbox=req.bbox,
+    )
+    return record.to_dict()
+
+
 class DatasetLinkRequest(BaseModel):
     url: str
     name: str

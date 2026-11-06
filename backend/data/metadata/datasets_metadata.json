@@ -1,10 +1,10 @@
 [
   {
-    "id": "aa8596b0-9f5f-4e98-bb98-e7c0abb1daed",
-    "name": "demm",
-    "description": "High-accuracy Digital Elevation Model (DEM) for Nyagisozi watershed, formatted for hydrological modeling (HEC-HMS).",
+    "id": "7d462964-760b-42dc-9853-1091515616b2",
+    "name": "DEM",
+    "description": "",
     "file_type": "tiff",
-    "storage_key": "kaggle://petrovih/blacportal-datasets/aa8596b0-9f5f-4e98-bb98-e7c0abb1daed_DEM_Nyagisozi_for HEC-HMS.tif",
+    "storage_key": "r2://blacportal-data/rare_data/files/7d462964-760b-42dc-9853-1091515616b2_DEM_Nyagisozi_for HEC-HMS.tif",
     "original_filename": "DEM_Nyagisozi_for HEC-HMS.tif",
     "bbox": [
       29.252916255265344,
@@ -12,75 +12,369 @@
       29.788772106341245,
       -2.1526466101905712
     ],
-    "upload_date": "2026-08-21T12:59:12.308265+00:00",
+    "upload_date": "2026-08-22T09:30:23.446400+00:00",
     "file_size_mb": 54.331,
     "status": "ok",
     "error_message": null,
     "source": "admin",
     "contributor": "SPETRO Admin",
-    "source_url": "https://huggingface.co/datasets/petersstore/blacportal-datasets/resolve/main/aa8596b0-9f5f-4e98-bb98-e7c0abb1daed_DEM_Nyagisozi_for%20HEC-HMS.tif",
-    "category": "Elevation & Terrain",
+    "source_url": null,
+    "category": "Geospatial Data",
     "tags": [
       "Rwanda",
-      "Admin",
-      "GeoTIFF",
-      "Elevation & Terrain"
+      "Raster",
+      "GeoTIFF"
     ]
   },
   {
-    "id": "4fedd6f7-19c1-4bbe-8283-a78c205f0998",
-    "name": "tree",
-    "description": "Baseline Tree Cover Year 2000 raster layer for Rwanda national forest monitoring.",
+    "id": "0fc2b7c4-df26-4d15-a6bf-85cedc6ef4d0",
+    "name": "A3_VCI_2023.tif [Portal ID: 0fc2b7c4]",
+    "description": "",
     "file_type": "tiff",
-    "storage_key": "kaggle://petrovih/blacportal-datasets/4fedd6f7-19c1-4bbe-8283-a78c205f0998_TreeCover2000.tif",
-    "original_filename": "TreeCover2000.tif",
+    "storage_key": "r2://blacportal-data/rare_data/files/0fc2b7c4-df26-4d15-a6bf-85cedc6ef4d0_A3_VCI_2023.tif",
+    "original_filename": "A3_VCI_2023.tif",
     "bbox": [
-      28.52520825043726,
-      -2.865542541247325,
-      31.074357532183225,
-      -0.9540174481693953
+      30.605627555120794,
+      -2.122524667752222,
+      30.72506200502985,
+      -1.9148928799017266
     ],
-    "upload_date": "2026-08-21T13:11:23.247871+00:00",
-    "file_size_mb": 28.133,
+    "upload_date": "2026-08-22T09:32:56.375390+00:00",
+    "file_size_mb": 1.259,
     "status": "ok",
     "error_message": null,
     "source": "admin",
     "contributor": "SPETRO Admin",
-    "source_url": "https://huggingface.co/datasets/petersstore/blacportal-datasets/resolve/main/4fedd6f7-19c1-4bbe-8283-a78c205f0998_TreeCover2000.tif",
-    "category": "Forestry & Biomass",
+    "source_url": "https://drive.google.com/file/d/1lr9byclD4qD4W9xMRMC42OjZBOx6SbWp/view?usp=sharing",
+    "category": "Geospatial Data",
     "tags": [
       "Rwanda",
-      "Admin",
-      "GeoTIFF",
-      "Forestry & Biomass"
+      "Raster",
+      "GeoTIFF"
     ]
   },
   {
-    "id": "6943d7ef-4a08-4afb-a485-c98ba8efe6f4",
-    "name": "LOSS",
-    "description": "Hansen Global Forest Change annual tree loss year raster layer for Rwanda.",
+    "id": "ecdba876-2882-447e-8625-6786b488402d",
+    "name": "Sentinel2_RGB_2023_11.tif [Portal ID: ecdba876]",
+    "description": "",
     "file_type": "tiff",
-    "storage_key": "kaggle://petrovih/blacportal-datasets/6943d7ef-4a08-4afb-a485-c98ba8efe6f4_TreeLossYear.tif",
-    "original_filename": "TreeLossYear.tif",
+    "storage_key": "r2://blacportal-data/rare_data/files/ecdba876-2882-447e-8625-6786b488402d_Sentinel2_RGB_2023_11.tif",
+    "original_filename": "Sentinel2_RGB_2023_11.tif",
     "bbox": [
-      28.52520825043726,
-      -2.865542541247325,
-      31.074357532183225,
-      -0.9540174481693953
+      29.90994637392994,
+      -2.1035849008226837,
+      30.341227541835725,
+      -1.7699506043006932
     ],
-    "upload_date": "2026-08-21T14:46:44.980639+00:00",
-    "file_size_mb": 3.395,
+    "upload_date": "2026-08-22T10:32:53.205224+00:00",
+    "file_size_mb": 39.186,
     "status": "ok",
     "error_message": null,
     "source": "admin",
     "contributor": "SPETRO Admin",
-    "source_url": "https://huggingface.co/datasets/petersstore/blacportal-datasets/resolve/main/6943d7ef-4a08-4afb-a485-c98ba8efe6f4_TreeLossYear.tif",
-    "category": "Forestry & Biomass",
+    "source_url": "https://drive.google.com/file/d/1GArl9DtPlzasEMR6WQZXVWlw-Cf4-tP5/view?usp=sharing",
+    "category": "Geospatial Data",
     "tags": [
       "Rwanda",
-      "Admin",
-      "GeoTIFF",
-      "Forestry & Biomass"
+      "Raster",
+      "GeoTIFF"
+    ]
+  },
+  {
+    "id": "78ba4563-823b-49ee-a71b-4a2eed5fb4f4",
+    "name": "Sentinel2_RGB_2023_11.tif [Portal ID: 78ba4563]",
+    "description": "",
+    "file_type": "tiff",
+    "storage_key": "rare_data/files/78ba4563-823b-49ee-a71b-4a2eed5fb4f4_Sentinel2_RGB_2023_11.tif",
+    "original_filename": "Sentinel2_RGB_2023_11.tif",
+    "bbox": [
+      29.90994637392994,
+      -2.1035849008226837,
+      30.341227541835725,
+      -1.7699506043006932
+    ],
+    "upload_date": "2026-08-22T12:18:44.092988+00:00",
+    "file_size_mb": 39.186,
+    "status": "error",
+    "error_message": "Failed to save to Kaggle: Could not connect to the endpoint URL: \"https://0b358304b8ec8eb2a959cbb0519d357e.r2.cloudflarestorage.com/blacportal-data/rare_data/files/78ba4563-823b-49ee-a71b-4a2eed5fb4f4_Sentinel2_RGB_2023_11.tif\"",
+    "source": "admin",
+    "contributor": "SPETRO Admin",
+    "source_url": "https://drive.google.com/file/d/1GArl9DtPlzasEMR6WQZXVWlw-Cf4-tP5/view?usp=sharing",
+    "category": "Geospatial Data",
+    "tags": [
+      "Rwanda",
+      "Raster",
+      "GeoTIFF"
+    ]
+  },
+  {
+    "id": "a8d7bf94-852b-4875-9508-854f158264e3",
+    "name": "Sentinel2_RGB_2023_11.tif [Portal ID: a8d7bf94]",
+    "description": "",
+    "file_type": "tiff",
+    "storage_key": "r2://blacportal-data/rare_data/files/a8d7bf94-852b-4875-9508-854f158264e3_Sentinel2_RGB_2023_11.tif",
+    "original_filename": "Sentinel2_RGB_2023_11.tif",
+    "bbox": [
+      29.90994637392994,
+      -2.1035849008226837,
+      30.341227541835725,
+      -1.7699506043006932
+    ],
+    "upload_date": "2026-08-22T12:32:56.279724+00:00",
+    "file_size_mb": 39.186,
+    "status": "ok",
+    "error_message": null,
+    "source": "admin",
+    "contributor": "SPETRO Admin",
+    "source_url": "https://drive.google.com/file/d/1GArl9DtPlzasEMR6WQZXVWlw-Cf4-tP5/view?usp=sharing",
+    "category": "Geospatial Data",
+    "tags": [
+      "Rwanda",
+      "Raster",
+      "GeoTIFF"
+    ]
+  },
+  {
+    "id": "a2cf9311-e9ef-447b-bfc4-112d48fde035",
+    "name": "Sentinel2_RGB_2023_11.tif [Portal ID: a2cf9311]",
+    "description": "",
+    "file_type": "tiff",
+    "storage_key": "r2://blacportal-data/rare_data/files/a2cf9311-e9ef-447b-bfc4-112d48fde035_Sentinel2_RGB_2023_11.tif",
+    "original_filename": "Sentinel2_RGB_2023_11.tif",
+    "bbox": [
+      29.90994637392994,
+      -2.1035849008226837,
+      30.341227541835725,
+      -1.7699506043006932
+    ],
+    "upload_date": "2026-08-22T12:50:24.772923+00:00",
+    "file_size_mb": 39.186,
+    "status": "ok",
+    "error_message": null,
+    "source": "admin",
+    "contributor": "SPETRO Admin",
+    "source_url": "https://drive.google.com/file/d/1GArl9DtPlzasEMR6WQZXVWlw-Cf4-tP5/view?usp=sharing",
+    "category": "Geospatial Data",
+    "tags": [
+      "Rwanda",
+      "Raster",
+      "GeoTIFF"
+    ]
+  },
+  {
+    "id": "aa3e6e87-b0b4-407b-8b27-34fab82877d7",
+    "name": "Sentinel2_RGB_2023_11.tif [Portal ID: aa3e6e87]",
+    "description": "",
+    "file_type": "tiff",
+    "storage_key": "r2://blacportal-data/rare_data/files/aa3e6e87-b0b4-407b-8b27-34fab82877d7_Sentinel2_RGB_2023_11.tif",
+    "original_filename": "Sentinel2_RGB_2023_11.tif",
+    "bbox": [
+      28.86,
+      -2.84,
+      30.9,
+      -1.05
+    ],
+    "upload_date": "2026-08-22T15:22:53.315542+00:00",
+    "file_size_mb": 39.186,
+    "status": "ok",
+    "error_message": null,
+    "source": "admin",
+    "contributor": "SPETRO Admin",
+    "source_url": "https://drive.google.com/file/d/1GArl9DtPlzasEMR6WQZXVWlw-Cf4-tP5/view?usp=sharing",
+    "category": "Geospatial Data",
+    "tags": [
+      "Rwanda",
+      "Raster",
+      "GeoTIFF"
+    ]
+  },
+  {
+    "id": "829c193b-0469-430a-bdda-7d0922618f47",
+    "name": "Sentinel2_RGB_2023_11.tif [Portal ID: 829c193b]",
+    "description": "",
+    "file_type": "tiff",
+    "storage_key": "r2://blacportal-data/rare_data/files/829c193b-0469-430a-bdda-7d0922618f47_Sentinel2_RGB_2023_11.tif",
+    "original_filename": "Sentinel2_RGB_2023_11.tif",
+    "bbox": [
+      28.86,
+      -2.84,
+      30.9,
+      -1.05
+    ],
+    "upload_date": "2026-08-22T15:38:37.643700+00:00",
+    "file_size_mb": 39.186,
+    "status": "ok",
+    "error_message": null,
+    "source": "admin",
+    "contributor": "SPETRO Admin",
+    "source_url": "https://drive.google.com/file/d/1GArl9DtPlzasEMR6WQZXVWlw-Cf4-tP5/view?usp=sharing",
+    "category": "Geospatial Data",
+    "tags": [
+      "Rwanda",
+      "Raster",
+      "GeoTIFF"
+    ]
+  },
+  {
+    "id": "8b0cdd5d-9e8a-47a0-8271-e40c875e07ab",
+    "name": "tiger-line-shapefile-2017-nation-u-s-current-state-and-equivalent-national [Portal ID: 8b0cdd5d]",
+    "description": "",
+    "file_type": "tiff",
+    "storage_key": "r2://blacportal-data/rare_data/files/8b0cdd5d-9e8a-47a0-8271-e40c875e07ab_tiger-line-shapefile-2017-nation-u-s-current-state-and-equivalent-national.tif",
+    "original_filename": "tiger-line-shapefile-2017-nation-u-s-current-state-and-equivalent-national.tif",
+    "bbox": [
+      28.86,
+      -2.84,
+      30.9,
+      -1.05
+    ],
+    "upload_date": "2026-08-22T21:24:52.138843+00:00",
+    "file_size_mb": 0.123,
+    "status": "ok",
+    "error_message": null,
+    "source": "admin",
+    "contributor": "SPETRO Admin",
+    "source_url": "https://catalog.data.gov/dataset/tiger-line-shapefile-2017-nation-u-s-current-state-and-equivalent-national",
+    "category": "Geospatial Data",
+    "tags": [
+      "Rwanda",
+      "Raster",
+      "GeoTIFF"
+    ]
+  },
+  {
+    "id": "7c9f94b2-a020-4615-ba76-5dd27826f3c3",
+    "name": "usa",
+    "description": "",
+    "file_type": "tiff",
+    "storage_key": "r2://blacportal-data/rare_data/files/7c9f94b2-a020-4615-ba76-5dd27826f3c3_tiger-line-shapefile-2017-nation-u-s-current-state-and-equivalent-national.tif",
+    "original_filename": "tiger-line-shapefile-2017-nation-u-s-current-state-and-equivalent-national.tif",
+    "bbox": [
+      28.86,
+      -2.84,
+      30.9,
+      -1.05
+    ],
+    "upload_date": "2026-08-22T21:28:05.750308+00:00",
+    "file_size_mb": 0.123,
+    "status": "ok",
+    "error_message": null,
+    "source": "admin",
+    "contributor": "SPETRO Admin",
+    "source_url": null,
+    "category": "Geospatial Data",
+    "tags": [
+      "Rwanda",
+      "Raster",
+      "GeoTIFF"
+    ]
+  },
+  {
+    "id": "4a858cb0-86da-404b-9db1-5a347fa70748",
+    "name": "1600.tif [Portal ID: 4a858cb0]",
+    "description": "",
+    "file_type": "tiff",
+    "storage_key": "r2://blacportal-data/rare_data/files/4a858cb0-86da-404b-9db1-5a347fa70748_1600.tif",
+    "original_filename": "1600.tif",
+    "bbox": [
+      28.86,
+      -2.84,
+      30.9,
+      -1.05
+    ],
+    "upload_date": "2026-08-22T21:50:13.013886+00:00",
+    "file_size_mb": 0.024,
+    "status": "ok",
+    "error_message": null,
+    "source": "admin",
+    "contributor": "SPETRO Admin",
+    "source_url": "https://s3.amazonaws.com/elevation-tiles-prod/geotiff/12/2340/1600.tif",
+    "category": "Geospatial Data",
+    "tags": [
+      "Rwanda",
+      "Raster",
+      "GeoTIFF"
+    ]
+  },
+  {
+    "id": "6cc214fc-289f-4b0a-9297-769a01a63a78",
+    "name": "Rwanda_Base_Map_2014-0000000000-0000005376.tif [Portal ID: 6cc214fc]",
+    "description": "",
+    "file_type": "tiff",
+    "storage_key": "r2://blacportal-data/rare_data/files/6cc214fc-289f-4b0a-9297-769a01a63a78_Rwanda_Base_Map_2014-0000000000-0000005376.tif",
+    "original_filename": "Rwanda_Base_Map_2014-0000000000-0000005376.tif",
+    "bbox": [
+      28.86,
+      -2.84,
+      30.9,
+      -1.05
+    ],
+    "upload_date": "2026-09-12T15:29:23.054027+00:00",
+    "file_size_mb": 353.843,
+    "status": "ok",
+    "error_message": null,
+    "source": "admin",
+    "contributor": "SPETRO Admin",
+    "source_url": "https://drive.google.com/file/d/1-cTjO0WanTIPfTbfppryP-4TO1oU1S8s/view?usp=sharing",
+    "category": "Geospatial Data",
+    "tags": [
+      "Rwanda",
+      "Raster",
+      "GeoTIFF"
+    ]
+  },
+  {
+    "id": "68c23916-b0bc-48e2-8743-7c71069034b1",
+    "name": "Rwanda_Base_Map_2014-0000000000-0000005376.tif [Portal ID: 68c23916]",
+    "description": "",
+    "file_type": "tiff",
+    "storage_key": "r2://blacportal-data/rare_data/files/68c23916-b0bc-48e2-8743-7c71069034b1_Rwanda_Base_Map_2014-0000000000-0000005376.tif",
+    "original_filename": "Rwanda_Base_Map_2014-0000000000-0000005376.tif",
+    "bbox": [
+      28.86,
+      -2.84,
+      30.9,
+      -1.05
+    ],
+    "upload_date": "2026-09-17T13:58:47.666613+00:00",
+    "file_size_mb": 353.843,
+    "status": "ok",
+    "error_message": null,
+    "source": "admin",
+    "contributor": "SPETRO Admin",
+    "source_url": "https://drive.google.com/file/d/1-cTjO0WanTIPfTbfppryP-4TO1oU1S8s/view?usp=sharing",
+    "category": "Geospatial Data",
+    "tags": [
+      "Rwanda",
+      "Raster",
+      "GeoTIFF"
+    ]
+  },
+  {
+    "id": "2a1f5b56-d80d-47ed-86cc-f3412b31109f",
+    "name": "Rwanda_Base_Map_2014-0000000000-0000005376.tif [Portal ID: 2a1f5b56]",
+    "description": "",
+    "file_type": "tiff",
+    "storage_key": "r2://blacportal-data/rare_data/files/2a1f5b56-d80d-47ed-86cc-f3412b31109f_Rwanda_Base_Map_2014-0000000000-0000005376.tif",
+    "original_filename": "Rwanda_Base_Map_2014-0000000000-0000005376.tif",
+    "bbox": [
+      28.86,
+      -2.84,
+      30.9,
+      -1.05
+    ],
+    "upload_date": "2026-09-17T13:59:01.860384+00:00",
+    "file_size_mb": 353.843,
+    "status": "ok",
+    "error_message": null,
+    "source": "admin",
+    "contributor": "SPETRO Admin",
+    "source_url": "https://drive.google.com/file/d/1-cTjO0WanTIPfTbfppryP-4TO1oU1S8s/view?usp=sharing",
+    "category": "Geospatial Data",
+    "tags": [
+      "Rwanda",
+      "Raster",
+      "GeoTIFF"
     ]
   }
 ]

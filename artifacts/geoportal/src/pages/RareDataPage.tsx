@@ -936,10 +936,12 @@ function ContributePanel({
                 }}
                 className="w-full text-xs file:mr-2 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer"
               />
-              {file && file.size > 95 * 1024 * 1024 && (
-                <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-[11px] leading-relaxed">
-                  <strong className="font-semibold block mb-0.5">⚠️ Large file detected ({(file.size / (1024 * 1024)).toFixed(1)} MB)</strong>
-                  Cloudflare edge proxy limits direct browser uploads to 100 MB. To publish files larger than 100 MB without limits, please use <strong>Option 2: Link from GitHub / Remote URL</strong> on the right.
+              {file && file.size > 50 * 1024 * 1024 && (
+                <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-400 text-[11px] leading-relaxed flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-emerald-500 shrink-0" />
+                  <span>
+                    <strong>Large file detected ({(file.size / (1024 * 1024)).toFixed(1)} MB):</strong> High-speed direct Cloudflare R2 Vault acceleration enabled (up to 50 GB supported).
+                  </span>
                 </div>
               )}
             </div>
@@ -992,7 +994,7 @@ function ContributePanel({
 
             <Button
               onClick={() => uploadMut.mutate()}
-              disabled={uploadMut.isPending || !file || !uploadName || (file ? file.size > 100 * 1024 * 1024 : false)}
+              disabled={uploadMut.isPending || !file || !uploadName}
               className="w-full gap-2 text-xs h-8.5 mt-2 cursor-pointer"
             >
               {uploadMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
@@ -1239,9 +1241,12 @@ function AdminTab() {
               }}
               className="w-full text-xs file:mr-2 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-primary/10 file:text-primary hover:file:bg-primary/20 cursor-pointer"
             />
-            {file && file.size > 95 * 1024 * 1024 && (
-              <div className="p-2 rounded bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400 text-[10px] mt-1">
-                ⚠️ File is {(file.size / (1024 * 1024)).toFixed(1)} MB (Cloudflare edge limit is 100 MB). Use the remote link option for files &gt; 100 MB.
+            {file && file.size > 50 * 1024 * 1024 && (
+              <div className="p-2 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-700 dark:text-emerald-400 text-[10px] mt-1 flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                <span>
+                  <strong>Large file ({(file.size / (1024 * 1024)).toFixed(1)} MB):</strong> High-speed direct Cloudflare R2 Vault acceleration active.
+                </span>
               </div>
             )}
           </div>
@@ -1284,7 +1289,7 @@ function AdminTab() {
 
         <Button
           onClick={() => uploadMut.mutate()}
-          disabled={uploadMut.isPending || !file || !uploadName || (file ? file.size > 100 * 1024 * 1024 : false)}
+          disabled={uploadMut.isPending || !file || !uploadName}
           className="gap-2 text-xs h-8 mt-1"
         >
           {uploadMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}

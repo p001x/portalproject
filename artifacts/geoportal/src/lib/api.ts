@@ -1261,7 +1261,73 @@ export const api = {
       }
       return r.json() as Promise<DatasetRecord>;
     },
-    uploadWithProgress: (fd: FormData, onProgress: (pct: number) => void) => {
+    uploadWithProgress: async (fd: FormData, onProgress: (pct: number) => void) => {
+      const file = fd.get("file") as File | null;
+      const name = (fd.get("name") as string) || (file?.name ?? "dataset");
+      const description = (fd.get("description") as string) || "";
+      const source = (fd.get("source") as string) || "admin";
+      const contributor = (fd.get("contributor") as string) || undefined;
+      const category = (fd.get("category") as string) || undefined;
+
+      // Accelerated Direct R2 Upload for files > 20 MB or large archives (bypasses all edge limits up to 50 GB)
+      if (file && file.size > 20 * 1024 * 1024) {
+        try {
+          const presignedRes = await post<{
+            dataset_id: string;
+            storage_key: string;
+            raw_key: string;
+            upload_url: string;
+            file_type: string;
+          }>("/datasets/presigned-upload", {
+            filename: file.name,
+            source: source,
+            content_type: file.type || "application/octet-stream",
+          });
+
+          if (presignedRes && presignedRes.upload_url) {
+            await new Promise<void>((resolve, reject) => {
+              const xhr = new XMLHttpRequest();
+              xhr.open("PUT", presignedRes.upload_url);
+              if (file.type) xhr.setRequestHeader("Content-Type", file.type);
+              xhr.upload.onprogress = (e) => {
+                if (e.lengthComputable) {
+                  onProgress(Math.round((e.loaded * 100) / e.total));
+                }
+              };
+              xhr.onload = () => {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                  resolve();
+                } else {
+                  reject(new Error(`Direct storage upload returned status ${xhr.status}`));
+                }
+              };
+              xhr.onerror = () => reject(new Error("Direct storage upload network error"));
+              xhr.ontimeout = () => reject(new Error("Direct storage upload timed out"));
+              xhr.timeout = 60 * 60 * 1000; // 1 hour timeout for massive datasets
+              xhr.send(file);
+            });
+
+            // Confirm and publish dataset metadata
+            const confirmedRecord = await post<DatasetRecord>("/datasets/confirm-upload", {
+              dataset_id: presignedRes.dataset_id,
+              name: name,
+              description: description,
+              storage_key: presignedRes.storage_key,
+              original_filename: file.name,
+              file_type: presignedRes.file_type,
+              file_size_mb: file.size / (1024 * 1024),
+              source: source,
+              contributor: contributor,
+              category: category,
+            });
+
+            return confirmedRecord;
+          }
+        } catch (directErr) {
+          console.warn("Direct R2 presigned upload failed; falling back to direct server streaming:", directErr);
+        }
+      }
+
       return new Promise<DatasetRecord>((resolve, reject) => {
         // Direct origin upload endpoint bypasses Cloudflare Workers' 100-second 524 timeout
         const uploadUrl = BASE.startsWith("http") 
