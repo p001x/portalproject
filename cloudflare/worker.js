@@ -17,7 +17,7 @@
 
 import { connect } from 'cloudflare:sockets';
 
-const DEFAULT_BACKEND_ORIGIN = "https://geoportal-api-ygzi.onrender.com";
+const DEFAULT_BACKEND_ORIGIN = "https://portalproject-248060026367.europe-west1.run.app";
 const JWT_SECRET = "jdvzqsCm2OlT-11073Aoq1wWVnyn7UTYERwt6ZyMeqNvd5aUv8PMS00Iy9ZDOvHk";
 const GMAIL_USER = "petersonyang8@gmail.com";
 const GMAIL_APP_PASS = "ghhkuzsdcfbbgoab";

@@ -92,7 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             signal: AbortSignal.timeout(3000)
           });
 
-          // Handle server cold start (Render free tier wake-up) by retrying
+          // Handle server cold start by retrying
           if (res.status === 502 || res.status === 503 || res.status === 504) {
             await new Promise((r) => setTimeout(r, 2000));
             try {
@@ -144,7 +144,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return await res.json();
     } catch {
       if (res.status === 503 || res.status === 502 || res.status === 504) {
-        return { detail: "Backend server is waking up from hibernation (Render free-tier cold start). Please wait ~15 seconds and try again." };
+        return { detail: "Backend server is initializing. Please wait a few seconds and try again." };
       }
       return { detail: `${fallback} (Server returned ${res.status}: ${res.statusText || "No response body"})` };
     }

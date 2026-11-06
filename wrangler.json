@@ -13,6 +13,6 @@
     ]
   },
   "vars": {
-    "BACKEND_ORIGIN": "https://geoportal-api-ygzi.onrender.com"
+    "BACKEND_ORIGIN": "https://portalproject-248060026367.europe-west1.run.app"
   }
 }

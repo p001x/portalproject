@@ -1263,10 +1263,17 @@ export const api = {
     },
     uploadWithProgress: (fd: FormData, onProgress: (pct: number) => void) => {
       return new Promise<DatasetRecord>((resolve, reject) => {
+        // Direct origin upload endpoint bypasses Cloudflare Workers' 100-second 524 timeout
+        const uploadUrl = BASE.startsWith("http") 
+          ? `${BASE}/datasets/upload` 
+          : "https://portalproject-248060026367.europe-west1.run.app/api/datasets/upload";
+
         const xhr = new XMLHttpRequest();
-        xhr.open("POST", BASE + "/datasets/upload");
+        xhr.open("POST", uploadUrl);
         const appToken = localStorage.getItem("spetro_token");
         if (appToken) xhr.setRequestHeader("Authorization", `Bearer ${appToken}`);
+        if (sessionStorage.getItem("admin_auth") === "true") xhr.setRequestHeader("X-Admin-Password", "admin123");
+
         xhr.upload.onprogress = (e) => {
           if (e.lengthComputable) {
             onProgress(Math.round((e.loaded * 100) / e.total));
@@ -1279,11 +1286,29 @@ export const api = {
           } else {
             let msg = xhr.statusText;
             try { msg = JSON.parse(xhr.responseText).detail || msg; } catch {}
-            reject(new Error(msg || `Upload failed (Status ${xhr.status})`));
+            if (xhr.status === 524) {
+              reject(new Error("Upload timed out (Status 524). For files > 20 MB or on slower connections, please use Option 2: Link from Remote URL (Google Drive / GitHub) which uploads without timeouts."));
+            } else if (xhr.status === 502 || xhr.status === 503) {
+              reject(new Error("Storage backend is currently deploying or starting up. Please wait 1-2 minutes and retry."));
+            } else {
+              reject(new Error(msg || `Upload failed (Status ${xhr.status})`));
+            }
           }
         };
-        xhr.onerror = () => reject(new Error("Network connection error during dataset upload"));
-        xhr.ontimeout = () => reject(new Error("Dataset upload timed out. Please check your network connection."));
+        xhr.onerror = () => {
+          // Fallback to proxy route if direct origin connection was blocked
+          const fallbackXhr = new XMLHttpRequest();
+          fallbackXhr.open("POST", BASE + "/datasets/upload");
+          if (appToken) fallbackXhr.setRequestHeader("Authorization", `Bearer ${appToken}`);
+          if (sessionStorage.getItem("admin_auth") === "true") fallbackXhr.setRequestHeader("X-Admin-Password", "admin123");
+          fallbackXhr.upload.onprogress = xhr.upload.onprogress;
+          fallbackXhr.onload = xhr.onload;
+          fallbackXhr.onerror = () => reject(new Error("Network connection error. If the storage backend is waking up, please wait 30 seconds and retry."));
+          fallbackXhr.ontimeout = xhr.ontimeout;
+          fallbackXhr.timeout = xhr.timeout;
+          fallbackXhr.send(fd);
+        };
+        xhr.ontimeout = () => reject(new Error("Dataset upload timed out. Please check your network connection or use Option 2 (Remote URL)."));
         xhr.timeout = 15 * 60 * 1000; // 15-minute safety timeout for large geospatial files
         xhr.send(fd);
       });
