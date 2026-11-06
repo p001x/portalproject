@@ -211,6 +211,15 @@ app.add_middleware(
     allow_methods=["*"], allow_headers=["*"],
 )
 
+@app.get("/", tags=["meta"])
+async def root():
+    return {
+        "status": "online",
+        "service": "Rwanda GeoPortal API",
+        "version": "1.0",
+        "gee_ready": _gee_ready,
+    }
+
 from routers.aoi_router import router as aoi_router
 app.include_router(aoi_router)
 
