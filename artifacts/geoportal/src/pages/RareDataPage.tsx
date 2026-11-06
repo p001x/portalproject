@@ -732,9 +732,12 @@ function OfficialTab() {
   const [showMap, setShowMap] = useState(true);
   const [selectedDataset, setSelectedDataset] = useState<DatasetRecord | null>(null);
 
-  const { data, isLoading } = useQuery({
+  const { data } = useQuery({
     queryKey: ["datasets", "admin"],
     queryFn: () => api.datasets.list("admin"),
+    initialData: { records: DEFAULT_OFFICIAL_DATASETS },
+    staleTime: 10 * 60 * 1000,
+    retry: 1,
   });
   const records = (data?.records && data.records.length > 0) ? data.records : DEFAULT_OFFICIAL_DATASETS;
 
@@ -756,14 +759,6 @@ function OfficialTab() {
 
   return (
     <div className="space-y-4">
-      {isLoading && !data && (
-        <div className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-primary/10 border border-primary/20 text-primary text-xs">
-          <span className="flex items-center gap-1.5">
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            Connecting to official vault... (Displaying instant cached repository)
-          </span>
-        </div>
-      )}
       <SummaryRow
         records={records}
         source="admin"
@@ -1016,7 +1011,7 @@ function ContributePanel({
                     ) : (
                       <>
                         <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-500" />
-                        Finalizing spatial metadata & publishing to vault…
+                        Finalizing and publishing to vault…
                       </>
                     )}
                   </span>
@@ -1109,9 +1104,12 @@ function CommunityTab() {
   const [showMap, setShowMap] = useState(true);
   const [selectedDataset, setSelectedDataset] = useState<DatasetRecord | null>(null);
 
-  const { data, isLoading } = useQuery({
+  const { data } = useQuery({
     queryKey: ["datasets", "community"],
     queryFn: () => api.datasets.list("community"),
+    initialData: { records: DEFAULT_COMMUNITY_DATASETS },
+    staleTime: 10 * 60 * 1000,
+    retry: 1,
   });
   const records = (data?.records && data.records.length > 0) ? data.records : DEFAULT_COMMUNITY_DATASETS;
 
@@ -1133,14 +1131,6 @@ function CommunityTab() {
 
   return (
     <div className="space-y-6">
-      {isLoading && !data && (
-        <div className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-primary/10 border border-primary/20 text-primary text-xs">
-          <span className="flex items-center gap-1.5">
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            Connecting to community vault... (Displaying instant cached repository)
-          </span>
-        </div>
-      )}
       <SummaryRow
         records={records}
         source="community"
@@ -1168,11 +1158,14 @@ function AdminTab() {
   const { toast } = useToast();
   const qc = useQueryClient();
 
-  const { data, isLoading } = useQuery({
+  const fallbackAll = [...DEFAULT_OFFICIAL_DATASETS, ...DEFAULT_COMMUNITY_DATASETS];
+  const { data } = useQuery({
     queryKey: ["datasets", "all"],
     queryFn: () => api.datasets.list("all"),
+    initialData: { records: fallbackAll },
+    staleTime: 10 * 60 * 1000,
+    retry: 1,
   });
-  const fallbackAll = [...DEFAULT_OFFICIAL_DATASETS, ...DEFAULT_COMMUNITY_DATASETS];
   const records = (data?.records && data.records.length > 0) ? data.records : fallbackAll;
 
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
@@ -1331,15 +1324,6 @@ function AdminTab() {
         records={records}
         source="admin"
       />
-
-      {isLoading && !data && (
-        <div className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-primary/10 border border-primary/20 text-primary text-xs">
-          <span className="flex items-center gap-1.5">
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-            Connecting to live vault... (Displaying instant cached repository)
-          </span>
-        </div>
-      )}
 
       <DatasetList
         records={records}

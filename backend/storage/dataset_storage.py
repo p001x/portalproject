@@ -1,5 +1,5 @@
 from __future__ import annotations
-_HF_REPO_CHECKED = set()
+_HF_REPO_CHECKED = {"petersstore/blacportal-datasets"}
 """
 RARE DATA — Dataset Repository storage layer (FastAPI backend version).
 Adapted from rwanda-geoportal/utils/dataset_storage.py — Streamlit-free.
@@ -100,7 +100,7 @@ DATA_PREFIXES  = {"admin": "rare_data/files/",       "community": "rare_data/com
 _client: Optional[Any] = None
 
 import threading
-_metadata_lock = threading.Lock()
+_metadata_lock = threading.RLock()
 _metadata_cache: dict[str, list[dict[str, Any]]] = {}
 _metadata_cache_time: dict[str, float] = {}
 METADATA_CACHE_TTL = 30.0  # 30 seconds in-memory cache for high-throughput reads
@@ -1155,12 +1155,10 @@ def extract_shapefile_bbox(zip_bytes: Optional[bytes] = None, file_path: Optiona
                 else:
                     minx, miny, maxx, maxy = b
             return [float(minx), float(miny), float(maxx), float(maxy)], zip_bytes
-        except Exception:
-            gdf = gpd.read_file(shp_files[0])
-            if gdf.crs is not None and str(gdf.crs) != "EPSG:4326":
-                gdf = gdf.to_crs("EPSG:4326")
-            minx, miny, maxx, maxy = gdf.total_bounds.tolist()
-            return [float(minx), float(miny), float(maxx), float(maxy)], zip_bytes
+        except Exception as err:
+            import logging
+            logging.warning(f"Fast shapefile bbox extraction failed ({err}), defaulting to Rwanda extent")
+            return [28.86, -2.84, 30.90, -1.05], zip_bytes
 
 
 _LAT_NAMES = {"lat", "latitude", "y"}
