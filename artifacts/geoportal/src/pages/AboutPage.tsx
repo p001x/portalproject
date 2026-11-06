@@ -59,7 +59,7 @@ export function AboutPage() {
               <div className="flex items-center gap-1.5">
                 <span className="font-bold text-base leading-tight tracking-tight text-foreground">SPETRO</span>
               </div>
-              <p className="text-[11px] text-muted-foreground">Geoportal &amp; Spatial Intelligence</p>
+              <p className="text-[11px] text-muted-foreground">Geoportal Analysis</p>
             </div>
           </div>
         </div>

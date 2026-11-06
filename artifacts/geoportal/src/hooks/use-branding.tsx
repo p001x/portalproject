@@ -10,7 +10,7 @@ export interface BrandingConfig {
 
 const DEFAULT_BRANDING: BrandingConfig = {
   siteName: 'SPETRO',
-  siteSubtitle: 'Spatial Intelligence',
+  siteSubtitle: 'Geoportal Analysis',
   logoUrl: '/logo.png',
 };
 
@@ -18,7 +18,12 @@ export function getBranding(): BrandingConfig {
   try {
     const stored = localStorage.getItem(BRANDING_STORAGE_KEY);
     if (stored) {
-      return { ...DEFAULT_BRANDING, ...JSON.parse(stored) };
+      const parsed = JSON.parse(stored);
+      if (parsed.siteSubtitle === "Spatial Intelligence") {
+        parsed.siteSubtitle = "Geoportal Analysis";
+        localStorage.setItem(BRANDING_STORAGE_KEY, JSON.stringify(parsed));
+      }
+      return { ...DEFAULT_BRANDING, ...parsed };
     }
   } catch (e) {
     // Ignore error
