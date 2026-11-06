@@ -329,22 +329,22 @@ export function AirPollutionPage() {
                 {dataStats?.exceeds_who && (
                   <div className="mb-3 flex items-center gap-2 bg-destructive/10 border border-destructive/30 text-destructive rounded-lg px-4 py-2.5 text-sm font-medium">
                     <Wind className="w-4 h-4 shrink-0" />
-                    Exceeds WHO annual limit equivalent (10 Ã‚Âµmol/mÃ‚Â²*) 
-                    <span className="text-xs opacity-80 font-normal ml-2">(*Note: WHO limit is surface Ã‚Âµg/mÃ‚Â³, this is column density)</span>
+                    Exceeds WHO annual limit equivalent (10 µmol/m²*) 
+                    <span className="text-xs opacity-80 font-normal ml-2">(*Note: WHO limit is surface µg/m³, this is column density)</span>
                   </div>
                 )}
                 <div className="h-[520px] rounded-lg overflow-hidden border">
                   <DistrictMap center={dataMap.center} bbox={dataMap.bbox} tileUrl={dataMap.tile_url} />
                 </div>
                 <div className="mt-3 flex flex-wrap gap-3 text-xs text-muted-foreground">
-                  <span>NOÃ¢â€šâ€š tropospheric column density (Ã‚Âµmol/mÃ‚Â²)</span>
+                  <span>NO₂ tropospheric column density (µmol/m²)</span>
                   <span className="flex items-center gap-1.5">
                     <span className="w-3 h-3 rounded-sm inline-block" style={{ background: "#000080" }} />
                     Low (0)
                   </span>
                   <span className="flex items-center gap-1.5">
                     <span className="w-3 h-3 rounded-sm inline-block" style={{ background: "#ff0000" }} />
-                    High (Ã¢â€°Â¥20)
+                    High (≥20)
                   </span>
                 </div>
               </TabsContent>
@@ -352,10 +352,10 @@ export function AirPollutionPage() {
               <TabsContent value="stats" className="space-y-6">
                 <div>
                   <h2 className="font-semibold text-lg mb-1">
-                    Multi-Pollutant Statistics Ã¢â‚¬â€ {dataMap.district}
+                    Multi-Pollutant Statistics — {dataMap.district}
                   </h2>
                   <p className="text-sm text-muted-foreground">
-                    Averaged column density statistics over the selected period. Quality masked: NOÃ¢â€šâ€š (qa&gt;0.75), CO &amp; SOÃ¢â€šâ€š (qa&gt;0.5).
+                    Averaged column density statistics over the selected period. Quality masked: NO₂ (qa&gt;0.75), CO &amp; SO₂ (qa&gt;0.5).
                   </p>
                 </div>
 
@@ -373,7 +373,7 @@ export function AirPollutionPage() {
                         <div>
                           <p className="font-semibold">WHO Guideline Proxy Exceeded</p>
                           <p className="text-xs mt-0.5 opacity-90">
-                            The mean NOÃ¢â€šâ€š column density exceeds 10 Ã‚Âµmol/mÃ‚Â². While not perfectly translatable to ground-level Ã‚Âµg/mÃ‚Â³, this serves as a proxy indicating potentially hazardous long-term exposure.
+                            The mean NO₂ column density exceeds 10 µmol/m². While not perfectly translatable to ground-level µg/m³, this serves as a proxy indicating potentially hazardous long-term exposure.
                           </p>
                         </div>
                       </div>
@@ -394,10 +394,10 @@ export function AirPollutionPage() {
               <TabsContent value="timeseries" className="space-y-6">
                 <div>
                   <h2 className="font-semibold text-lg mb-1">
-                    Air Pollution Time Series Ã¢â‚¬â€ {dataMap.district}
+                    Air Pollution Time Series — {dataMap.district}
                   </h2>
                   <p className="text-sm text-muted-foreground">
-                    Monthly mean column densities (NOÃ¢â€šâ€š, CO, SOÃ¢â€šâ€š) and Aerosol Index.
+                    Monthly mean column densities (NO₂, CO, SO₂) and Aerosol Index.
                   </p>
                 </div>
 
@@ -406,23 +406,23 @@ export function AirPollutionPage() {
                     <LineChart
                       data={dataTimeseries.time_series.map((pt) => ({
                         date: `${pt.year}-${String(pt.month).padStart(2, "0")}`,
-                        no2: pt["NO2 (Ã‚Âµmol/mÃ‚Â²)"],
-                        so2: pt["SO2 (Ã‚Âµmol/mÃ‚Â²)"],
-                        co: pt["CO (mol/mÃ‚Â²)"],
+                        no2: pt["NO2 (µmol/m²)"],
+                        so2: pt["SO2 (µmol/m²)"],
+                        co: pt["CO (mol/m²)"],
                         aer: pt["Aerosol Index"],
                       }))}
                       margin={{ top: 10, right: 30, left: 10, bottom: 30 }}
                     >
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                       <XAxis dataKey="date" tick={{ fontSize: 11 }} angle={-35} textAnchor="end" height={55} />
-                      <YAxis yAxisId="left" unit=" Ã‚Âµmol/mÃ‚Â²" tick={{ fontSize: 11 }} width={80} />
+                      <YAxis yAxisId="left" unit=" µmol/m²" tick={{ fontSize: 11 }} width={80} />
                       <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} width={80} />
                       <Tooltip labelFormatter={(l) => `Period: ${l}`} />
                       <Legend verticalAlign="top" height={36}/>
-                      <ReferenceLine yAxisId="left" y={10} stroke="#d73027" strokeDasharray="4 4" label={{ value: "WHO (NOÃ¢â€šâ€š)", position: "insideTopRight", fontSize: 10, fill: "#d73027" }} />
-                      <Line yAxisId="left" type="monotone" name="NOÃ¢â€šâ€š (Ã‚Âµmol/mÃ‚Â²)" dataKey="no2" stroke="#d73027" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
-                      <Line yAxisId="left" type="monotone" name="SOÃ¢â€šâ€š (Ã‚Âµmol/mÃ‚Â²)" dataKey="so2" stroke="#4575b4" strokeWidth={2} dot={{ r: 3 }} />
-                      <Line yAxisId="right" type="monotone" name="CO (mol/mÃ‚Â²)" dataKey="co" stroke="#313695" strokeWidth={2} strokeDasharray="3 3" dot={false} />
+                      <ReferenceLine yAxisId="left" y={10} stroke="#d73027" strokeDasharray="4 4" label={{ value: "WHO (NO₂)", position: "insideTopRight", fontSize: 10, fill: "#d73027" }} />
+                      <Line yAxisId="left" type="monotone" name="NO₂ (µmol/m²)" dataKey="no2" stroke="#d73027" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                      <Line yAxisId="left" type="monotone" name="SO₂ (µmol/m²)" dataKey="so2" stroke="#4575b4" strokeWidth={2} dot={{ r: 3 }} />
+                      <Line yAxisId="right" type="monotone" name="CO (mol/m²)" dataKey="co" stroke="#313695" strokeWidth={2} strokeDasharray="3 3" dot={false} />
                       <Line yAxisId="right" type="monotone" name="Aerosol Index" dataKey="aer" stroke="#fdae61" strokeWidth={2} strokeDasharray="5 5" dot={false} />
                     </LineChart>
                   </ResponsiveContainer>
@@ -450,16 +450,16 @@ export function AirPollutionPage() {
 
               <TabsContent value="report" className="space-y-6">
                 <div>
-                  <h2 className="font-semibold text-lg mb-1">PDF Report Ã¢â‚¬â€ {dataMap.district}</h2>
+                  <h2 className="font-semibold text-lg mb-1">PDF Report — {dataMap.district}</h2>
                   <p className="text-sm text-muted-foreground">
-                    Download a full PDF report including NOÃ¢â€šâ€š statistics, time series analysis, and air quality maps.
+                    Download a full PDF report including NO₂ statistics, time series analysis, and air quality maps.
                   </p>
                 </div>
                 {dataStats && dataTimeseries && (
                   <div className="bg-card border rounded-lg p-5 space-y-4">
                     <p className="text-sm text-muted-foreground leading-relaxed">
-                      <strong>Contents:</strong> District metadata Ã‚Â· NOÃ¢â€šâ€š concentration statistics Ã‚Â·
-                      WHO limit exceedance check Ã‚Â· Time series data Ã‚Â· Air quality maps Ã‚Â· Methodology notes.
+                      <strong>Contents:</strong> District metadata · NO₂ concentration statistics ·
+                      WHO limit exceedance check · Time series data · Air quality maps · Methodology notes.
                     </p>
                     <ReportDownloadButton
                       aoi={aoi}

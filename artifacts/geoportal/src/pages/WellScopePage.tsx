@@ -867,7 +867,7 @@ function printReport(data: any, analysisDate: string) {
                   {statsData ? (
                     <>
                       <div>
-                        <h2 className="font-semibold text-lg mb-1">Analysis Results Ã¢â‚¬â€ {effectiveDistrictName}</h2>
+                        <h2 className="font-semibold text-lg mb-1">Analysis Results — {effectiveDistrictName}</h2>
                         <p className="text-sm text-muted-foreground">Overall groundwater suitability distribution.</p>
                       </div>
 

@@ -377,10 +377,10 @@ export function DashboardPage() {
               </div>
               <div>
                 <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground flex items-center gap-2.5">
-                  Admin Command & Analytics Center
+                  Admin Dashboard
                 </h1>
                 <p className="text-sm text-muted-foreground">
-                  Enterprise telemetry, real-time visitor intelligence, account moderation, and behavioral habits.
+                  Platform telemetry, real-time traffic, user accounts, and system health.
                 </p>
               </div>
             </div>

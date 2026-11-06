@@ -206,13 +206,13 @@ export function UserManagementPage() {
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-lg font-bold tracking-tight text-white">Management of Users</h1>
+                <h1 className="text-lg font-bold tracking-tight text-white">User Management</h1>
                 <Badge variant="outline" className="text-[10px] bg-indigo-500/10 border-indigo-500/30 text-indigo-400">
                   Admin Console
                 </Badge>
               </div>
               <p className="text-xs text-slate-400">
-                Monitor member activities, favorite analysis tools, community posts, enforce account moderation, and review appeals.
+                Manage user accounts, roles, access permissions, and account moderation.
               </p>
             </div>
           </div>

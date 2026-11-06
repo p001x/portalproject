@@ -494,7 +494,7 @@ function DatasetList({
                 <th className="text-left px-4 py-3 font-semibold text-xs">
                   Dataset Name & Metadata
                   <span className="hidden sm:inline font-normal text-muted-foreground/70 text-[10px] ml-2">
-                    (Right-click or double-click for ArcGIS menu)
+                    (Right-click for options, double-click for properties)
                   </span>
                 </th>
                 <th className="text-left px-4 py-3 font-semibold text-xs">Format</th>
@@ -511,7 +511,7 @@ function DatasetList({
                     className={`transition-colors group hover:bg-muted/40 cursor-context-menu ${isSelected ? "bg-primary/5" : i % 2 === 0 ? "bg-background" : "bg-muted/15"}`}
                     onClick={() => onSelect && onSelect(r)}
                     onDoubleClick={() => setPropertiesDataset(r)}
-                    title="Right-click for ArcGIS menu, double-click for Properties"
+                    title="Right-click for dataset options, double-click for Properties"
                     onContextMenu={contextMenu.open([
                       { label: "Open (Preview)", icon: <FolderOpen className="w-4 h-4" />, onClick: () => setPreviewDataset(r), dividerAfter: false },
                       { label: "Properties", icon: <Settings2 className="w-4 h-4" />, onClick: () => setPropertiesDataset(r), dividerAfter: true },
@@ -880,7 +880,7 @@ function ContributePanel({
         <div>
           <div className="flex items-center gap-2 font-bold text-sm text-foreground">
             <Upload className="w-4 h-4 text-primary" />
-            Contribute a Dataset to the Repository
+            Contribute Dataset to Data Vault
           </div>
           <p className="text-xs text-muted-foreground mt-0.5">
             Upload a GeoTIFF, Shapefile (.zip), GeoJSON or CSV file, or link an existing dataset hosted on GitHub / Cloud.
@@ -897,7 +897,7 @@ function ContributePanel({
                 className="h-6 text-xs bg-background border border-input rounded px-1.5 font-medium cursor-pointer"
               >
                 <option value="community">Community Vault</option>
-                <option value="admin">Official Repository</option>
+                <option value="admin">Official Vault</option>
               </select>
             </div>
           )}
@@ -998,7 +998,7 @@ function ContributePanel({
               className="w-full gap-2 text-xs h-8.5 mt-2 cursor-pointer"
             >
               {uploadMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-              Upload to {targetSource === "admin" ? "Official Repository" : "Community Vault"}
+              Publish to {targetSource === "admin" ? "Official Vault" : "Community Vault"}
             </Button>
 
             {uploadProgress !== null && (
@@ -1293,7 +1293,7 @@ function AdminTab() {
           className="gap-2 text-xs h-8 mt-1"
         >
           {uploadMut.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-          Publish to Official Repository
+          Publish to Official Vault
         </Button>
 
         {uploadProgress !== null && (
@@ -1304,8 +1304,8 @@ function AdminTab() {
                   <>Uploading dataset bytes…</>
                 ) : (
                   <>
-                    <Loader2 className="w-3 h-3 animate-spin text-amber-500" />
-                    Processing & extracting metadata on server…
+                    <Loader2 className="w-3 h-3 animate-spin text-emerald-500" />
+                    Finalizing dataset registration…
                   </>
                 )}
               </span>
@@ -1357,10 +1357,10 @@ export function RareDataPage() {
               <div className="p-2 bg-primary/10 rounded-xl text-primary border border-primary/20 shadow-2xs">
                 <Database className="w-6 h-6" />
               </div>
-              RARE DATA — Dataset Repository
+              Data Vault
             </div>
             <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
-              Curated repository for high-resolution satellite rasters, shapefiles, digital elevation models, and ground truth data across Rwanda.
+              Curated repository for high-resolution satellite rasters, shapefiles, digital elevation models, and ground truth datasets across Rwanda.
             </p>
           </div>
 

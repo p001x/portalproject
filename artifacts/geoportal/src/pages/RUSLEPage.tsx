@@ -42,12 +42,12 @@ const YEARS = Array.from({ length: 15 }, (_, i) => 2010 + i);
 const RUSLE_COLORS = ["#1a9641","#a6d96a","#ffffbf","#fdae61","#d7191c","#7b0000"];
 
 const FACTOR_LAYERS = [
-  { key: "A", label: "A â€” Annual Soil Loss" },
-  { key: "R", label: "R â€” Rainfall Erosivity" },
-  { key: "K", label: "K â€” Soil Erodibility" },
-  { key: "LS", label: "LS â€” Topographic Factor" },
-  { key: "C", label: "C â€” Cover Management" },
-  { key: "P", label: "P â€” Support Practice" },
+  { key: "A", label: "A — Annual Soil Loss" },
+  { key: "R", label: "R — Rainfall Erosivity" },
+  { key: "K", label: "K — Soil Erodibility" },
+  { key: "LS", label: "LS — Topographic Factor" },
+  { key: "C", label: "C — Cover Management" },
+  { key: "P", label: "P — Support Practice" },
 ];
 
 const DEFAULT_PRESETS: Record<number, string[]> = {
@@ -191,7 +191,7 @@ export function RUSLEPage() {
           RUSLE Analysis
         </div>
         <p className="text-xs text-muted-foreground leading-relaxed">
-          Revised Universal Soil Loss Equation â€” estimates annual soil erosion from
+          Revised Universal Soil Loss Equation — estimates annual soil erosion from
           rainfall, soil erodibility, slope, cover and practice factors.
         </p>
 
@@ -398,7 +398,7 @@ export function RUSLEPage() {
                 <>
                   <div>
                     <h2 className="font-semibold text-lg mb-1">
-                      Statistics â€” {statsData.district}
+                      Statistics — {statsData.district}
                     </h2>
                     <p className="text-sm text-muted-foreground">Year: {statsData.start_year || 1980}-{statsData.end_year || 2024}</p>
                   </div>
@@ -462,7 +462,7 @@ export function RUSLEPage() {
               {statsData && mapData && (
                 <>
                   <div>
-                    <h2 className="font-semibold text-lg mb-1">Factor Maps â€” {statsData.district}</h2>
+                    <h2 className="font-semibold text-lg mb-1">Factor Maps — {statsData.district}</h2>
                     <p className="text-sm text-muted-foreground">
                       Individual RUSLE factor layers classified and visualised per district.
                     </p>
@@ -499,7 +499,7 @@ export function RUSLEPage() {
               {statsData && classifyData && (
                 <>
                   <div>
-                    <h2 className="font-semibold text-lg mb-1">Risk Index â€” {statsData.district}</h2>
+                    <h2 className="font-semibold text-lg mb-1">Risk Index — {statsData.district}</h2>
                     <p className="text-sm text-muted-foreground">
                       Composite erosion risk index derived from all RUSLE factors.
                     </p>
@@ -556,7 +556,7 @@ export function RUSLEPage() {
               {statsData && mapData && classifyData && (
                 <>
                   <div>
-                    <h2 className="font-semibold text-lg mb-1">PDF Report â€” {statsData.district}</h2>
+                    <h2 className="font-semibold text-lg mb-1">PDF Report — {statsData.district}</h2>
                     <p className="text-sm text-muted-foreground">
                       Download a full PDF report including soil loss statistics, factor summaries, and risk maps.
                     </p>

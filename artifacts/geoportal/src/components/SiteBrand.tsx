@@ -34,7 +34,7 @@ export function SiteBrand({ size = "normal", className = "", hideSubtitleOnMobil
         <img src={logoUrl || "/logo.png"} alt={`${siteName} Logo`} className={logoClasses} />
         <div>
           <div className={titleClasses}>{siteName || "SPETRO"}</div>
-          {size !== "small" && <div className={subtitleClasses}>{siteSubtitle || "Geoportal Analysis"}</div>}
+          {size !== "small" && <div className={subtitleClasses}>{siteSubtitle || "Spatial Intelligence"}</div>}
         </div>
       </div>
     </Link>

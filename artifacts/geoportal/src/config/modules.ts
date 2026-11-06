@@ -57,20 +57,20 @@ export const analysisModules = [
 ];
 
 export const rareDataModules = [
-  { path: "/rare-data", label: "RARE DATA Hub", icon: Database, description: "Dataset Repository" },
-  { path: "/harvester", label: "Data Harvester", icon: Globe2, description: "Universal Spatial Ingestion" },
+  { path: "/rare-data", label: "Data Vault", icon: Database, description: "Spatial Datasets & Rasters" },
+  { path: "/harvester", label: "Data Harvester", icon: Globe2, description: "Catalog & Web Ingestion" },
 ];
 
 export const digitizationModules = [
-  { path: "/samples", label: "Sample Digitizer", icon: Edit, description: "Training Samples" },
+  { path: "/samples", label: "Sample Digitizer", icon: Edit, description: "Ground Truth & Training Data" },
 ];
 
 export const infrastructureModules = [
-  { path: "/cloud-ingest", label: "Cloud Ingestion", icon: UploadCloud, description: "Direct GEE Upload" },
-  { path: "/services", label: "Premium Services", icon: Briefcase, description: "Consultation & Teaching" },
+  { path: "/cloud-ingest", label: "Cloud Ingestion", icon: UploadCloud, description: "Earth Engine Asset Staging" },
+  { path: "/services", label: "Professional Services", icon: Briefcase, description: "Consulting & Custom Pipelines" },
 ];
 
 export const educationModules = [
-  { path: "/academy", label: "Training & Academy", icon: GraduationCap, description: "Courses & Reading" },
-  { path: "/blog", label: "Blog & Case Studies", icon: BookOpen, description: "News & Success Stories" },
+  { path: "/academy", label: "Training Academy", icon: GraduationCap, description: "GIS Courses & Certification" },
+  { path: "/blog", label: "Publications & Studies", icon: BookOpen, description: "Applied Research & Notes" },
 ];

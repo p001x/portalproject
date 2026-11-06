@@ -1463,7 +1463,7 @@ export function SampleDigitizationPage() {
     mutationFn: () => api.datasets.addLink({ url: linkUrl, name: "Backed up URL: " + linkUrl.split("/").pop(), source: "community" }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["datasets", "community"] });
-      toast({ title: "Backed up to Kaggle!", description: "The external data was safely downloaded and stored in the RARE DATA Repository." });
+      toast({ title: "Saved to Data Vault", description: "The dataset was safely downloaded and registered in the Data Vault." });
     },
     onError: (e: Error) => {
       toast({ variant: "destructive", title: "Backup Failed", description: e.message });
@@ -4168,7 +4168,7 @@ export function SampleDigitizationPage() {
               <div className="bg-muted/30 border border-border/60 p-3 rounded-lg text-xs text-foreground flex items-center justify-between animate-in fade-in">
                 <span className="flex items-center gap-2 font-medium">
                   <Database className="w-4 h-4 text-muted-foreground" />
-                  Linked Imagery Source from RARE DATA: <strong className="text-foreground">{previewDatasetName}</strong>
+                  Linked Imagery Source from Data Vault: <strong className="text-foreground">{previewDatasetName}</strong>
                 </span>
                 <Badge variant="outline" className="border-border/60 text-muted-foreground bg-muted/40 font-mono text-[10px]">
                   Directly Compatible
@@ -4187,7 +4187,7 @@ export function SampleDigitizationPage() {
                   <option value="sentinel2">Sentinel-2 SR (10m Multi-spectral - Default)</option>
                   <option value="landsat8">Landsat 8 SR (30m Multi-spectral)</option>
                   <option value="custom">
-                    {previewDatasetName ? `Imported RARE DATA: ${previewDatasetName}` : "Custom GEE Asset / Imported Imagery"}
+                    {previewDatasetName ? `Imported from Data Vault: ${previewDatasetName}` : "Custom GEE Asset / Imported Imagery"}
                   </option>
                   <option value="native_cog">Native COG (Local scikit-learn Classification)</option>
                 </select>
@@ -4551,18 +4551,18 @@ export function SampleDigitizationPage() {
           </div>
         </TabsContent>
 
-        {/* 3. IMPORT RARE DATA & HARVESTER TAB */}
+        {/* 3. IMPORT DATA VAULT & HARVESTER TAB */}
         {isAdmin && (
           <TabsContent value="import" className="h-full overflow-y-auto p-4 space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Import from RARE DATA */}
+            {/* Import from Data Vault */}
             <div className="border border-border/60 rounded-lg p-5 bg-card space-y-4">
               <div className="flex items-center gap-2 font-medium text-sm text-foreground">
                 <Database className="w-4 h-4 text-foreground" />
-                Import from RARE DATA Repository
+                Import from Data Vault
               </div>
               <p className="text-xs text-muted-foreground">
-                Select an existing dataset from Official or Community RARE DATA repositories to import its spatial features as training samples.
+                Select an existing dataset from the Official or Community Data Vault to import its spatial features as training samples.
               </p>
 
               <div className="space-y-1">

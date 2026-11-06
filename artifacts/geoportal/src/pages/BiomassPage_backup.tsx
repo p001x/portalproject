@@ -522,7 +522,7 @@ export function BiomassPage() {
                           <FileText className="w-8 h-8" />
                         </div>
                         <div>
-                          <h2 className="font-semibold text-2xl mb-2">Biomass Depletion Report â€” {effectiveDistrictName}</h2>
+                          <h2 className="font-semibold text-2xl mb-2">Biomass Depletion Report — {effectiveDistrictName}</h2>
                           <p className="text-muted-foreground">
                             Download a full PDF report including statistics, class areas, and classification maps.
                           </p>

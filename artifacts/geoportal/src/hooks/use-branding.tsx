@@ -10,7 +10,7 @@ export interface BrandingConfig {
 
 const DEFAULT_BRANDING: BrandingConfig = {
   siteName: 'SPETRO',
-  siteSubtitle: 'Geoportal Analysis',
+  siteSubtitle: 'Spatial Intelligence',
   logoUrl: '/logo.png',
 };
 
