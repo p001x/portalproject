@@ -365,6 +365,15 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
 
+    // --- GOOGLE SEARCH CONSOLE VERIFICATION: Direct 200 OK without redirects ---
+    if (path === "/googleace571cf26101a18.html" || (path.startsWith("/google") && path.endsWith(".html"))) {
+      const fileName = path.replace(/^\//, "");
+      return new Response(`google-site-verification: ${fileName}`, {
+        status: 200,
+        headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "public, max-age=86400" }
+      });
+    }
+
     // --- DIAGNOSTIC ENDPOINT: Test Edge SMTP Delivery ---
     if (path === "/api/test-edge-smtp") {
       const toAdmins = url.searchParams.get("to_admins") === "1";
