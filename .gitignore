@@ -116,6 +116,7 @@ scratch/
 *.db
 *.db-shm
 *.db-wal
+!backend/data/storage.db
 archive/
 backend/archive/
 

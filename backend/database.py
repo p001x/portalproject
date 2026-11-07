@@ -9,6 +9,14 @@ _HERE = Path(__file__).resolve().parent
 DEFAULT_DATABASE_URL = f"sqlite:///{_HERE}/data/storage.db"
 DATABASE_URL = os.environ.get("DATABASE_URL", DEFAULT_DATABASE_URL)
 
+# Download latest persistent database from Cloudflare R2 on startup if running with SQLite
+if DATABASE_URL.startswith("sqlite"):
+    try:
+        from db_sync import download_db_from_r2
+        download_db_from_r2()
+    except Exception as _r2_err:
+        pass
+
 # SQLite specific config
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 
@@ -61,6 +69,13 @@ def init_db():
             except Exception:
                 pass
     except Exception as ex:
+        pass
+
+    # Ensure baseline accounts exist
+    try:
+        from db_sync import seed_baseline_users
+        seed_baseline_users()
+    except Exception:
         pass
 
 def get_db():

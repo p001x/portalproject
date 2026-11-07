@@ -86,6 +86,11 @@ def create_user(name: str, email: str, password_hash: str = None, role: str = 'u
         )
         db.add(new_user)
         db.commit()
+    try:
+        from db_sync import upload_db_to_r2
+        upload_db_to_r2(async_run=True)
+    except Exception:
+        pass
 
 def get_user_by_google_id(google_id: str) -> Optional[Dict[str, Any]]:
     with SessionLocal() as db:
@@ -185,6 +190,11 @@ def update_user_password(email: str, password_hash: str) -> None:
             user.reset_token = None
             user.reset_token_expiry = None
             db.commit()
+            try:
+                from db_sync import upload_db_to_r2
+                upload_db_to_r2(async_run=True)
+            except Exception:
+                pass
 
 def set_reset_token(email: str, token: str, expiry_iso: str) -> None:
     if not email:
