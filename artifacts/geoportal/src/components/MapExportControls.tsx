@@ -142,6 +142,10 @@ export function MapExportControls({ tileUrl, thumbUrl, district, title, classAre
                  parsedMsg = jsonErr.detail || errText;
                }
              } catch {}
+
+             if (parsedMsg.includes("Invalid token") || parsedMsg.includes("UNAUTHENTICATED") || res.status === 401) {
+               parsedMsg = "Satellite map session has expired. Please click 'Calculate' on the left panel to generate a fresh map.";
+             }
              throw new Error(parsedMsg);
           }
           return res.blob();
