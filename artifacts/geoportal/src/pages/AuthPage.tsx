@@ -50,6 +50,7 @@ export function AuthPage() {
   const [isResending, setIsResending] = useState(false);
   const [accountRecognized, setAccountRecognized] = useState(false);
   const [isCheckingEmail, setIsCheckingEmail] = useState(false);
+  const [redirectParam, setRedirectParam] = useState<string | null>(null);
   const [, setLocation] = useLocation();
 
   useEffect(() => {
@@ -62,6 +63,10 @@ export function AuthPage() {
       const urlEmail = params.get("email");
       if (urlEmail) {
         setEmail(urlEmail);
+      }
+      const urlRedirect = params.get("redirect");
+      if (urlRedirect && urlRedirect.startsWith("/") && !urlRedirect.startsWith("//")) {
+        setRedirectParam(urlRedirect);
       }
     } catch (_) {}
   }, []);
@@ -310,8 +315,16 @@ export function AuthPage() {
             </p>
           </div>
 
+          {/* Protected Route Notice if Redirected */}
+          {redirectParam && (
+            <div className="flex items-center gap-2 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-medium mb-4 text-left">
+              <Lock className="w-4 h-4 shrink-0 text-emerald-500" />
+              <span>Please sign in or create an account to access <strong>{redirectParam.replace(/^\//, "").replace(/-/g, " ").toUpperCase()}</strong>.</span>
+            </div>
+          )}
+
           {/* Universal Cross-Device Sync Indicator */}
-          {step !== "otp" && mode !== "forgot" && (
+          {step !== "otp" && mode !== "forgot" && !redirectParam && (
             <div className="flex items-center justify-center gap-2 py-1 px-3 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[11px] font-medium text-emerald-600 dark:text-emerald-400 mb-4 max-w-fit mx-auto select-none">
               <Monitor className="w-3.5 h-3.5 shrink-0" />
               <span>One account works across PC & Mobile</span>

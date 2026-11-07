@@ -168,6 +168,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const getRedirectTarget = () => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const redirect = params.get("redirect");
+      if (redirect && redirect.startsWith("/") && !redirect.startsWith("//")) {
+        return redirect;
+      }
+    } catch {}
+    return "/platform";
+  };
+
   const verifyOtp = async (email: string, code: string, name?: string) => {
     setIsLoading(true);
     try {
@@ -193,7 +204,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       setAuthUser(data.user);
       localStorage.setItem("spetro_token", data.token);
-      setLocation("/");
+      setLocation(getRedirectTarget());
     } finally {
       setIsLoading(false);
     }
@@ -224,7 +235,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       setAuthUser(data.user);
       localStorage.setItem("spetro_token", data.token);
-      setLocation("/");
+      setLocation(getRedirectTarget());
     } finally {
       setIsLoading(false);
     }
@@ -263,7 +274,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       setAuthUser(data.user);
       localStorage.setItem("spetro_token", data.token);
-      setLocation("/");
+      setLocation(getRedirectTarget());
     } finally {
       setIsLoading(false);
     }
@@ -284,7 +295,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       setAuthUser(data.user);
       localStorage.setItem("spetro_token", data.token);
-      setLocation("/");
+      setLocation(getRedirectTarget());
     } finally {
       setIsLoading(false);
     }

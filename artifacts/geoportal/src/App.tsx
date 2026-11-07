@@ -106,7 +106,8 @@ import {
   Menu,
   LogOut,
   Settings,
-  Bell
+  Bell,
+  Lock
 } from "lucide-react";
 
 const queryClient = new QueryClient({
@@ -483,28 +484,61 @@ function Layout({ children }: { children: React.ReactNode }) {
 
   // Normalize location: strip any leading wouter tilde '~', query strings, and trailing slashes
   const cleanLoc = (loc || "").replace(/^~/, "").split("?")[0].replace(/\/+$/, "") || "/";
-  const publicStandaloneRoutes = ["/", "/platform", "/analysis-hub", "/about", "/contact", "/auth", "/blog", "/export-editor"];
-  const isStandalone = publicStandaloneRoutes.includes(cleanLoc) || cleanLoc.startsWith("/reset-password");
 
-  const strictlyProtectedRoutes = ["/settings", "/admin/users", "/cloud-ingest", "/dashboard"];
-  const requiresAuth = strictlyProtectedRoutes.some(p => cleanLoc === p || cleanLoc.startsWith(p + "/"));
+  // Strict whitelist of public routes accessible without an account
+  const publicRoutes = new Set([
+    "/",
+    "/about",
+    "/services",
+    "/contact",
+    "/academy",
+    "/blog",
+    "/auth",
+  ]);
+  const isPublic = publicRoutes.has(cleanLoc) || cleanLoc.startsWith("/reset-password");
+  const requiresAuth = !isPublic;
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated && requiresAuth) {
-      setLocation("/auth");
+      setLocation(`/auth?redirect=${encodeURIComponent(cleanLoc)}`);
     }
-  }, [isAuthenticated, isLoading, requiresAuth, setLocation]);
+  }, [isAuthenticated, isLoading, requiresAuth, cleanLoc, setLocation]);
+
+  // If a protected route is requested while loading credentials or unauthenticated, block with clear notice
+  if (requiresAuth && (isLoading || !isAuthenticated)) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-background text-foreground">
+        <div className="flex flex-col items-center gap-4 max-w-sm p-6 text-center">
+          <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 flex items-center justify-center">
+            <Lock className="w-6 h-6 animate-pulse" />
+          </div>
+          <div className="space-y-1">
+            <h3 className="text-base font-bold text-foreground">Authentication Required</h3>
+            <p className="text-xs text-muted-foreground">
+              SPETRO analysis modules require an authorized account. Directing to sign-in...
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Standalone pages rendered without standard sidebar layout
+  const standaloneRoutes = [
+    "/",
+    "/platform",
+    "/analysis-hub",
+    "/about",
+    "/services",
+    "/contact",
+    "/auth",
+    "/blog",
+    "/export-editor",
+  ];
+  const isStandalone = standaloneRoutes.includes(cleanLoc) || cleanLoc.startsWith("/reset-password");
 
   if (isStandalone) {
     return <>{children}</>;
-  }
-
-  if (isLoading || (!isAuthenticated && requiresAuth)) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-background text-muted-foreground">
-        Loading...
-      </div>
-    );
   }
 
   const isFocusedMode = [...analysisModules, ...rareDataModules, ...digitizationModules, ...infrastructureModules, ...educationModules].some(m => m.path === cleanLoc) || cleanLoc === "/community" || cleanLoc === "/dashboard" || cleanLoc === "/settings" || cleanLoc === "/admin/users";
