@@ -90,12 +90,40 @@ export function HomePage() {
       </header>
 
       {/* Main Content */}
-      <main className="relative z-10 flex-1 max-w-7xl w-full mx-auto px-6 flex flex-col items-center justify-center text-center">
+      <main className="relative z-10 flex-1 max-w-7xl w-full mx-auto px-6 flex flex-col items-center justify-center text-center py-16 sm:py-24 space-y-6">
+        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-xs font-semibold tracking-wide">
+          <Sparkles className="w-3.5 h-3.5" />
+          <span>Planetary Remote Sensing &amp; Spatial Intelligence</span>
+        </div>
 
         <h2 className="text-5xl md:text-7xl font-black text-foreground tracking-tight leading-tight max-w-4xl">
           Welcome to the <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-500 to-teal-400">SPETRO</span> Geoportal
         </h2>
 
+        <p className="text-base sm:text-lg text-muted-foreground max-w-2xl leading-relaxed">
+          Sub-hectare satellite Earth observation, environmental hazard modeling, and curated spatial Data Vault for Rwanda.
+        </p>
+
+        <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+          <Link href="/platform">
+            <Button
+              size="lg"
+              className="gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-semibold text-sm rounded-xl shadow-lg shadow-emerald-500/20 px-6 h-11"
+            >
+              <span>Explore Platform Launchpad</span>
+              <ArrowRight className="w-4 h-4" />
+            </Button>
+          </Link>
+          <Link href="/data-vault">
+            <Button
+              variant="outline"
+              size="lg"
+              className="gap-2 text-sm font-semibold rounded-xl border-border/80 hover:bg-muted/50 px-5 h-11"
+            >
+              <span>Spatial Data Vault</span>
+            </Button>
+          </Link>
+        </div>
       </main>
 
       {/* Global Footer */}
