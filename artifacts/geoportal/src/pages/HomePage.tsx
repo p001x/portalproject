@@ -1,6 +1,6 @@
 import { Link, useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
-import { ArrowRight, Sparkles } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SiteBrand, SiteLogoOnly } from "@/components/SiteBrand";
 import { UserNav } from "@/components/UserNav";
@@ -91,11 +91,6 @@ export function HomePage() {
 
       {/* Main Content */}
       <main className="relative z-10 flex-1 max-w-7xl w-full mx-auto px-6 flex flex-col items-center justify-center text-center py-16 sm:py-24 space-y-6">
-        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-xs font-semibold tracking-wide">
-          <Sparkles className="w-3.5 h-3.5" />
-          <span>Planetary Remote Sensing &amp; Spatial Intelligence</span>
-        </div>
-
         <h2 className="text-5xl md:text-7xl font-black text-foreground tracking-tight leading-tight max-w-4xl">
           Welcome to the <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-500 to-teal-400">SPETRO</span> Geoportal
         </h2>
