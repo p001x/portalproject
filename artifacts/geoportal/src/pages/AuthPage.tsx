@@ -14,8 +14,6 @@ import {
   AlertCircle,
   KeyRound,
   ShieldCheck,
-  Smartphone,
-  Monitor,
   LogIn,
   UserPlus
 } from "lucide-react";
@@ -307,7 +305,7 @@ export function AuthPage() {
                 ? `Enter the 6-digit code sent to ${email}`
                 : mode === "login"
                 ? (accountRecognized 
-                    ? "Your account from your PC is active. Sign in with your password below."
+                    ? "Welcome back! Enter your password below to sign in."
                     : "Sign in to access satellite analysis and spatial modules")
                 : mode === "forgot"
                 ? "Enter your registered email to receive password recovery instructions"
@@ -320,15 +318,6 @@ export function AuthPage() {
             <div className="flex items-center gap-2 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-xs font-medium mb-4 text-left">
               <Lock className="w-4 h-4 shrink-0 text-emerald-500" />
               <span>Please sign in or create an account to access <strong>{redirectParam.replace(/^\//, "").replace(/-/g, " ").toUpperCase()}</strong>.</span>
-            </div>
-          )}
-
-          {/* Universal Cross-Device Sync Indicator */}
-          {step !== "otp" && mode !== "forgot" && !redirectParam && (
-            <div className="flex items-center justify-center gap-2 py-1 px-3 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[11px] font-medium text-emerald-600 dark:text-emerald-400 mb-4 max-w-fit mx-auto select-none">
-              <Monitor className="w-3.5 h-3.5 shrink-0" />
-              <span>One account works across PC & Mobile</span>
-              <Smartphone className="w-3.5 h-3.5 shrink-0" />
             </div>
           )}
 
@@ -372,10 +361,10 @@ export function AuthPage() {
               </div>
               <div className="text-xs space-y-1 flex-1">
                 <p className="font-bold text-emerald-600 dark:text-emerald-400">
-                  Account Recognized from your PC!
+                  Account Recognized
                 </p>
                 <p className="text-muted-foreground leading-relaxed">
-                  Your email <strong className="text-foreground">{email}</strong> already has an active account. You do not need to register again on mobile—simply enter your password below to Sign In.
+                  Your email <strong className="text-foreground">{email}</strong> already has an active account. Please enter your password below to sign in.
                 </p>
               </div>
             </div>
