@@ -23,6 +23,14 @@ load_dotenv()
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
+# Ensure persistent database synchronization from Cloudflare R2 on startup
+try:
+    from db_sync import download_db_from_r2, seed_baseline_users
+    download_db_from_r2()
+    seed_baseline_users()
+except Exception as _sync_init_err:
+    pass
+
 import requests
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -435,6 +443,43 @@ def login(req: LoginRequest):
     except Exception as e:
         logger.error("Login error: %s", e, exc_info=True)
         raise HTTPException(500, f"Login error: {str(e)}")
+
+@app.get("/api/auth/sync-status", tags=["auth"])
+def sync_status():
+    from db_sync import _DB_PATH, get_r2_client
+    import sqlite3
+    s3, bucket = get_r2_client()
+    user_count = 0
+    tables = []
+    if _DB_PATH.exists():
+        try:
+            conn = sqlite3.connect(str(_DB_PATH))
+            cur = conn.cursor()
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = [r[0] for r in cur.fetchall()]
+            if "users" in tables:
+                cur.execute("SELECT count(*) FROM users")
+                user_count = cur.fetchone()[0]
+            conn.close()
+        except Exception:
+            pass
+    return {
+        "ok": True,
+        "r2_connected": bool(s3 and bucket),
+        "bucket": bucket,
+        "user_count": user_count,
+        "tables": tables,
+        "db_exists": _DB_PATH.exists(),
+        "db_size": _DB_PATH.stat().st_size if _DB_PATH.exists() else 0
+    }
+
+@app.post("/api/auth/sync-database", tags=["auth"])
+def sync_database_endpoint():
+    from db_sync import download_db_from_r2, seed_baseline_users, upload_db_to_r2
+    downloaded = download_db_from_r2()
+    seed_baseline_users()
+    upload_db_to_r2(async_run=False)
+    return {"ok": True, "downloaded_from_r2": downloaded}
 
 @app.post("/api/auth/forgot-password", tags=["auth"])
 def forgot_password(req: ForgotPasswordRequest, request: Request):
