@@ -47,13 +47,13 @@ AGENCY_CONFIGS = {
         "badge": "AGRICULTURAL POLICY DIRECTIVE",
     },
     "STANDARD": {
-        "name": "RWANDA ENVIRONMENTAL GEOPORTAL",
+        "name": "SPETRO GEOPORTAL ANALYSIS",
         "subtitle": "SATELLITE EARTH OBSERVATION & SPATIAL ANALYTICS REPORT",
-        "primary": colors.HexColor("#1a9850"),
-        "secondary": colors.HexColor("#f5f5f5"),
-        "accent": colors.HexColor("#0288d1"),
-        "mandate": "Automated Earth Observation analysis computed on-demand via Copernicus Sentinel and USGS Landsat satellite missions.",
-        "badge": "SPATIAL INTELLIGENCE REPORT",
+        "primary": colors.HexColor("#0f766e"),      # Deep Emerald / Teal
+        "secondary": colors.HexColor("#f0fdf4"),
+        "accent": colors.HexColor("#059669"),
+        "mandate": "Automated Earth Observation analysis computed on-demand via Copernicus Sentinel and USGS Landsat satellite missions powered by SPETRO Spatial Intelligence.",
+        "badge": "SPETRO ANALYTICAL DOSSIER",
     },
 }
 
@@ -178,6 +178,175 @@ def _rl_image(buf: io.BytesIO, width: float, caption: str,
         return [Paragraph(f"[Map unavailable: {caption}]", st_styles["caption"])]
 
 
+def _executive_briefing(module_name: str, district: str, date_range: str, stats: dict, class_areas: dict, st_styles: dict, primary_color: colors.Color) -> list:
+    """Builds a clear, executive-level natural language summary and condition assessment for the PDF."""
+    mod_lower = module_name.lower()
+    status_label = "SATISFACTORY BASELINE"
+    status_color = colors.HexColor("#059669")
+    narrative = f"Satellite Earth observation across {district} during {date_range} provides an empirical baseline of surface conditions."
+    
+    mean_val = None
+    for k, v in stats.items():
+        if "mean" in k.lower():
+            try:
+                mean_val = float(v)
+                break
+            except (ValueError, TypeError):
+                pass
+                
+    total_area = sum(float(v) for v in class_areas.values() if isinstance(v, (int, float))) if class_areas else 0
+    dominant_class = ""
+    dominant_pct = 0.0
+    if class_areas and total_area > 0:
+        sorted_classes = sorted([(k, float(v)) for k, v in class_areas.items() if isinstance(v, (int, float))], key=lambda x: x[1], reverse=True)
+        if sorted_classes:
+            dominant_class = sorted_classes[0][0]
+            dominant_pct = (sorted_classes[0][1] / total_area) * 100
+
+    if "ndvi" in mod_lower or "vegetation" in mod_lower:
+        if mean_val is not None:
+            if mean_val >= 0.60:
+                status_label = "OPTIMAL CANOPY & ROBUST BIOMASS"
+                status_color = colors.HexColor("#059669")
+                narrative = (
+                    f"Overall vegetative vigor across {district} is in an optimal ecological state (Mean NDVI: {mean_val:.2f}). "
+                    f"Canopy cover reflects active photosynthetic activity with healthy foliage density and minimal physiological moisture stress. "
+                    f"The dominant land cover category is '{dominant_class}', representing {dominant_pct:.1f}% of the surveyed landscape."
+                )
+            elif mean_val >= 0.40:
+                status_label = "FAVORABLE / MIXED VEGETATIVE HEALTH"
+                status_color = colors.HexColor("#0d9488")
+                narrative = (
+                    f"Vegetative cover across {district} exhibits moderate to favorable health (Mean NDVI: {mean_val:.2f}). "
+                    f"The landscape comprises a balanced mixture of active cropland, agroforestry, and seasonal shrubland. "
+                    f"The primary classification is '{dominant_class}' ({dominant_pct:.1f}% of monitored territory)."
+                )
+            elif mean_val >= 0.25:
+                status_label = "MODERATE CANOPY STRESS WATCH"
+                status_color = colors.HexColor("#d97706")
+                narrative = (
+                    f"Satellite monitoring detects localized vegetative stress across {district} (Mean NDVI: {mean_val:.2f}). "
+                    f"Observable patches display reduced chlorophyll absorption, likely driven by seasonal dryness or localized soil moisture depletion. "
+                    f"Dominant classification '{dominant_class}' covers {dominant_pct:.1f}% of the territory."
+                )
+            else:
+                status_label = "CRITICAL VEGETATION DEFICIT"
+                status_color = colors.HexColor("#dc2626")
+                narrative = (
+                    f"Satellite spectral indices indicate acute vegetative degradation or severe canopy dormancy in {district} (Mean NDVI: {mean_val:.2f}). "
+                    f"Large expanses correspond to sparse rangeland or bare agricultural soil requiring targeted soil-moisture interventions."
+                )
+    elif "drought" in mod_lower:
+        status_label = "DROUGHT MONITORING PROFILE"
+        status_color = colors.HexColor("#d97706")
+        narrative = (
+            f"Multi-temporal drought indexing across {district} for {date_range} synthesizes rainfall deficit and vegetative thermal stress. "
+            f"Dominant territory classification '{dominant_class}' encompasses {dominant_pct:.1f}% of the total monitored area ({total_area:.2f} km²)."
+        )
+    elif "rusle" in mod_lower or "erosion" in mod_lower:
+        if mean_val is not None:
+            if mean_val > 50:
+                status_label = "SEVERE SOIL LOSS RISK"
+                status_color = colors.HexColor("#dc2626")
+                narrative = (
+                    f"Watershed modeling estimates severe soil erosion pressure across {district} (Mean soil loss: {mean_val:.2f} t/ha/yr). "
+                    f"Steep slope topography combined with intense precipitation exposes topsoil to accelerated detachment. Immediate mechanical terracing is recommended."
+                )
+            elif mean_val > 25:
+                status_label = "ELEVATED EROSION HAZARD"
+                status_color = colors.HexColor("#ea580c")
+                narrative = (
+                    f"Erosion modeling identifies heightened soil loss vulnerability across {district} (Spatial mean: {mean_val:.2f} t/ha/yr). "
+                    f"Contour stabilization and agroforestry buffers are advised to protect vulnerable catchment slopes."
+                )
+            else:
+                status_label = "TOLERABLE SOIL LOSS BASELINE"
+                status_color = colors.HexColor("#059669")
+                narrative = (
+                    f"Catchment soil loss rates across {district} remain largely within tolerable conservation thresholds (Mean: {mean_val:.2f} t/ha/yr). "
+                    f"Existing vegetative cover and terraced hillsides effectively mitigate severe runoff detachment."
+                )
+    elif "flood" in mod_lower or "water" in mod_lower:
+        status_label = "HYDROLOGICAL & FLOOD PROFILE"
+        status_color = colors.HexColor("#0284c7")
+        narrative = (
+            f"Radar and optical hydrological analysis detects surface water dynamics and inundation footprints across {district}. "
+            f"Lowland riverine floodplains and wetland drainage networks are mapped across {total_area:.2f} km²."
+        )
+    elif "landslide" in mod_lower or "lsi" in mod_lower:
+        status_label = "SLOPE STABILITY ASSESSMENT"
+        status_color = colors.HexColor("#ea580c")
+        narrative = (
+            f"Geomorphological slope susceptibility modeling across {district} identifies key terrain failure corridors. "
+            f"Precipitation triggers on slopes exceeding 25° demand regular monitoring and vegetative bio-engineering."
+        )
+    elif "uhi" in mod_lower or "lst" in mod_lower or "heat" in mod_lower:
+        status_label = "THERMAL & MICROCLIMATE PROFILE"
+        status_color = colors.HexColor("#e11d48")
+        narrative = (
+            f"Thermal infrared satellite retrieval measures radiometric surface temperatures across {district}. "
+            f"Urban impervious surfaces and dense settlements contrast against vegetative cooling corridors."
+        )
+    else:
+        narrative = (
+            f"Comprehensive geospatial analytics for {module_name} across {district} ({date_range}). "
+            f"Analysis covers {total_area:.2f} km² of territory, with '{dominant_class or 'Predominant'}' as the primary observed class ({dominant_pct:.1f}%)."
+        )
+
+    box_data = [
+        [Paragraph(f"<b>STATUS: {status_label}</b>", ParagraphStyle("StatH", parent=st_styles["body"], fontSize=9, textColor=status_color, fontName="Helvetica-Bold"))],
+        [Paragraph(f"<b>Executive Briefing:</b> {narrative}", st_styles["body"])],
+    ]
+    if dominant_class:
+        box_data.append([
+            Paragraph(f"<b>Key Landscape Indicator:</b> Total surveyed area: <b>{total_area:.2f} km²</b> ({total_area*100:,.0f} ha) · Dominant category: <b>{dominant_class}</b> (<b>{dominant_pct:.1f}%</b>)", st_styles["note"])
+        ])
+        
+    t = Table(box_data, colWidths=[PAGE_W])
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#f8fafc")),
+        ("BOX", (0, 0), (-1, -1), 1, colors.HexColor("#cbd5e1")),
+        ("LINEBEFORE", (0, 0), (0, -1), 4, status_color),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("LEFTPADDING", (0, 0), (-1, -1), 10),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+    ]))
+    
+    return [
+        Paragraph("Executive Summary & Operational Synthesis", st_styles["section"]),
+        t,
+        Spacer(1, 0.3 * cm)
+    ]
+
+
+def _provenance_table(st_styles: dict) -> list:
+    """Adds formal satellite data quality and provenance verification."""
+    data = [
+        ["Satellite Constellation:", "Copernicus Sentinel-2 MSI (10m) / Sentinel-1 C-SAR / USGS Landsat-8/9"],
+        ["Processing Engine:",       "Google Earth Engine (GEE) Automated Cloud Analytics"],
+        ["Atmospheric Correction:",   "Surface Reflectance (SR) with Cloud & Shadow QA Masking"],
+        ["Coordinate Reference:",     "WGS 84 / Geographic (EPSG:4326)"],
+        ["Authority & Platform:",    "SPETRO Spatial Intelligence · Geoportal Analysis Platform"],
+    ]
+    t = Table(data, colWidths=[5 * cm, 11 * cm])
+    t.setStyle(TableStyle([
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("TEXTCOLOR", (0, 0), (0, -1), DARK),
+        ("ROWBACKGROUNDS", (0, 0), (-1, -1), [LIGHT_GRAY, colors.white]),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#e2e8f0")),
+    ]))
+    return [
+        Paragraph("Data Quality & Satellite Provenance", st_styles["section"]),
+        t,
+        Spacer(1, 0.3 * cm),
+    ]
+
+
 def _build_action_matrix(module_name: str, stats: dict, class_areas: dict, agency_template: str, st_styles: dict) -> list:
     """Intelligently generates policy/engineering actions based on analysis metrics."""
     module_lower = module_name.lower()
@@ -277,6 +446,7 @@ def build_report(
     story.append(HRFlowable(width="100%", thickness=2, color=config["primary"], spaceAfter=10))
     story.append(_meta_table(district, date_range))
     story.append(Spacer(1, 0.4 * cm))
+    story.extend(_executive_briefing(module_name, district, date_range, stats, class_areas, st_styles, config["primary"]))
     story.extend(_stats_table(stats, st_styles))
     if class_areas:
         story.extend(_class_table(class_areas, st_styles))
@@ -305,6 +475,8 @@ def build_report(
         story.append(Spacer(1, 0.3 * cm))
     if include_action_matrix:
         story.extend(_build_action_matrix(module_name, stats, class_areas, agency_key, st_styles))
+
+    story.extend(_provenance_table(st_styles))
     if maps:
         story.append(Spacer(1, 0.5 * cm))
         story.append(HRFlowable(width="100%", thickness=1, color=colors.lightgrey))
@@ -339,7 +511,7 @@ def build_report(
     story.append(Spacer(1, 0.2 * cm))
     story.append(Paragraph(config["mandate"], st_styles["note"]))
     story.append(Paragraph(
-        "This report was generated automatically by the GEOPORTAL ANALYSIS. "
+        "This report was generated automatically by SPETRO Geoportal Analysis. "
         "All analyses are computed on-demand using Google Earth Engine satellite imagery. "
         "Results are for informational purposes and should be validated against ground-truth "
         "data before use in policy or planning decisions.",
@@ -395,7 +567,7 @@ def build_uhi_report(
     st_styles = _styles()
     story = []
 
-    story.append(Paragraph("GEOPORTAL ANALYSIS", st_styles["title"]))
+    story.append(Paragraph("SPETRO GEOPORTAL ANALYSIS", st_styles["title"]))
     story.append(Paragraph("Urban Heat Island — LST vs Impervious Surface (NDBI)", st_styles["subtitle"]))
     story.append(HRFlowable(width="100%", thickness=2, color=GREEN, spaceAfter=10))
     story.append(_meta_table(district, date_range))
@@ -482,7 +654,7 @@ def build_uhi_report(
     story.append(HRFlowable(width="100%", thickness=1, color=colors.lightgrey))
     story.append(Spacer(1, 0.2 * cm))
     story.append(Paragraph(
-        "This report was generated automatically by the GEOPORTAL ANALYSIS. "
+        "This report was generated automatically by SPETRO Geoportal Analysis. "
         "All analyses are computed on-demand using Google Earth Engine satellite imagery. "
         "Results are for informational purposes and should be validated against ground-truth "
         "data before use in policy or planning decisions.",
@@ -522,7 +694,7 @@ def build_rusle_report(
     story     = []
 
     # ── Cover ──────────────────────────────────────────────────────────────────
-    story.append(Paragraph("GEOPORTAL ANALYSIS", st_styles["title"]))
+    story.append(Paragraph("SPETRO GEOPORTAL ANALYSIS", st_styles["title"]))
     story.append(Paragraph("RUSLE — Soil Erosion Risk Analysis Report", st_styles["subtitle"]))
     story.append(HRFlowable(width="100%", thickness=2, color=GREEN, spaceAfter=10))
     story.append(_meta_table(district, str(year)))
@@ -629,7 +801,7 @@ def build_rusle_report(
     story.append(HRFlowable(width="100%", thickness=1, color=colors.lightgrey))
     story.append(Spacer(1, 0.2 * cm))
     story.append(Paragraph(
-        "This report was generated automatically by the GEOPORTAL ANALYSIS. "
+        "This report was generated automatically by SPETRO Geoportal Analysis. "
         "All analyses are computed on-demand using Google Earth Engine satellite imagery. "
         "Results are for informational purposes and should be validated against ground-truth "
         "data before use in policy or planning decisions.",
