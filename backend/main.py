@@ -1316,6 +1316,10 @@ def _download_png(url: str) -> bytes:
                 logger.warning(f"HTTP {err.code} downloading image (attempt {attempt+1}/{max_retries}), retrying in {backoff}s...")
                 time.sleep(backoff)
                 backoff *= 2.0
+            elif err.code == 401:
+                body = err.read().decode("utf-8")
+                logger.warning(f"Earth Engine token expired (401) on {url}: {body}")
+                raise HTTPException(status_code=401, detail="Satellite map session has expired. Please click 'Calculate' on the left panel to generate a fresh map.")
             else:
                 body = err.read().decode("utf-8")
                 logger.error(f"HTTPError {err.code} on {url}: {body}")
@@ -1388,6 +1392,8 @@ def static_map_endpoint(req: StaticMapRequest):
                 "Content-Disposition": f'attachment; filename="{filename}"'
             }
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.exception("Static map generation failed")
         raise HTTPException(status_code=500, detail=str(exc))
