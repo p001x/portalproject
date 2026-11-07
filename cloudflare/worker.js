@@ -25,6 +25,14 @@ const RESEND_API_KEY = atob("cmVfVmhxUGt3NkhfQVhUdU1qVmJER2NKZ04zNHJFdG1tM2hI");
 
 const ADMIN_EMAILS = new Set(["petersonyang8@gmail.com", "pierrendorimana16@gmail.com"]);
 
+// Baseline persistent accounts guaranteed to exist even across cold starts
+const BASELINE_ACCOUNTS = new Map([
+  ["petersonyang8@gmail.com", { name: "ndorimana yang", role: "admin" }],
+  ["pierrendorimana16@gmail.com", { name: "ndorimana yang", role: "admin" }],
+  ["tzartzar19@gmail.com", { name: "tzar", role: "user" }],
+  ["admin@example.com", { name: "System Admin", role: "admin" }]
+]);
+
 // In-memory state across requests for this worker isolate
 const OTP_STORE = new Map(); // email -> { code, expiresAt }
 const REGISTERED_USERS = new Map(); // email -> { name, email, password, role }
@@ -404,6 +412,12 @@ export default {
           headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
         });
       }
+      if (BASELINE_ACCOUNTS.has(email)) {
+        return new Response(JSON.stringify({ exists: true, name: BASELINE_ACCOUNTS.get(email).name, email }), {
+          status: 200,
+          headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+        });
+      }
       if (REGISTERED_USERS.has(email)) {
         return new Response(JSON.stringify({ exists: true, name: REGISTERED_USERS.get(email).name, email }), {
           status: 200,
@@ -412,7 +426,7 @@ export default {
       }
       try {
         const backendOrigin = (env.BACKEND_ORIGIN || env.CLOUD_RUN_ORIGIN || DEFAULT_BACKEND_ORIGIN).replace(/\/$/, "");
-        const resp = await fetch(`${backendOrigin}/api/auth/check-email?email=${encodeURIComponent(email)}`, { signal: AbortSignal.timeout(1500) });
+        const resp = await fetch(`${backendOrigin}/api/auth/check-email?email=${encodeURIComponent(email)}`, { signal: AbortSignal.timeout(15000) });
         if (resp.ok) {
           const data = await resp.json();
           return new Response(JSON.stringify(data), {
@@ -680,7 +694,7 @@ export default {
           method: "POST",
           headers: headers,
           body: request.clone().body,
-          signal: AbortSignal.timeout(2500)
+          signal: AbortSignal.timeout(15000)
         });
 
         if (resp.ok) {

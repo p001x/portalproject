@@ -1357,16 +1357,19 @@ def _download_png(url: str) -> bytes:
             with urllib.request.urlopen(req_obj, timeout=300) as response:
                 return response.read()
         except urllib.error.HTTPError as err:
+            body = ""
+            try:
+                body = err.read().decode("utf-8")
+            except Exception:
+                pass
             if err.code in (429, 500, 502, 503, 504) and attempt < max_retries - 1:
                 logger.warning(f"HTTP {err.code} downloading image (attempt {attempt+1}/{max_retries}), retrying in {backoff}s...")
                 time.sleep(backoff)
                 backoff *= 2.0
-            elif err.code == 401:
-                body = err.read().decode("utf-8")
+            elif err.code == 401 or "Invalid token" in body or "UNAUTHENTICATED" in body:
                 logger.warning(f"Earth Engine token expired (401) on {url}: {body}")
-                raise HTTPException(status_code=401, detail="Satellite map session has expired. Please click 'Calculate' on the left panel to generate a fresh map.")
+                raise HTTPException(status_code=401, detail="Satellite map session has expired. Please click 'Recalculate & Refresh Map' to generate a fresh satellite map.")
             else:
-                body = err.read().decode("utf-8")
                 logger.error(f"HTTPError {err.code} on {url}: {body}")
                 raise Exception(f"HTTP Error {err.code}: {body}") from err
         except Exception as err:

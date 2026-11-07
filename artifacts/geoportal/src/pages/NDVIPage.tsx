@@ -714,6 +714,7 @@ export function NDVIPage() {
                 title="NDVI Vegetation Health"
                 classAreas={layerMode === "continuous" || isContinuous ? undefined : activeAreas}
                 bbox={data.bbox}
+                onRecalculate={() => mutate()}
               /></div>
             </TabsContent>
 

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Palette, Download, Eye, Layers, Compass, Grid, Scale, Frame, Loader2, Sparkles, ExternalLink } from "lucide-react";
+import { Palette, Download, Eye, Layers, Compass, Grid, Scale, Frame, Loader2, Sparkles, ExternalLink, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -34,9 +34,10 @@ interface MapExportControlsProps {
   bbox?: number[] | number[][];
   proposedFacilities?: [number, number][];
   overridePalette?: string[];
+  onRecalculate?: () => void;
 }
 
-export function MapExportControls({ tileUrl, thumbUrl, district, title, classAreas, downloadUrl, bbox, proposedFacilities, overridePalette }: MapExportControlsProps) {
+export function MapExportControls({ tileUrl, thumbUrl, district, title, classAreas, downloadUrl, bbox, proposedFacilities, overridePalette, onRecalculate }: MapExportControlsProps) {
   const [mode, setMode] = useState<"static" | "canva">("static");
   const [selectedPalette, setSelectedPalette] = useState("default");
   const [customColors, setCustomColors] = useState<string[]>([]);
@@ -59,6 +60,28 @@ export function MapExportControls({ tileUrl, thumbUrl, district, title, classAre
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
+
+  const triggerPageRecalculate = () => {
+    if (onRecalculate) {
+      onRecalculate();
+      return;
+    }
+    const buttons = Array.from(document.querySelectorAll("button"));
+    const calculateButton = buttons.find((btn) => {
+      const txt = (btn.textContent || "").toLowerCase();
+      return (
+        (txt.includes("calculate") || txt.includes("compute") || txt.includes("analyze") || txt.includes("run")) &&
+        !txt.includes("recalculate") &&
+        !btn.disabled
+      );
+    }) as HTMLButtonElement | undefined;
+
+    if (calculateButton) {
+      calculateButton.click();
+    } else {
+      setRetryCount((c) => c + 1);
+    }
+  };
 
   const classCount = classAreas ? Object.keys(classAreas).length : 5;
 
@@ -143,8 +166,16 @@ export function MapExportControls({ tileUrl, thumbUrl, district, title, classAre
                }
              } catch {}
 
-             if (parsedMsg.includes("Invalid token") || parsedMsg.includes("UNAUTHENTICATED") || res.status === 401) {
-               parsedMsg = "Satellite map session has expired. Please click 'Calculate' on the left panel to generate a fresh map.";
+             const isAuthOrExpired =
+               res.status === 401 ||
+               parsedMsg.includes("Invalid token") ||
+               parsedMsg.includes("UNAUTHENTICATED") ||
+               parsedMsg.includes("session has expired") ||
+               parsedMsg.includes("HTTP Error 401") ||
+               parsedMsg.includes("401");
+
+             if (isAuthOrExpired) {
+               parsedMsg = "Satellite imagery session expired. Click 'Recalculate & Refresh Map' below to generate fresh satellite data.";
              }
              throw new Error(parsedMsg);
           }
@@ -162,7 +193,17 @@ export function MapExportControls({ tileUrl, thumbUrl, district, title, classAre
             if (err.name === "AbortError") {
               setError("Preview generation timed out. Try a smaller study area or simpler parameters.");
             } else {
-              setError(err.message || "Preview failed to load. Please try again.");
+              const msg = err.message || "Preview failed to load. Please try again.";
+              if (
+                msg.includes("Invalid token") ||
+                msg.includes("UNAUTHENTICATED") ||
+                msg.includes("HTTP Error 401") ||
+                msg.includes("401")
+              ) {
+                setError("Satellite imagery session expired. Click 'Recalculate & Refresh Map' below to generate fresh satellite data.");
+              } else {
+                setError(msg);
+              }
             }
           }
         })
@@ -544,11 +585,35 @@ export function MapExportControls({ tileUrl, thumbUrl, district, title, classAre
             )}
 
             {error ? (
-              <div className="flex flex-col items-center gap-3 text-destructive p-6 border border-destructive/20 rounded bg-destructive/5 text-center">
-                <span className="text-sm font-medium">{error}</span>
-                <Button variant="outline" size="sm" onClick={() => setRetryCount(c => c + 1)}>
-                   Retry Preview
-                </Button>
+              <div className="flex flex-col items-center gap-3 text-center p-6 border rounded-xl max-w-md mx-auto shadow-sm bg-card border-border">
+                {error.includes("expired") || error.includes("token") || error.includes("Satellite") ? (
+                  <>
+                    <div className="w-12 h-12 rounded-full bg-amber-500/10 flex items-center justify-center text-amber-500 mb-1">
+                      <RotateCcw className="w-6 h-6" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <h4 className="text-sm font-semibold text-foreground">Satellite Session Timed Out</h4>
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        Google Earth Engine temporary imagery tokens expire after inactivity. Click below to recalculate and refresh your map preview with fresh satellite data.
+                      </p>
+                    </div>
+                    <Button 
+                      size="sm" 
+                      onClick={triggerPageRecalculate}
+                      className="gap-2 mt-2 font-medium bg-primary hover:bg-primary/90 text-primary-foreground"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      Recalculate & Refresh Map
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-sm font-medium text-destructive">{error}</span>
+                    <Button variant="outline" size="sm" onClick={() => setRetryCount((c) => c + 1)}>
+                      Retry Preview
+                    </Button>
+                  </>
+                )}
               </div>
             ) : previewBlobUrl ? (
               <img

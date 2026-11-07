@@ -1619,7 +1619,10 @@ def static_map():
         )
     except Exception as exc:
         logger.error("static-map error: %s", exc)
-        return jsonify({"detail": str(exc)}), 500
+        err_str = str(exc)
+        status_code = 401 if ("401" in err_str or "Invalid token" in err_str or "UNAUTHENTICATED" in err_str) else 500
+        msg = "Satellite map session has expired. Please click 'Recalculate & Refresh Map' to generate a fresh map." if status_code == 401 else err_str
+        return jsonify({"detail": msg}), status_code
 
     # Strip non-latin-1 chars (e.g. em-dash in "A — Annual Soil Loss") from
     # HTTP headers which must be latin-1 encoded.
