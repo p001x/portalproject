@@ -27,7 +27,7 @@ export const getFriendlyModuleName = (path: string): string => {
   if (base === '/flood') return 'Flood Mapping';
   if (base === '/drought') return 'Drought Assessment';
   if (base === '/uhi') return 'Urban Heat Island';
-  if (base === '/rare-data') return 'Data Vault';
+  if (base === '/data-vault' || base === '/rare-data') return 'Data Vault';
   if (base === '/samples') return 'Sample Digitization';
   if (base === '/community') return 'Community Forum';
   if (base === '/biomass') return 'Biomass & Carbon';

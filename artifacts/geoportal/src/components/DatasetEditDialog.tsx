@@ -112,7 +112,7 @@ export function DatasetEditDialog({
             Edit Dataset Metadata
           </DialogTitle>
           <DialogDescription className="text-xs text-muted-foreground">
-            Update the title, description, domain category, and tags for this repository asset.
+            Update the title, description, domain category, and tags for this Data Vault asset.
           </DialogDescription>
         </DialogHeader>
 

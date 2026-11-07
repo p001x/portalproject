@@ -674,7 +674,13 @@ function Router() {
           <Route path="/water-harvesting" component={WaterHarvestingPage} />
           <Route path="/wellscope" component={WellScopePage} />
           <Route path="/biomass" component={BiomassPage} />
-          <Route path="/rare-data" component={RareDataPage} />
+          <Route path="/data-vault" component={RareDataPage} />
+          <Route path="/rare-data">
+            {() => {
+              window.location.replace("/data-vault");
+              return null;
+            }}
+          </Route>
           <Route path="/harvester" component={DataHarvesterPage} />
           <Route path="/samples">
             <div className="h-full flex flex-col">

@@ -19,7 +19,7 @@ export function getBranding(): BrandingConfig {
     const stored = localStorage.getItem(BRANDING_STORAGE_KEY);
     if (stored) {
       const parsed = JSON.parse(stored);
-      if (parsed.siteSubtitle === "Spatial Intelligence") {
+      if (!parsed.siteSubtitle || /spatial/i.test(parsed.siteSubtitle)) {
         parsed.siteSubtitle = "Geoportal Analysis";
         localStorage.setItem(BRANDING_STORAGE_KEY, JSON.stringify(parsed));
       }

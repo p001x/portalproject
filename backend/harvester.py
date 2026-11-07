@@ -1312,7 +1312,7 @@ class HarvesterTransferManager:
                 "file_type": rec.file_type,
                 "size_mb": rec.file_size_mb,
                 "storage_key": rec.storage_key,
-                "message": f"Successfully saved '{rec.name}' to Portal Repository!",
+                "message": f"Successfully saved '{rec.name}' to Data Vault!",
             }
         finally:
             if os.path.exists(temp_path):
@@ -1549,7 +1549,7 @@ class HarvesterTransferManager:
             gcs_bucket = os.environ.get("GEE_STAGING_BUCKET") or os.environ.get("GCS_BUCKET")
             if not gcs_bucket:
                 # GEE CLI requires a gs:// URI for raw file uploads. Automatically save to portal so user can use it immediately!
-                update_task(task_id, status="in_progress", progress=30, message="Saving dataset to Portal Repository for native analysis...")
+                update_task(task_id, status="in_progress", progress=30, message="Saving dataset to Data Vault for native analysis...")
                 res = HarvesterTransferManager.save_to_portal_repository(
                     source_url=source_url,
                     name=clean_name,

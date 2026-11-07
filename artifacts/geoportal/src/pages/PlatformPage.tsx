@@ -19,7 +19,7 @@ const MODULES = [
   },
   {
     title: "Data Vault",
-    path: "/rare-data",
+    path: "/data-vault",
     emblem: DataVaultEmblem,
     glowColor: "rgba(59, 130, 246, 0.25)",
     hoverBorder: "hover:border-blue-500/50",
@@ -86,10 +86,10 @@ export function PlatformPage() {
         {/* Confident, Minimal Header */}
         <div className="text-center max-w-2xl mx-auto mb-14">
           <h1 className="text-3xl md:text-5xl font-extrabold text-foreground tracking-tight mb-3">
-            Geospatial Intelligence
+            Geoportal Analysis
           </h1>
           <p className="text-muted-foreground text-base md:text-lg">
-            Select an operational module to begin.
+            Earth observation, satellite analytics, and spatial data for Rwanda.
           </p>
         </div>
 
@@ -154,7 +154,7 @@ export function PlatformPage() {
           <div className="flex flex-col gap-3">
             <h4 className="text-sm font-extrabold uppercase tracking-widest text-foreground mb-1">Platform</h4>
             <Link href="/analysis-hub" className="text-sm text-muted-foreground hover:text-primary font-medium transition-colors">Earth Analytics</Link>
-            <Link href="/rare-data" className="text-sm text-muted-foreground hover:text-primary font-medium transition-colors">Data Vault</Link>
+            <Link href="/data-vault" className="text-sm text-muted-foreground hover:text-primary font-medium transition-colors">Data Vault</Link>
             <Link href="/harvester" className="text-sm text-muted-foreground hover:text-primary font-medium transition-colors">Spatial Harvester</Link>
             <Link href="/samples" className="text-sm text-muted-foreground hover:text-primary font-medium transition-colors">Ground Truth Digitizer</Link>
           </div>

@@ -80,7 +80,7 @@ export function AboutPage() {
             </h1>
 
             <p className="text-base sm:text-lg text-muted-foreground max-w-2xl mx-auto leading-relaxed">
-              Transforming Earth observation data into clear, actionable spatial intelligence for environmental stewardship,
+              Transforming Earth observation data into clear, actionable geoportal analysis for environmental stewardship,
               agriculture, and resilient regional planning.
             </p>
 

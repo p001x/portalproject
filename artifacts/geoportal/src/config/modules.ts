@@ -57,7 +57,7 @@ export const analysisModules = [
 ];
 
 export const rareDataModules = [
-  { path: "/rare-data", label: "Data Vault", icon: Database, description: "Spatial Datasets & Rasters" },
+  { path: "/data-vault", label: "Data Vault", icon: Database, description: "Spatial Datasets & Rasters" },
   { path: "/harvester", label: "Data Harvester", icon: Globe2, description: "Catalog & Web Ingestion" },
 ];
 

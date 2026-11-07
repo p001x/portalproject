@@ -827,7 +827,7 @@ function ContributePanel({
       setUploadProgress(null);
       toast({
         title: "Upload Completed",
-        description: `Your dataset has been published to the ${targetSource === "admin" ? "Official" : "Community"} repository.`,
+        description: `Your dataset has been published to the ${targetSource === "admin" ? "Official" : "Community"} Data Vault.`,
       });
       if (onClose) onClose();
     },
@@ -1120,7 +1120,7 @@ function CommunityTab() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["datasets", "community"] });
       qc.invalidateQueries({ queryKey: ["datasets", "all"] });
-      toast({ title: "Dataset removed from community repository." });
+      toast({ title: "Dataset removed from Community Vault." });
     },
     onError: (err: any) => {
       toast({
@@ -1209,7 +1209,7 @@ function AdminTab() {
       qc.invalidateQueries({ queryKey: ["datasets", "all"] });
       qc.invalidateQueries({ queryKey: ["datasets", "admin"] });
       qc.invalidateQueries({ queryKey: ["datasets", "community"] });
-      toast({ title: "Dataset deleted from all repositories." });
+      toast({ title: "Dataset deleted from all vaults." });
     },
     onError: (err: any) => {
       toast({
@@ -1360,7 +1360,7 @@ export function RareDataPage() {
               Data Vault
             </div>
             <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
-              Curated repository for high-resolution satellite rasters, shapefiles, digital elevation models, and ground truth datasets across Rwanda.
+              Curated spatial data vault for high-resolution satellite rasters, shapefiles, digital elevation models, and verified ground truth datasets across Rwanda.
             </p>
           </div>
 
@@ -1375,7 +1375,7 @@ export function RareDataPage() {
                   ? "bg-primary text-primary-foreground shadow-md ring-2 ring-primary/20"
                   : "hover:border-primary hover:text-primary hover:bg-primary/5 bg-card"
               }`}
-              title={isContributeOpen ? "Collapse contribution options" : "Upload or link a new dataset to repository"}
+              title={isContributeOpen ? "Collapse contribution options" : "Upload or link a new dataset to Data Vault"}
             >
               <Upload className="w-4 h-4" />
               <span>Contribute Dataset</span>

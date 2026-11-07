@@ -314,7 +314,7 @@ export function DatasetHarvester({
             qc.invalidateQueries({ queryKey: ["datasets"] });
             setSavedItemIds((prev) => ({ ...prev, [item.id]: res.dataset_id || "fallback_id" }));
             setSavingProgressIds((prev) => ({ ...prev, [item.id]: 100 }));
-            toast({ title: "Dataset Ingested", description: `Archived ${item.name} into repository.` });
+            toast({ title: "Dataset Ingested", description: `Archived ${item.name} into Data Vault.` });
             setTimeout(() => {
               setSavingItemIds((prev) => ({ ...prev, [item.id]: false }));
               setSavingProgressIds((prev) => {
@@ -400,7 +400,7 @@ export function DatasetHarvester({
       });
       toast({
         title: "Dataset Removed",
-        description: `Removed ${item.name} from repository.`,
+        description: `Removed ${item.name} from Data Vault.`,
       });
       qc.invalidateQueries({ queryKey: ["datasets"] });
     } catch (err: any) {
@@ -445,7 +445,7 @@ export function DatasetHarvester({
     if (itemsToSave.length === 0) {
       toast({
         title: "No Datasets to Ingest",
-        description: "All selected datasets are already saved in the repository.",
+        description: "All selected datasets are already saved in the Data Vault.",
       });
       return;
     }
